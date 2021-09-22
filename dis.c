@@ -269,19 +269,21 @@ int main(int argc, char ** argv)
 		{
 			*cur = (*cur >> 8) | (*cur << 8);
 		}
-		uint32_t start = filebuf[2] << 16 | filebuf[3];
-		uint32_t int_2 = filebuf[0x68/2] << 16 | filebuf[0x6A/2];
-		uint32_t int_4 = filebuf[0x70/2] << 16 | filebuf[0x72/2];
-		uint32_t int_6 = filebuf[0x78/2] << 16 | filebuf[0x7A/2];
-		named_labels = add_label(named_labels, "start", start);
-		named_labels = add_label(named_labels, "int_2", int_2);
-		named_labels = add_label(named_labels, "int_4", int_4);
-		named_labels = add_label(named_labels, "int_6", int_6);
-		if (!def || !only) {
-			def = defer(start, def);
-			def = defer(int_2, def);
-			def = defer(int_4, def);
-			def = defer(int_6, def);
+		if (!address_off) {
+			uint32_t start = filebuf[2] << 16 | filebuf[3];
+			uint32_t int_2 = filebuf[0x68/2] << 16 | filebuf[0x6A/2];
+			uint32_t int_4 = filebuf[0x70/2] << 16 | filebuf[0x72/2];
+			uint32_t int_6 = filebuf[0x78/2] << 16 | filebuf[0x7A/2];
+			named_labels = add_label(named_labels, "start", start);
+			named_labels = add_label(named_labels, "int_2", int_2);
+			named_labels = add_label(named_labels, "int_4", int_4);
+			named_labels = add_label(named_labels, "int_6", int_6);
+			if (!def || !only) {
+				def = defer(start, def);
+				def = defer(int_2, def);
+				def = defer(int_4, def);
+				def = defer(int_6, def);
+			}
 		}
 	}
 	uint16_t *encoded, *next;

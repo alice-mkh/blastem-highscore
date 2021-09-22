@@ -23,6 +23,25 @@
 #define MCLKS_PER_Z80 15
 #define MCLKS_PER_PSG (MCLKS_PER_Z80*16)
 
+
+#ifdef DISABLE_ZLIB
+#define VGMFILE FILE*
+#define vgmopen fopen
+#define vgmread fread
+#define vgmseek fseek
+#define vgmgetc fgetc
+#define vgmclose fclose
+#else
+#include "zlib/zlib.h"
+#define VGMFILE gzFile
+#define vgmopen gzopen
+#define vgmread gzfread
+#define vgmseek gzseek
+#define vgmgetc gzgetc
+#define vgmclose gzclose
+#endif
+
+
 system_header *current_system;
 
 void system_request_exit(system_header *system, uint8_t force_release)
@@ -120,17 +139,17 @@ int main(int argc, char ** argv)
 	psg_context p_context;
 	psg_init(&p_context, MCLKS_NTSC, MCLKS_PER_PSG);
 
-	FILE * f = fopen(argv[1], "rb");
+	VGMFILE * f = vgmopen(argv[1], "rb");
 	vgm_header header;
-	fread(&header, sizeof(header), 1, f);
+	vgmread(&header, sizeof(header), 1, f);
 	if (header.version < 0x150 || !header.data_offset) {
 		header.data_offset = 0xC;
 	}
-	fseek(f, header.data_offset + 0x34, SEEK_SET);
+	vgmseek(f, header.data_offset + 0x34, SEEK_SET);
 	uint32_t data_size = header.eof_offset + 4 - (header.data_offset + 0x34);
 	uint8_t * data = malloc(data_size);
-	fread(data, 1, data_size, f);
-	fclose(f);
+	vgmread(data, 1, data_size, f);
+	vgmclose(f);
 
 	uint32_t mclks_sample = MCLKS_NTSC / 44100;
 	uint32_t loop_count = 2;
