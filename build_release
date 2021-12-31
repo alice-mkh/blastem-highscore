@@ -68,8 +68,10 @@ for file in README COPYING CHANGELOG; do
 done
 if [ $OS = "Darwin" ]; then
 	cp SDL-LICENSE "$dir"
-else
+elif [ $OS = "Windows" -o $OS = "Win64" ]; then
 	cp sdl/COPYING.txt "$dir"/SDL-LICENSE$txt
+else
+	cp sdl/LICENSE.txt "$dir"/SDL-LICENSE$txt
 fi
 cp glew/LICENSE.txt "$dir"/GLEW-LICENSE$txt
 
