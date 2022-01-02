@@ -38,7 +38,7 @@ uint32_t MCLKS_PER_68K;
 #ifdef IS_LIB
 #define MAX_SOUND_CYCLES (MCLKS_PER_YM*NUM_OPERATORS*6*4)
 #else
-#define MAX_SOUND_CYCLES 100000	
+#define MAX_SOUND_CYCLES 100000
 #endif
 
 #ifdef NEW_CORE
@@ -56,53 +56,53 @@ void genesis_serialize(genesis_context *gen, serialize_buffer *buf, uint32_t m68
 		start_section(buf, SECTION_68000);
 		m68k_serialize(gen->m68k, m68k_pc, buf);
 		end_section(buf);
-		
+
 		start_section(buf, SECTION_Z80);
 		z80_serialize(gen->z80, buf);
 		end_section(buf);
 	}
-	
+
 	start_section(buf, SECTION_VDP);
 	vdp_serialize(gen->vdp, buf);
 	end_section(buf);
-	
+
 	start_section(buf, SECTION_YM2612);
 	ym_serialize(gen->ym, buf);
 	end_section(buf);
-	
+
 	start_section(buf, SECTION_PSG);
 	psg_serialize(gen->psg, buf);
 	end_section(buf);
-	
+
 	if (all) {
 		start_section(buf, SECTION_GEN_BUS_ARBITER);
 		save_int8(buf, gen->z80->reset);
 		save_int8(buf, gen->z80->busreq);
 		save_int16(buf, gen->z80_bank_reg);
 		end_section(buf);
-		
+
 		start_section(buf, SECTION_SEGA_IO_1);
 		io_serialize(gen->io.ports, buf);
 		end_section(buf);
-		
+
 		start_section(buf, SECTION_SEGA_IO_2);
 		io_serialize(gen->io.ports + 1, buf);
 		end_section(buf);
-		
+
 		start_section(buf, SECTION_SEGA_IO_EXT);
 		io_serialize(gen->io.ports + 2, buf);
 		end_section(buf);
-		
+
 		start_section(buf, SECTION_MAIN_RAM);
 		save_int8(buf, RAM_WORDS * 2 / 1024);
 		save_buffer16(buf, gen->work_ram, RAM_WORDS);
 		end_section(buf);
-		
+
 		start_section(buf, SECTION_SOUND_RAM);
 		save_int8(buf, Z80_RAM_BYTES / 1024);
 		save_buffer8(buf, gen->zram, Z80_RAM_BYTES);
 		end_section(buf);
-		
+
 		if (gen->version_reg & 0xF) {
 			//only save TMSS info if it's present
 			//that will allow a state saved on a model lacking TMSS
@@ -112,7 +112,7 @@ void genesis_serialize(genesis_context *gen, serialize_buffer *buf, uint32_t m68
 			save_buffer16(buf, gen->tmss_lock, 2);
 			end_section(buf);
 		}
-		
+
 		cart_serialize(&gen->header, buf);
 	}
 }
@@ -250,7 +250,7 @@ uint16_t read_dma_value(uint32_t address)
 	if ((address >= 0xA00000 && address < 0xB00000) || (address >= 0xC00000 && address <= 0xE00000)) {
 		return 0;
 	}
-	
+
 	//addresses here are word addresses (i.e. bit 0 corresponds to A1), so no need to do multiply by 2
 	return read_word(address * 2, (void **)genesis->m68k->mem_pointers, &genesis->m68k->options->gen, genesis->m68k);
 }
@@ -290,7 +290,7 @@ static void adjust_int_cycle(m68k_context * context, vdp_context * v_context)
 				uint32_t next_eint_port0 = io_next_interrupt(gen->io.ports, context->current_cycle);
 				uint32_t next_eint_port1 = io_next_interrupt(gen->io.ports + 1, context->current_cycle);
 				uint32_t next_eint_port2 = io_next_interrupt(gen->io.ports + 2, context->current_cycle);
-				uint32_t next_eint = next_eint_port0 < next_eint_port1 
+				uint32_t next_eint = next_eint_port0 < next_eint_port1
 					? (next_eint_port0 < next_eint_port2 ? next_eint_port0 : next_eint_port2)
 					: (next_eint_port1 < next_eint_port2 ? next_eint_port1 : next_eint_port2);
 				if (next_eint != CYCLE_NEVER) {
@@ -310,7 +310,7 @@ static void adjust_int_cycle(m68k_context * context, vdp_context * v_context)
 		printf("int cycle changed to: %d, level: %d @ %d(%d), frame: %d, vcounter: %d, hslot: %d, mask: %d, hint_counter: %d\n", context->int_cycle, context->int_num, v_context->cycles, context->current_cycle, v_context->frame, v_context->vcounter, v_context->hslot, context->status & 0x7, v_context->hint_counter);
 		old_int_cycle = context->int_cycle;
 	}*/
-	
+
 	if (context->status & M68K_STATUS_TRACE || context->trace_pending) {
 		context->target_cycle = context->current_cycle;
 		return;
@@ -335,7 +335,7 @@ static void adjust_int_cycle(m68k_context * context, vdp_context * v_context)
 		} else {
 			context->target_cycle = context->sync_cycle = context->current_cycle;
 		}
-		
+
 	}
 	/*printf("Cyc: %d, Trgt: %d, Int Cyc: %d, Int: %d, Mask: %X, V: %d, H: %d, HICount: %d, HReg: %d, Line: %d\n",
 		context->current_cycle, context->target_cycle, context->int_cycle, context->int_num, (context->status & 0x7),
@@ -610,7 +610,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 							gen->bus_busy = 0;
 						}
 					}
-					
+
 					if (blocked < 0) {
 						blocked = vdp_control_port_write(v_context, value);
 					} else {
@@ -1308,7 +1308,7 @@ void set_region(genesis_context *gen, rom_info *info, uint8_t region)
 	} else {
 		gen->version_reg = NO_DISK | USA;
 	}
-	
+
 	if (region & HZ50) {
 		gen->normal_clock = MCLKS_PAL;
 		gen->soft_flush_cycles = MCLKS_LINE * 262 / 3 + 2;
@@ -1514,6 +1514,9 @@ static void free_genesis(system_header *system)
 	free(gen->header.save_dir);
 	free_rom_info(&gen->header.info);
 	free(gen->lock_on);
+	if (gen->save_type != SAVE_NONE && gen->mapper_type != MAPPER_SEGA_MED_V2) {
+		free(gen->save_storage);
+	}
 	free(gen);
 }
 
@@ -1578,7 +1581,7 @@ static void set_audio_config(genesis_context *gen)
 	render_audio_source_gaindb(gen->psg->audio, config_gain ? atof(config_gain) : 0.0f);
 	config_gain = tern_find_path(config, "audio\0fm_gain\0", TVAL_PTR).ptrval;
 	render_audio_source_gaindb(gen->ym->audio, config_gain ? atof(config_gain) : 0.0f);
-	
+
 	char *config_dac = tern_find_path_default(config, "audio\0fm_dac\0", (tern_val){.ptrval="zero_offset"}, TVAL_PTR).ptrval;
 	ym_enable_zero_offset(gen->ym, !strcmp(config_dac, "zero_offset"));
 }
@@ -1621,7 +1624,7 @@ static void *tmss_rom_write_16(uint32_t address, void *context, uint16_t value)
 	if (gen->tmss) {
 		return gen->tmss_write_16(address, context, value);
 	}
-	
+
 	return context;
 }
 
@@ -1632,7 +1635,7 @@ static void *tmss_rom_write_8(uint32_t address, void *context, uint8_t value)
 	if (gen->tmss) {
 		return gen->tmss_write_8(address, context, value);
 	}
-	
+
 	return context;
 }
 
@@ -1670,7 +1673,7 @@ static void *tmss_word_write_16(uint32_t address, void *context, uint16_t value)
 		*dest = value;
 		m68k_handle_code_write(address, m68k);
 	}
-	
+
 	return context;
 }
 
@@ -1688,7 +1691,7 @@ static void *tmss_word_write_8(uint32_t address, void *context, uint8_t value)
 #endif
 		m68k_handle_code_write(address & ~1, m68k);
 	}
-	
+
 	return context;
 }
 
@@ -1797,10 +1800,10 @@ genesis_context *alloc_init_genesis(rom_info *rom, void *main_rom, void *lock_on
 	gen->max_cycles = config_cycles ? atoi(config_cycles) : DEFAULT_SYNC_INTERVAL;
 	gen->int_latency_prev1 = MCLKS_PER_68K * 32;
 	gen->int_latency_prev2 = MCLKS_PER_68K * 16;
-	
+
 	render_set_video_standard((gen->version_reg & HZ50) ? VID_PAL : VID_NTSC);
 	event_system_start(SYSTEM_GENESIS, (gen->version_reg & HZ50) ? VID_PAL : VID_NTSC, rom->name);
-	
+
 	gen->ym = malloc(sizeof(ym2612_context));
 	char *fm = tern_find_ptr_default(model, "fm", "discrete 2612");
 	if (!strcmp(fm + strlen(fm) -4, "3834")) {
@@ -1810,7 +1813,7 @@ genesis_context *alloc_init_genesis(rom_info *rom, void *main_rom, void *lock_on
 
 	gen->psg = malloc(sizeof(psg_context));
 	psg_init(gen->psg, gen->master_clock, MCLKS_PER_PSG);
-	
+
 	set_audio_config(gen);
 
 	z80_map[0].buffer = gen->zram = calloc(1, Z80_RAM_BYTES);
@@ -1881,9 +1884,9 @@ genesis_context *alloc_init_genesis(rom_info *rom, void *main_rom, void *lock_on
 	} else {
 		gen->save_storage = NULL;
 	}
-	
+
 	gen->mapper_start_index = rom->mapper_start_index;
-	
+
 	//This must happen before we generate memory access functions in init_m68k_opts
 	uint8_t next_ptr_index = 0;
 	uint32_t tmss_min_alloc = 16 * 1024;
@@ -2031,7 +2034,7 @@ genesis_context *alloc_init_genesis(rom_info *rom, void *main_rom, void *lock_on
 	gen->m68k = init_68k_context(opts, NULL);
 	gen->m68k->system = gen;
 	opts->address_log = (system_opts & OPT_ADDRESS_LOG) ? fopen("address.log", "w") : NULL;
-	
+
 	//This must happen after the 68K context has been allocated
 	for (int i = 0; i < rom->map_chunks; i++)
 	{
@@ -2039,7 +2042,7 @@ genesis_context *alloc_init_genesis(rom_info *rom, void *main_rom, void *lock_on
 			gen->m68k->mem_pointers[rom->map[i].ptr_index] = rom->map[i].buffer;
 		}
 	}
-	
+
 	if (gen->mapper_type == MAPPER_SEGA) {
 		//initialize bank registers
 		for (int i = 1; i < sizeof(gen->bank_regs); i++)

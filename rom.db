@@ -779,7 +779,7 @@ MK-1079 {
 			last 3FFFFF
 		}
 	}
-	
+
 }
 MK-1563 {
 	name Sonic & Knuckles
@@ -1287,7 +1287,7 @@ BlstMenu {
 }
 
 7313c20071de0ab1cd84ac1352cb0ed1c4a4afa8 {
-	#This appears to be an underdump, but it seems to be the only copy floating around 
+	#This appears to be an underdump, but it seems to be the only copy floating around
 	name 12-in-1
 	map {
 		0 {
@@ -1377,20 +1377,6 @@ cda73e4caf53cbc8f0750b69e5e7f394ad3735d1 {
 		}
 	}
 }
-NETO-001 {
-	name Sonic Delta
-	map {
-		0 {
-			device ROM
-			last 7FFFF
-		}
-		80000 {
-			device Sega mapper
-			last 3FFFFF
-			offset 80000
-		}
-	}
-}
 5e5ca20b39122c86b8f662bd8014af674f9dbed7 {
 	name Rock Heaven
 	map {
@@ -1422,7 +1408,7 @@ NETO-001 {
 			value A000
 			last 500209
 		}
-		
+
 	}
 }
 T-122026 {

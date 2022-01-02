@@ -80,6 +80,7 @@ void cart_serialize(system_header *sys, serialize_buffer *buf)
 	{
 	case MAPPER_SEGA:
 	case MAPPER_SEGA_SRAM:
+	case MAPPER_SEGA_MED_V2:
 		sega_mapper_serialize(gen, buf);
 		break;
 	case MAPPER_REALTEC:
@@ -126,7 +127,7 @@ char *get_header_name(uint8_t *rom)
 	//TODO: Should probably prefer the title field that corresponds to the user's region preference
 	uint8_t *last = rom + TITLE_END - 1;
 	uint8_t *src = rom + TITLE_START;
-	
+
 	for (;;)
 	{
 		while (last > src && (*last <=  0x20 || *last >= 0x80))
@@ -169,7 +170,7 @@ char *region_chars = "JUEW";
 uint8_t region_bits[] = {REGION_J, REGION_U, REGION_E, REGION_J|REGION_U|REGION_E};
 
 uint8_t translate_region_char(uint8_t c)
-{	
+{
 	for (int i = 0; i < sizeof(region_bits); i++)
 	{
 		if (c == region_chars[i]) {
@@ -226,7 +227,7 @@ uint32_t calc_mask(uint32_t src_size, uint32_t start, uint32_t end)
 
 uint8_t has_ram_header(uint8_t *rom, uint32_t rom_size)
 {
-	return rom_size >= (RAM_END + 4) && rom[RAM_ID] == 'R' && rom[RAM_ID + 1] == 'A'; 
+	return rom_size >= (RAM_END + 4) && rom[RAM_ID] == 'R' && rom[RAM_ID + 1] == 'A';
 }
 
 uint32_t read_ram_header(rom_info *info, uint8_t *rom)
@@ -253,44 +254,86 @@ uint32_t read_ram_header(rom_info *info, uint8_t *rom)
 void add_memmap_header(rom_info *info, uint8_t *rom, uint32_t size, memmap_chunk const *base_map, int base_chunks)
 {
 	uint32_t rom_end = get_u32be(rom + ROM_END) + 1;
+	uint32_t rom_end_raw = rom_end;
 	if (size > rom_end) {
 		rom_end = size;
 	} else if (rom_end > nearest_pow2(size)) {
 		rom_end = nearest_pow2(size);
 	}
 	info->save_type = SAVE_NONE;
-	if (size >= 0x80000 && !memcmp("SEGA SSF", rom + 0x100, 8)) {
+	uint8_t is_med_ssf = size >= 0x108 && !memcmp("SEGA SSF", rom + 0x100, 8);
+	if (is_med_ssf || (size >= 0x400000 && rom_end_raw <= 0x400000)) {
+		if (is_med_ssf && rom_end < 16*1024*1024) {
+			info->rom = rom = realloc(rom, 16*1024*1024);
+		}
 		info->mapper_start_index = 0;
-		info->mapper_type = MAPPER_SEGA;
+		info->mapper_type = is_med_ssf ? MAPPER_SEGA_MED_V2 : MAPPER_SEGA;
 		info->map_chunks = base_chunks + 9;
 		info->map = malloc(sizeof(memmap_chunk) * info->map_chunks);
 		memset(info->map, 0, sizeof(memmap_chunk)*9);
 		memcpy(info->map+9, base_map, sizeof(memmap_chunk) * base_chunks);
-		
-		info->map[0].start = 0;
-		info->map[0].end = 0x80000;
-		info->map[0].mask = 0xFFFFFF;
-		info->map[0].flags = MMAP_READ;
-		info->map[0].buffer = rom;
-		
-		if (has_ram_header(rom, size)){
-			read_ram_header(info, rom);
+
+		int i;
+		uint16_t map_flags;
+		if (is_med_ssf) {
+			i = 0;
+			map_flags = info->map[i].flags = MMAP_READ | MMAP_PTR_IDX | MMAP_CODE;
+			info->save_type = RAM_FLAG_BOTH;
+			info->save_size = 256*1024;
+			info->save_mask = info->save_size - 1;
+			info->save_buffer = rom + 16*1024*1024 - 256*1024;
+		} else {
+			i = 1;
+			map_flags = info->map[i].flags = MMAP_READ | MMAP_PTR_IDX | MMAP_CODE | MMAP_FUNC_NULL;
+			info->map[0].start = 0;
+			info->map[0].end = 0x80000;
+			info->map[0].mask = 0xFFFFFF;
+			info->map[0].flags = MMAP_READ;
+			info->map[0].buffer = rom;
+
+			if (has_ram_header(rom, size)){
+				read_ram_header(info, rom);
+			}
 		}
-		
-		for (int i = 1; i < 8; i++)
+		static const write_8_fun med_w8[] = {
+			write_med_ram0_b,
+			write_med_ram1_b,
+			write_med_ram2_b,
+			write_med_ram3_b,
+			write_med_ram4_b,
+			write_med_ram5_b,
+			write_med_ram6_b,
+			write_med_ram7_b,
+		};
+		static const write_16_fun med_w16[] = {
+			write_med_ram0_w,
+			write_med_ram1_w,
+			write_med_ram2_w,
+			write_med_ram3_w,
+			write_med_ram4_w,
+			write_med_ram5_w,
+			write_med_ram6_w,
+			write_med_ram7_w,
+		};
+
+		for (; i < 8; i++)
 		{
 			info->map[i].start = i * 0x80000;
 			info->map[i].end = (i + 1) * 0x80000;
 			info->map[i].mask = 0x7FFFF;
 			info->map[i].buffer = (i + 1) * 0x80000 <= size ? rom + i * 0x80000 : rom;
 			info->map[i].ptr_index = i;
-			info->map[i].flags = MMAP_READ | MMAP_PTR_IDX | MMAP_CODE | MMAP_FUNC_NULL;
-			
-			info->map[i].read_16 = (read_16_fun)read_sram_w;//these will only be called when mem_pointers[i] == NULL
-			info->map[i].read_8 = (read_8_fun)read_sram_b;
-			info->map[i].write_16 = (write_16_fun)write_sram_area_w;//these will be called all writes to the area
-			info->map[i].write_8 = (write_8_fun)write_sram_area_b;
-			
+			info->map[i].flags = map_flags;
+
+			info->map[i].read_16 = is_med_ssf ? NULL : (read_16_fun)read_sram_w;//these will only be called when mem_pointers[i] == NULL
+			info->map[i].read_8 = is_med_ssf ? NULL : (read_8_fun)read_sram_b;
+			if (is_med_ssf) {
+				info->map[i].write_16 = med_w16[i];
+				info->map[i].write_8 = med_w8[i];
+			} else {
+				info->map[i].write_16 = (write_16_fun)write_sram_area_w;//these will be called all writes to the area
+				info->map[i].write_8 = (write_8_fun)write_sram_area_b;
+			}
 		}
 		info->map[8].start = 0xA13000;
 		info->map[8].end = 0xA13100;
@@ -327,7 +370,7 @@ void add_memmap_header(rom_info *info, uint8_t *rom, uint32_t size, memmap_chunk
 		info->map[1].end = 0xA130D0;
 		info->map[1].mask = 0xFFFFFF;
 		if (!strcmp(
-			"on", 
+			"on",
 			tern_find_path_default(config, "system\0megawifi\0", (tern_val){.ptrval="off"}, TVAL_PTR).ptrval)
 		) {
 			info->map[1].write_16 = megawifi_write_w;
@@ -388,7 +431,7 @@ void add_memmap_header(rom_info *info, uint8_t *rom, uint32_t size, memmap_chunk
 				info->map[1].write_16 = (write_16_fun)write_sram_area_w;//these will be called all writes to the area
 				info->map[1].write_8 = (write_8_fun)write_sram_area_b;
 				info->map[1].buffer = rom + 0x200000;
-				
+
 				//Last entry in the base map is a catch all one that needs to be
 				//after all the other entries
 				memmap_chunk *unused = info->map + info->map_chunks - 2;
@@ -405,7 +448,7 @@ void add_memmap_header(rom_info *info, uint8_t *rom, uint32_t size, memmap_chunk
 			return;
 		}
 	}
-	
+
 	info->map_chunks = base_chunks + 1;
 	info->map = malloc(sizeof(memmap_chunk) * info->map_chunks);
 	memset(info->map, 0, sizeof(memmap_chunk));
@@ -743,7 +786,7 @@ void map_iter_fun(char *key, tern_val val, uint8_t valtype, void *data)
 		}
 	} else if (!strcmp(dtype, "NOR")) {
 		process_nor_def(key, state);
-		
+
 		map->write_16 = nor_flash_write_w;
 		map->write_8 = nor_flash_write_b;
 		map->read_16 = nor_flash_read_w;
@@ -868,7 +911,7 @@ void map_iter_fun(char *key, tern_val val, uint8_t valtype, void *data)
 		map->write_8 = write_multi_game_b;
 	} else if (!strcmp(dtype, "megawifi")) {
 		if (!strcmp(
-			"on", 
+			"on",
 			tern_find_path_default(config, "system\0megawifi\0", (tern_val){.ptrval="off"}, TVAL_PTR).ptrval)
 		) {
 			map->write_16 = megawifi_write_w;
@@ -965,14 +1008,14 @@ rom_info configure_rom(tern_node *rom_db, void *vrom, uint32_t rom_size, void *l
 			info.num_eeprom = 0;
 			memset(info.map, 0, sizeof(memmap_chunk) * info.map_chunks);
 			map_iter_state state = {
-				.info = &info, 
-				.rom = rom, 
+				.info = &info,
+				.rom = rom,
 				.lock_on = lock_on,
 				.root = entry,
 				.rom_db = rom_db,
-				.rom_size = rom_size, 
+				.rom_size = rom_size,
 				.lock_on_size = lock_on_size,
-				.index = 0, 
+				.index = 0,
 				.num_els = info.map_chunks - base_chunks,
 				.ptr_index = 0
 			};
