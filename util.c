@@ -7,7 +7,6 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <unistd.h>
 #include <errno.h>
 
 #ifdef __ANDROID__
@@ -80,7 +79,7 @@ char *replace_vars(char *base, tern_node *vars, uint8_t allow_env)
 	for (char *cur = base; *cur; ++cur)
 	{
 		if (in_var) {
-			if (!(*cur == '_' || isalnum(*cur))) {
+			if (!isalnum(*cur)) {
 				positions[num_vars].end = cur-base;
 				if (positions[num_vars].end - positions[num_vars].start > max_var_len) {
 					max_var_len = positions[num_vars].end - positions[num_vars].start;
@@ -187,6 +186,11 @@ char * split_keyval(char * text)
 	}
 	*text = 0;
 	return text+1;
+}
+
+uint8_t startswith(const char *haystack, const char *prefix)
+{
+	return !strncmp(haystack, prefix, strlen(prefix));
 }
 
 void bin_to_hex(uint8_t *output, uint8_t *input, uint64_t size)
@@ -437,6 +441,10 @@ void fatal_error(char *format, ...)
 	exit(1);
 }
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 void warning(char *format, ...)
 {
 	va_list args;
@@ -472,13 +480,16 @@ void warning(char *format, ...)
 	va_end(args);
 }
 
+static uint8_t output_enabled = 1;
 void info_message(char *format, ...)
 {
 	va_list args;
 	va_start(args, format);
 #ifndef _WIN32
 	if (headless || (isatty(STDOUT_FILENO) && isatty(STDIN_FILENO))) {
-		info_printf(format, args);
+		if (output_enabled) {
+			info_printf(format, args);
+		}
 	} else {
 #endif
 		int32_t size = strlen(format) * 2;
@@ -498,7 +509,9 @@ void info_message(char *format, ...)
 			va_start(args, format);
 			vsnprintf(buf, actual, format, args);
 		}
-		info_puts(buf);
+		if (output_enabled) {
+			info_puts(buf);
+		}
 		render_infobox("BlastEm Info", buf);
 		free(buf);
 #ifndef _WIN32
@@ -507,7 +520,28 @@ void info_message(char *format, ...)
 	va_end(args);
 }
 
+void debug_message(char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	if (output_enabled) {
+		info_printf(format, args);
+	}
+}
+
+void disable_stdout_messages(void)
+{
+	output_enabled = 0;
+}
+
+uint8_t is_stdout_enabled(void)
+{
+	return output_enabled;
+}
+
 #ifdef _WIN32
+#define WINVER 0x501
+#include <winsock2.h>
 #include <windows.h>
 #include <shlobj.h>
 
@@ -655,7 +689,80 @@ int ensure_dir_exists(const char *path)
 	return CreateDirectory(path, NULL);
 }
 
+static WSADATA wsa_data;
+static void socket_cleanup(void)
+{
+	WSACleanup();
+}
+
+void socket_init(void)
+{
+	static uint8_t started;
+	if (!started) {
+		started = 1;
+		WSAStartup(MAKEWORD(2,2), &wsa_data);
+		atexit(socket_cleanup);
+	}
+}
+
+int socket_blocking(int sock, int should_block)
+{
+	u_long param = !should_block;
+	if (ioctlsocket(sock, FIONBIO, &param)) {
+		return WSAGetLastError();
+	}
+	return 0;
+}
+
+void socket_close(int sock)
+{
+	closesocket(sock);
+}
+
+int socket_last_error(void)
+{
+	return WSAGetLastError();
+}
+
+int socket_error_is_wouldblock(void)
+{
+	return WSAGetLastError() == WSAEWOULDBLOCK;
+}
+
 #else
+#include <fcntl.h>
+#include <signal.h>
+
+void socket_init(void)
+{
+	//SIGPIPE on network sockets is not desired
+	//would be better to do this in a more limited way,
+	//but the alternatives are not portable
+	signal(SIGPIPE, SIG_IGN);
+}
+
+int socket_blocking(int sock, int should_block)
+{
+	if (fcntl(sock, F_SETFL, should_block ? 0 : O_NONBLOCK)) {
+		return errno;
+	}
+	return 0;
+}
+
+void socket_close(int sock)
+{
+	close(sock);
+}
+
+int socket_last_error(void)
+{
+	return errno;
+}
+
+int socket_error_is_wouldblock(void)
+{
+	return errno == EAGAIN || errno == EWOULDBLOCK;
+}
 
 char * get_home_dir()
 {
@@ -830,9 +937,20 @@ void sort_dir_list(dir_entry *list, size_t num_entries)
 	qsort(list, num_entries, sizeof(dir_entry), sort_dir_alpha);
 }
 
+uint8_t delete_file(char *path)
+{
+#ifdef _WIN32
+	//TODO: Call Unicode version and prepend special string to remove max path limitation
+	return 0 != DeleteFileA(path);
+#else
+	return 0 == unlink(path);
+#endif
+}
+
 #ifdef __ANDROID__
 
 #include <SDL.h>
+#ifndef IS_LIB
 char *read_bundled_file(char *name, uint32_t *sizeret)
 {
 	SDL_RWops *rw = SDL_RWFromFile(name, "rb");
@@ -860,6 +978,7 @@ char *read_bundled_file(char *name, uint32_t *sizeret)
 	SDL_RWclose(rw);
 	return ret;
 }
+#endif
 
 char const *get_config_dir()
 {
@@ -873,16 +992,21 @@ char const *get_userdata_dir()
 
 #else
 
+#ifndef IS_LIB
 char *read_bundled_file(char *name, uint32_t *sizeret)
 {
-	char *exe_dir = get_exe_dir();
-	if (!exe_dir) {
+#ifdef DATA_PATH
+	char *data_dir = DATA_PATH;
+#else
+	char *data_dir = get_exe_dir();
+	if (!data_dir) {
 		if (sizeret) {
 			*sizeret = -1;
 		}
 		return NULL;
 	}
-	char const *pieces[] = {exe_dir, PATH_SEP, name};
+#endif
+	char const *pieces[] = {data_dir, PATH_SEP, name};
 	char *path = alloc_concat_m(3, pieces);
 	FILE *f = fopen(path, "rb");
 	free(path);
@@ -912,7 +1036,7 @@ char *read_bundled_file(char *name, uint32_t *sizeret)
 	fclose(f);
 	return ret;
 }
-
+#endif //ISLIB
 
 #ifdef _WIN32
 char const *get_userdata_dir()
@@ -969,8 +1093,6 @@ char const *get_userdata_dir()
 }
 
 
-#endif
+#endif //_WIN32
+#endif //__ANDROID__
 
-
-
-#endif

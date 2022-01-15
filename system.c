@@ -1,6 +1,7 @@
 #include <string.h>
 #include "system.h"
 #include "genesis.h"
+#include "gen_player.h"
 #include "sms.h"
 
 uint8_t safe_cmp(char *str, long offset, uint8_t *buffer, long filesize)
@@ -25,6 +26,14 @@ system_type detect_system_type(system_media *media)
 	) {
 		return SYSTEM_SMS;
 	}
+	if (safe_cmp("BLSTEL\x02", 0, media->buffer, media->size)) {
+		uint8_t *buffer = media->buffer;
+		if (media->size > 9 && buffer[7] == 0) {
+			return buffer[8] + 1;
+		}
+	}
+		
+	
 	//TODO: Detect Jaguar ROMs here
 	
 	//Header based detection failed, examine filename for clues
@@ -43,7 +52,7 @@ system_type detect_system_type(system_media *media)
 	//More certain checks failed, look for a valid 68K reset vector
 	if (media->size >= 8) {
 		char *rom = media->buffer;
-		uint32_t reset = rom[4] << 24 | rom[5] << 16 | rom[6] << 8 | rom[7];
+		uint32_t reset = rom[5] << 16 | rom[6] << 8 | rom[7];
 		if (!(reset & 1) && reset < media->size) {
 			//we have a valid looking reset vector, assume it's a Genesis ROM
 			return SYSTEM_GENESIS;
@@ -64,6 +73,8 @@ system_header *alloc_config_system(system_type stype, system_media *media, uint3
 	{
 	case SYSTEM_GENESIS:
 		return &(alloc_config_genesis(media->buffer, media->size, lock_on, lock_on_size, opts, force_region))->header;
+	case SYSTEM_GENESIS_PLAYER:
+		return &(alloc_config_gen_player(media->buffer, media->size))->header;
 	case SYSTEM_SEGACD:
 		return &(alloc_config_genesis_cdboot(media, opts, force_region))->header;
 #ifndef NO_Z80
@@ -73,4 +84,20 @@ system_header *alloc_config_system(system_type stype, system_media *media, uint3
 	default:
 		return NULL;
 	}
+}
+
+system_header *alloc_config_player(system_type stype, event_reader *reader)
+{
+	switch(stype)
+	{
+	case SYSTEM_GENESIS:
+		return &(alloc_config_gen_player_reader(reader))->header;
+	}
+	return NULL;
+}
+
+void system_request_exit(system_header *system, uint8_t force_release)
+{
+	system->force_release = force_release;
+	system->request_exit(system);
 }

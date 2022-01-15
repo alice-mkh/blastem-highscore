@@ -16,7 +16,8 @@
 #define SHADOW_OFFSET CRAM_SIZE
 #define HIGHLIGHT_OFFSET (SHADOW_OFFSET+CRAM_SIZE)
 #define MODE4_OFFSET (HIGHLIGHT_OFFSET+CRAM_SIZE)
-#define VSRAM_SIZE 40
+#define MIN_VSRAM_SIZE 40
+#define MAX_VSRAM_SIZE 64
 #define VRAM_SIZE (64*1024)
 #define BORDER_LEFT 13
 #define BORDER_RIGHT 14
@@ -24,8 +25,6 @@
 #define LINEBUF_SIZE (320+HORIZ_BORDER) //H40 + full border
 #define SCROLL_BUFFER_SIZE 32
 #define BORDER_BOTTOM 13 //TODO: Replace with actual value
-#define MAX_DRAWS 40
-#define MAX_DRAWS_H32 32
 #define MAX_DRAWS_H32_MODE4 8
 #define MAX_SPRITES_LINE 20
 #define MAX_SPRITES_LINE_H32 16
@@ -55,7 +54,7 @@
 #define FLAG_PENDING       0x10
 #define FLAG_READ_FETCHED  0x20
 #define FLAG_DMA_RUN       0x40
-#define FLAG_DMA_PROG      0x80
+#define FLAG_WINDOW_EDGE   0x80
 
 #define FLAG2_VINT_PENDING   0x01
 #define FLAG2_HINT_PENDING   0x02
@@ -92,8 +91,11 @@ enum {
 	REG_DMALEN_H,
 	REG_DMASRC_L,
 	REG_DMASRC_M,
-	REG_DMASRC_H
-} vdp_regs;
+	REG_DMASRC_H,
+	REG_KMOD_CTRL=29,
+	REG_KMOD_MSG,
+	REG_KMOD_TIMER
+};
 
 //Mode reg 1
 #define BIT_VSCRL_LOCK 0x80
@@ -116,7 +118,7 @@ enum {
 #define BIT_SPRITE_SZ  0x02
 
 //Mode reg 3
-#define BIT_EINT_EN    0x10
+#define BIT_EINT_EN    0x08
 #define BIT_VSCROLL    0x04
 
 //Mode reg 4
@@ -133,6 +135,8 @@ typedef struct {
 	int16_t x_pos;
 	uint8_t pal_priority;
 	uint8_t h_flip;
+	uint8_t width;
+	uint8_t height;
 } sprite_draw;
 
 typedef struct {
@@ -163,39 +167,49 @@ typedef struct {
 	system_header  *system;
 	//pointer to current line in framebuffer
 	uint32_t       *output;
-	uint32_t       *done_output;
 	//pointer to current framebuffer
 	uint32_t       *fb;
+	uint8_t        *done_composite;
 	uint32_t       *debug_fbs[VDP_NUM_DEBUG_TYPES];
+	char           *kmod_msg_buffer;
+	uint32_t       kmod_buffer_storage;
+	uint32_t       kmod_buffer_length;
+	uint32_t       timer_start_cycle;
 	uint32_t       output_pitch;
 	uint32_t       debug_fb_pitch[VDP_NUM_DEBUG_TYPES];
 	fifo_entry     fifo[FIFO_SIZE];
 	int32_t        fifo_write;
 	int32_t        fifo_read;
 	uint32_t       address;
+	uint32_t       address_latch;
 	uint32_t       serial_address;
 	uint32_t       colors[CRAM_SIZE*4];
 	uint32_t       debugcolors[1 << (3 + 1 + 1 + 1)];//3 bits for source, 1 bit for priority, 1 bit for shadow, 1 bit for hilight
 	uint16_t       cram[CRAM_SIZE];
 	uint32_t       frame;
+	uint32_t       vsram_size;
 	uint8_t        cd;
+	uint8_t        cd_latch;
 	uint8_t	       flags;
 	uint8_t        regs[VDP_REGS];
 	//cycle count in MCLKs
 	uint32_t       cycles;
 	uint32_t       pending_vint_start;
 	uint32_t       pending_hint_start;
-	uint16_t       vsram[VSRAM_SIZE];
+	uint32_t       top_offset;
+	uint16_t       vsram[MAX_VSRAM_SIZE];
 	uint16_t       vscroll_latch[2];
 	uint16_t       vcounter;
 	uint16_t       inactive_start;
 	uint16_t       border_top;
 	uint16_t       border_bot;
 	uint16_t       hscroll_a;
+	uint16_t       hscroll_a_fine;
 	uint16_t       hscroll_b;
+	uint16_t       hscroll_b_fine;
 	uint16_t       h40_lines;
 	uint16_t       output_lines;
-	sprite_draw    sprite_draw_list[MAX_DRAWS];
+	sprite_draw    sprite_draw_list[MAX_SPRITES_LINE];
 	sprite_info    sprite_info_list[MAX_SPRITES_LINE];
 	uint8_t        sat_cache[SAT_CACHE_SIZE];
 	uint16_t       col_1;
@@ -205,12 +219,14 @@ typedef struct {
 	uint16_t       test_port;
 	//stores 2-bit palette + 4-bit palette index + priority for current sprite line
 	uint8_t        linebuf[LINEBUF_SIZE];
+	uint8_t        compositebuf[LINEBUF_SIZE];
 	uint8_t        layer_debug_buf[LINEBUF_SIZE];
 	uint8_t        hslot; //hcounter/2
 	uint8_t	       sprite_index;
 	uint8_t        sprite_draws;
 	int8_t         slot_counter;
 	int8_t         cur_slot;
+	uint8_t        sprite_x_offset;
 	uint8_t        max_sprites_frame;
 	uint8_t        max_sprites_line;
 	uint8_t        fetch_tmp[2];
@@ -228,12 +244,13 @@ typedef struct {
 	uint8_t        enabled_debuggers;
 	uint8_t        debug_fb_indices[VDP_NUM_DEBUG_TYPES];
 	uint8_t        debug_modes[VDP_NUM_DEBUG_TYPES];
+	uint8_t        pushed_frame;
 	uint8_t        vdpmem[];
 } vdp_context;
 
 
 
-vdp_context *init_vdp_context(uint8_t region_pal);
+vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram);
 void vdp_free(vdp_context *context);
 void vdp_run_context_full(vdp_context * context, uint32_t target_cycles);
 void vdp_run_context(vdp_context * context, uint32_t target_cycles);
@@ -253,7 +270,6 @@ uint16_t vdp_data_port_read(vdp_context * context);
 uint8_t vdp_data_port_read_pbc(vdp_context * context);
 void vdp_latch_hv(vdp_context *context);
 uint16_t vdp_hv_counter_read(vdp_context * context);
-uint16_t vdp_test_port_read(vdp_context * context);
 void vdp_adjust_cycles(vdp_context * context, uint32_t deduction);
 uint32_t vdp_next_hint(vdp_context * context);
 uint32_t vdp_next_vint(vdp_context * context);
@@ -276,5 +292,6 @@ void vdp_toggle_debug_view(vdp_context *context, uint8_t debug_type);
 void vdp_inc_debug_mode(vdp_context *context);
 //to be implemented by the host system
 uint16_t read_dma_value(uint32_t address);
+void vdp_replay_event(vdp_context *context, uint8_t event, event_reader *reader);
 
 #endif //VDP_H_

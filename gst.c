@@ -144,6 +144,7 @@ uint8_t z80_load_gst(z80_context * context, FILE * gstfile)
 	}
 	uint8_t * curpos = regdata;
 	uint8_t f = *(curpos++);
+#ifndef NEW_CORE
 	context->flags[ZF_C] = f & 1;
 	f >>= 1;
 	context->flags[ZF_N] = f & 1;
@@ -200,6 +201,7 @@ uint8_t z80_load_gst(z80_context * context, FILE * gstfile)
 		context->mem_pointers[1] = NULL;
 	}
 	context->bank_reg = bank >> 15;
+#endif
 	uint8_t buffer[Z80_RAM_BYTES];
 	fseek(gstfile, GST_Z80_RAM, SEEK_SET);
 	if(fread(buffer, 1, sizeof(buffer), gstfile) != (8*1024)) {
@@ -210,11 +212,15 @@ uint8_t z80_load_gst(z80_context * context, FILE * gstfile)
 	{
 		if (context->mem_pointers[0][i] != buffer[i]) {
 			context->mem_pointers[0][i] = buffer[i];
+#ifndef NEW_CORE
 			z80_handle_code_write(i, context);
+#endif
 		}
 	}
+#ifndef NEW_CORE
 	context->native_pc = NULL;
 	context->extra_pc = NULL;
+#endif
 	return 1;
 }
 
@@ -238,11 +244,11 @@ uint8_t vdp_load_gst(vdp_context * context, FILE * state_file)
 		uint16_t value;
 		write_cram_internal(context, i, (tmp_buf[i*2+1] << 8) | tmp_buf[i*2]);
 	}
-	if (fread(tmp_buf, 2, VSRAM_SIZE, state_file) != VSRAM_SIZE) {
+	if (fread(tmp_buf, 2, MIN_VSRAM_SIZE, state_file) != MIN_VSRAM_SIZE) {
 		fputs("Failed to read VSRAM from savestate\n", stderr);
 		return 0;
 	}
-	for (int i = 0; i < VSRAM_SIZE; i++) {
+	for (int i = 0; i < MIN_VSRAM_SIZE; i++) {
 		context->vsram[i] = (tmp_buf[i*2+1] << 8) | tmp_buf[i*2];
 	}
 	fseek(state_file, GST_VDP_MEM, SEEK_SET);
@@ -274,12 +280,12 @@ uint8_t vdp_save_gst(vdp_context * context, FILE * outfile)
 		fputs("Error writing CRAM to savestate\n", stderr);
 		return 0;
 	}
-	for (int i = 0; i < VSRAM_SIZE; i++)
+	for (int i = 0; i < MIN_VSRAM_SIZE; i++)
 	{
 		tmp_buf[i*2] = context->vsram[i];
 		tmp_buf[i*2+1] = context->vsram[i] >> 8;
 	}
-	if (fwrite(tmp_buf, 2, VSRAM_SIZE, outfile) != VSRAM_SIZE) {
+	if (fwrite(tmp_buf, 2, MIN_VSRAM_SIZE, outfile) != MIN_VSRAM_SIZE) {
 		fputs("Error writing VSRAM to savestate\n", stderr);
 		return 0;
 	}
@@ -296,6 +302,7 @@ uint8_t z80_save_gst(z80_context * context, FILE * gstfile)
 	uint8_t regdata[GST_Z80_REG_SIZE];
 	uint8_t * curpos = regdata;
 	memset(regdata, 0, sizeof(regdata));
+#ifndef NEW_CORE
 	uint8_t f = context->flags[ZF_S];
 	f <<= 1;
 	f |= context->flags[ZF_Z] ;
@@ -348,6 +355,7 @@ uint8_t z80_save_gst(z80_context * context, FILE * gstfile)
 	curpos += 3;
 	uint32_t bank = context->bank_reg << 15;
 	write_le_32(curpos, bank);
+#endif
 	fseek(gstfile, GST_Z80_REGS, SEEK_SET);
 	if (fwrite(regdata, 1, sizeof(regdata), gstfile) != sizeof(regdata)) {
 		return 0;

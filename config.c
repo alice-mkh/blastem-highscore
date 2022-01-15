@@ -6,6 +6,7 @@
 #include "tern.h"
 #include "util.h"
 #include "paths.h"
+#include "config.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,11 +50,11 @@ static tern_node * parse_config_int(char **state, int started, int *line)
 		curline = strip_ws(curline);
 		int len = strlen(curline);
 		if (!len) {
-			*line = *line + 1;
+			(*line)++;
 			continue;
 		}
 		if (curline[0] == '#') {
-			*line = *line + 1;
+			(*line)++;
 			continue;
 		}
 		if (curline[0] == '}') {
@@ -67,7 +68,7 @@ static tern_node * parse_config_int(char **state, int started, int *line)
 		if (*end == '{') {
 			*end = 0;
 			curline = strip_ws(curline);
-			*line = *line + 1;
+			(*line)++;
 			head = tern_insert_node(head, curline, parse_config_int(state, 1, line));
 		} else {
 			char * val = strip_ws(split_keyval(curline));
@@ -77,7 +78,7 @@ static tern_node * parse_config_int(char **state, int started, int *line)
 			} else {
 				fprintf(stderr, "Key %s is missing a value on line %d\n", key, *line);
 			}
-			*line = *line + 1;
+			(*line)++;
 		}
 	}
 	return head;
@@ -174,11 +175,10 @@ tern_node *parse_config_file(char *config_path)
 	if (!config_size) {
 		goto config_empty;
 	}
-	char * config_data = malloc(config_size+1);
+	char *config_data = calloc(config_size + 1, 1);
 	if (fread(config_data, 1, config_size, config_file) != config_size) {
 		goto config_read_fail;
 	}
-	config_data[config_size] = '\0';
 
 	ret = parse_config(config_data);
 config_read_fail:
@@ -205,18 +205,28 @@ uint8_t serialize_config_file(tern_node *config, char *path)
 
 tern_node *parse_bundled_config(char *config_name)
 {
+	tern_node *ret = NULL;
+#ifdef CONFIG_PATH
+	if (!strcmp("default.cfg", config_name) || !strcmp("blastem.cfg", config_name)) {
+		char *confpath = path_append(CONFIG_PATH, config_name);
+		ret = parse_config_file(confpath);
+		free(confpath);
+	} else {
+#endif
 	uint32_t confsize;
 	char *confdata = read_bundled_file(config_name, &confsize);
-	tern_node *ret = NULL;
 	if (confdata) {
 		confdata[confsize] = 0;
 		ret = parse_config(confdata);
 		free(confdata);
 	}
+#ifdef CONFIG_PATH
+	}
+#endif
 	return ret;
 }
 
-tern_node *load_overrideable_config(char *name, char *bundled_name)
+tern_node *load_overrideable_config(char *name, char *bundled_name, uint8_t *used_config_dir)
 {
 	char const *confdir = get_config_dir();
 	char *confpath = NULL;
@@ -224,58 +234,60 @@ tern_node *load_overrideable_config(char *name, char *bundled_name)
 	if (confdir) {
 		confpath = path_append(confdir, name);
 		ret = parse_config_file(confpath);
-		if (ret) {
-			free(confpath);
-			return ret;
+	}
+	free(confpath);
+	if (used_config_dir) {
+		*used_config_dir = ret != NULL;
+	}
+	
+	if (!ret) {
+		ret = parse_bundled_config(name);
+		if (!ret) {
+			ret = parse_bundled_config(bundled_name);
 		}
 	}
 
-	ret = parse_bundled_config(bundled_name);
-	if (ret) {
-		free(confpath);
-		return ret;
-	}
-	return NULL;
+	return ret;
 }
 
+static uint8_t app_config_in_config_dir;
 tern_node *load_config()
 {
-	char const *confdir = get_config_dir();
-	char *confpath = NULL;
-	tern_node *ret = load_overrideable_config("blastem.cfg", "default.cfg");
-	if (confdir) {
-		confpath = path_append(confdir, "blastem.cfg");
-		ret = parse_config_file(confpath);
-		if (ret) {
-			free(confpath);
-			return ret;
+	tern_node *ret = load_overrideable_config("blastem.cfg", "default.cfg", &app_config_in_config_dir);
+	
+	if (!ret) {
+		if (get_config_dir()) {
+			fatal_error("Failed to find a config file at %s or in the blastem executable directory\n", get_config_dir());
+		} else {
+			fatal_error("Failed to find a config file in the BlastEm executable directory and the config directory path could not be determined\n");
 		}
 	}
-
-	ret = parse_bundled_config("default.cfg");
-	if (ret) {
-		free(confpath);
-		return ret;
-	}
-
-	if (get_config_dir()) {
-		fatal_error("Failed to find a config file at %s or in the blastem executable directory\n", get_config_dir());
-	} else {
-		fatal_error("Failed to find a config file in the BlastEm executable directory and the config directory path could not be determined\n");
-	}
-	//this will never get reached, but the compiler doesn't know that. Let's make it happy
-	return NULL;
+	return ret;
 }
 
-void persist_config_at(tern_node *config, char *fname)
+void persist_config_at(tern_node *app_config, tern_node *to_save, char *fname)
 {
-	char const *confdir = get_config_dir();
-	if (!confdir) {
-		fatal_error("Failed to locate config file directory\n");
+	char*use_exe_dir = tern_find_path_default(app_config, "ui\0config_in_exe_dir\0", (tern_val){.ptrval = "off"}, TVAL_PTR).ptrval;
+	char *confpath;
+	if (!strcmp(use_exe_dir, "on")) {
+		confpath = path_append(get_exe_dir(), fname);
+		if (app_config == to_save && app_config_in_config_dir) {
+			//user switched to "portable" configs this session and there is an
+			//existing config file in the user-specific config directory
+			//delete it so we don't end up loading it next time
+			char *oldpath = path_append(get_config_dir(), fname);
+			delete_file(oldpath);
+			free(oldpath);
+		}
+	} else {
+		char const *confdir = get_config_dir();
+		if (!confdir) {
+			fatal_error("Failed to locate config file directory\n");
+		}
+		ensure_dir_exists(confdir);
+		confpath = path_append(confdir, fname);
 	}
-	ensure_dir_exists(confdir);
-	char *confpath = path_append(confdir, fname);
-	if (!serialize_config_file(config, confpath)) {
+	if (!serialize_config_file(to_save, confpath)) {
 		fatal_error("Failed to write config to %s\n", confpath);
 	}
 	free(confpath);
@@ -283,7 +295,22 @@ void persist_config_at(tern_node *config, char *fname)
 
 void persist_config(tern_node *config)
 {
-	persist_config_at(config, "blastem.cfg");
+	persist_config_at(config, config, "blastem.cfg");
+}
+
+void delete_custom_config_at(char *fname)
+{
+	char *confpath = path_append(get_exe_dir(), fname);
+	delete_file(confpath);
+	free(confpath);
+	confpath = path_append(get_config_dir(), fname);
+	delete_file(confpath);
+	free(confpath);
+}
+
+void delete_custom_config(void)
+{
+	delete_custom_config_at("blastem.cfg");
 }
 
 char **get_extension_list(tern_node *config, uint32_t *num_exts_out)
@@ -310,4 +337,19 @@ uint32_t get_lowpass_cutoff(tern_node *config)
 {
 	char * lowpass_cutoff_str = tern_find_path(config, "audio\0lowpass_cutoff\0", TVAL_PTR).ptrval;
 	return lowpass_cutoff_str ? atoi(lowpass_cutoff_str) : DEFAULT_LOWPASS_CUTOFF;
+}
+
+tern_node *get_systems_config(void)
+{
+	static tern_node *systems;
+	if (!systems) {
+		systems = parse_bundled_config("systems.cfg");
+	}
+	return systems;
+}
+
+tern_node *get_model(tern_node *config, system_type stype)
+{
+	char *model = tern_find_path_default(config, "system\0model\0", (tern_val){.ptrval = "md1va3"}, TVAL_PTR).ptrval;
+	return tern_find_node(get_systems_config(), model);
 }

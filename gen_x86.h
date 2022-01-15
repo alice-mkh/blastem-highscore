@@ -30,7 +30,7 @@ enum {
 	R13,
 	R14,
 	R15
-} x86_regs;
+};
 
 enum {
 	CC_O = 0,
@@ -51,18 +51,25 @@ enum {
 	CC_GE,
 	CC_LE,
 	CC_G
-} x86_cc;
+};
 
 enum {
 	SZ_B = 0,
 	SZ_W,
 	SZ_D,
 	SZ_Q
-} x86_size;
+};
 
 #ifdef X86_64
 #define SZ_PTR SZ_Q
 #define MAX_INST_LEN 14
+#ifdef _WIN32
+#define FIRST_ARG_REG RCX
+#define SECOND_ARG_REG RDX
+#else
+#define FIRST_ARG_REG RDI
+#define SECOND_ARG_REG RSI
+#endif
 #else
 #define SZ_PTR SZ_D
 #define MAX_INST_LEN 11
@@ -78,7 +85,7 @@ enum {
 	MODE_REG_DIRECT = 0xC0,
 //"phony" mode
 	MODE_IMMED = 0xFF
-} x86_modes;
+};
 
 void rol_ir(code_info *code, uint8_t val, uint8_t dst, uint8_t size);
 void ror_ir(code_info *code, uint8_t val, uint8_t dst, uint8_t size);

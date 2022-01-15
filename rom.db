@@ -779,7 +779,7 @@ MK-1079 {
 			last 3FFFFF
 		}
 	}
-	
+
 }
 MK-1563 {
 	name Sonic & Knuckles
@@ -1287,7 +1287,7 @@ BlstMenu {
 }
 
 7313c20071de0ab1cd84ac1352cb0ed1c4a4afa8 {
-	#This appears to be an underdump, but it seems to be the only copy floating around 
+	#This appears to be an underdump, but it seems to be the only copy floating around
 	name 12-in-1
 	map {
 		0 {
@@ -1375,5 +1375,49 @@ cda73e4caf53cbc8f0750b69e5e7f394ad3735d1 {
 			device jcart
 			last 3FFFFF
 		}
+	}
+}
+5e5ca20b39122c86b8f662bd8014af674f9dbed7 {
+	name Rock Heaven
+	map {
+		0 {
+			device ROM
+			last 3FFFFF
+		}
+		500008 {
+			device fixed
+			value 5082
+			last 500009
+		}
+	}
+}
+68366449fd1497538741b5a1949e342202d48948 {
+	name Rock World
+	map {
+		0 {
+			device ROM
+			last 3FFFFF
+		}
+		500008 {
+			device fixed
+			value 4000
+			last 500009
+		}
+		500208 {
+			device fixed
+			value A000
+			last 500209
+		}
+
+	}
+}
+T-122026 {
+	name Outback Joey
+	HeartbeatTrainer {
+		size 512
+	}
+	device_overrides {
+		1 heartbeat_trainer.1
+		2 gamepad3.2
 	}
 }

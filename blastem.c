@@ -11,7 +11,11 @@
 #include "system.h"
 #include "68kinst.h"
 #include "m68k_core.h"
+#ifdef NEW_CORE
+#include "z80.h"
+#else
 #include "z80_to_x86.h"
+#endif
 #include "mem.h"
 #include "vdp.h"
 #include "render.h"
@@ -26,11 +30,12 @@
 #include "bindings.h"
 #include "menu.h"
 #include "zip.h"
+#include "event_log.h"
 #ifndef DISABLE_NUKLEAR
 #include "nuklear_ui/blastem_nuklear.h"
 #endif
 
-#define BLASTEM_VERSION "0.6.1"
+#define BLASTEM_VERSION "0.6.3-pre"
 
 #ifdef __ANDROID__
 #define FULLSCREEN_DEFAULT 1
@@ -69,6 +74,14 @@ tern_node * config;
 #define romclose gzclose
 #endif
 
+uint16_t *process_smd_block(uint16_t *dst, uint8_t *src, size_t bytes)
+{
+	for (uint8_t *low = src, *high = (src+bytes/2), *end = src+bytes; high < end; high++, low++) {
+		*(dst++) = *low << 8 | *high;
+	}
+	return dst;
+}
+
 int load_smd_rom(ROMFILE f, void **buffer)
 {
 	uint8_t block[SMD_BLOCK_SIZE];
@@ -76,39 +89,58 @@ int load_smd_rom(ROMFILE f, void **buffer)
 
 	size_t filesize = 512 * 1024;
 	size_t readsize = 0;
-	uint16_t *dst = malloc(filesize);
-	
+	uint16_t *dst, *buf;
+	dst = buf = malloc(filesize);
+
 
 	size_t read;
 	do {
 		if ((readsize + SMD_BLOCK_SIZE > filesize)) {
 			filesize *= 2;
-			dst = realloc(dst, filesize);
+			buf = realloc(buf, filesize);
+			dst = buf + readsize/sizeof(uint16_t);
 		}
 		read = romread(block, 1, SMD_BLOCK_SIZE, f);
 		if (read > 0) {
-			for (uint8_t *low = block, *high = (block+read/2), *end = block+read; high < end; high++, low++) {
-				*(dst++) = *low << 8 | *high;
-			}
+			dst = process_smd_block(dst, block, read);
 			readsize += read;
 		}
 	} while(read > 0);
 	romclose(f);
-	
-	*buffer = dst;
-	
+
+	*buffer = buf;
+
 	return readsize;
+}
+
+uint8_t is_smd_format(const char *filename, uint8_t *header)
+{
+	if (header[1] == SMD_MAGIC1 && header[8] == SMD_MAGIC2 && header[9] == SMD_MAGIC3) {
+		int i;
+		for (i = 3; i < 8; i++) {
+			if (header[i] != 0) {
+				return 0;
+			}
+		}
+		if (i == 8) {
+			if (header[2]) {
+				fatal_error("%s is a split SMD ROM which is not currently supported", filename);
+			}
+			return 1;
+		}
+	}
+	return 0;
 }
 
 uint32_t load_media_zip(const char *filename, system_media *dst)
 {
-	static const char *valid_exts[] = {"bin", "md", "gen", "sms", "rom"};
+	static const char *valid_exts[] = {"bin", "md", "gen", "sms", "rom", "smd"};
 	const uint32_t num_exts = sizeof(valid_exts)/sizeof(*valid_exts);
 	zip_file *z = zip_open(filename);
 	if (!z) {
 		return 0;
 	}
-	
+
 	for (uint32_t i = 0; i < z->num_entries; i++)
 	{
 		char *ext = path_extension(z->entries[i].name);
@@ -121,6 +153,17 @@ uint32_t load_media_zip(const char *filename, system_media *dst)
 				size_t out_size = nearest_pow2(z->entries[i].size);
 				dst->buffer = zip_read(z, i, &out_size);
 				if (dst->buffer) {
+					if (is_smd_format(z->entries[i].name, dst->buffer)) {
+						size_t offset;
+						for (offset = 0; offset + SMD_BLOCK_SIZE + SMD_HEADER_SIZE <= out_size; offset += SMD_BLOCK_SIZE)
+						{
+							uint8_t tmp[SMD_BLOCK_SIZE];
+							uint8_t *u8dst = dst->buffer;
+							memcpy(tmp, u8dst + offset + SMD_HEADER_SIZE, SMD_BLOCK_SIZE);
+							process_smd_block((void *)(u8dst + offset), tmp, SMD_BLOCK_SIZE);
+						}
+						out_size = offset;
+					}
 					dst->extension = ext;
 					dst->dir = path_dirname(filename);
 					dst->name = basename_no_extension(filename);
@@ -152,33 +195,22 @@ uint32_t load_media(const char * filename, system_media *dst, system_type *stype
 	if (sizeof(header) != romread(header, 1, sizeof(header), f)) {
 		fatal_error("Error reading from %s\n", filename);
 	}
-	
+
 	uint32_t ret = 0;
-	if (header[1] == SMD_MAGIC1 && header[8] == SMD_MAGIC2 && header[9] == SMD_MAGIC3) {
-		int i;
-		for (i = 3; i < 8; i++) {
-			if (header[i] != 0) {
-				break;
-			}
-		}
-		if (i == 8) {
-			if (header[2]) {
-				fatal_error("%s is a split SMD ROM which is not currently supported", filename);
-			}
+	if (is_smd_format(filename, header)) {
 			if (stype) {
 				*stype = SYSTEM_GENESIS;
 			}
 			ret = load_smd_rom(f, &dst->buffer);
 		}
-	}
-	
+
 	if (!ret) {
 		size_t filesize = 512 * 1024;
 		size_t readsize = sizeof(header);
-		
+
 		char *buf = malloc(filesize);
 		memcpy(buf, header, readsize);
-	
+
 		size_t read;
 		do {
 			read = romread(buf + readsize, 1, filesize - readsize, f);
@@ -203,7 +235,7 @@ uint32_t load_media(const char * filename, system_media *dst, system_type *stype
 	dst->name = basename_no_extension(filename);
 	dst->extension = path_extension(filename);
 	dst->size = ret;
-	
+
 	romclose(f);
 	return ret;
 }
@@ -247,6 +279,7 @@ static char *get_save_dir(system_media *media)
 		savedir_template = "$USERDATA/blastem/$ROMNAME";
 	}
 	tern_node *vars = tern_insert_ptr(NULL, "ROMNAME", media->name);
+	vars = tern_insert_ptr(vars, "ROMDIR", media->dir);
 	vars = tern_insert_ptr(vars, "HOME", get_home_dir());
 	vars = tern_insert_ptr(vars, "EXEDIR", get_exe_dir());
 	vars = tern_insert_ptr(vars, "USERDATA", (char *)get_userdata_dir());
@@ -258,12 +291,23 @@ static char *get_save_dir(system_media *media)
 	return save_dir;
 }
 
+const char *get_save_fname(uint8_t save_type)
+{
+	switch(save_type)
+	{
+	case SAVE_I2C: return "save.eeprom";
+	case SAVE_NOR: return "save.nor";
+	case SAVE_HBPT: return "save.hbpt";
+	default: return "save.sram";
+	}
+}
+
 void setup_saves(system_media *media, system_header *context)
 {
 	static uint8_t persist_save_registered;
 	rom_info *info = &context->info;
 	char *save_dir = get_save_dir(info->is_save_lock_on ? media->chain : media);
-	char const *parts[] = {save_dir, PATH_SEP, info->save_type == SAVE_I2C ? "save.eeprom" : info->save_type == SAVE_NOR ? "save.nor" : "save.sram"};
+	char const *parts[] = {save_dir, PATH_SEP, get_save_fname(info->save_type)};
 	free(save_filename);
 	save_filename = alloc_concat_m(3, parts);
 	if (info->is_save_lock_on) {
@@ -304,7 +348,7 @@ static void on_drag_drop(const char *filename)
 			free(current_system->next_rom);
 		}
 		current_system->next_rom = strdup(filename);
-		current_system->request_exit(current_system);
+		system_request_exit(current_system, 1);
 		if (menu_system && menu_system->type == SYSTEM_GENESIS) {
 			genesis_context *gen = (genesis_context *)menu_system;
 			if (gen->extra) {
@@ -323,6 +367,11 @@ static void on_drag_drop(const char *filename)
 }
 
 static system_media cart, lock_on;
+const system_media *current_media(void)
+{
+	return &cart;
+}
+
 void reload_media(void)
 {
 	if (!current_system) {
@@ -340,7 +389,7 @@ void reload_media(void)
 		num_parts--;
 	}
 	current_system->next_rom = alloc_concat_m(num_parts, start);
-	current_system->request_exit(current_system);
+	system_request_exit(current_system, 1);
 }
 
 void lockon_media(char *lock_on_path)
@@ -376,7 +425,7 @@ void init_system_with_media(const char *path, system_type force_stype)
 	if (!(cart.size = load_media(path, &cart, &stype))) {
 		fatal_error("Failed to open %s for reading\n", path);
 	}
-	
+
 	if (force_stype != SYSTEM_UNKNOWN) {
 		stype = force_stype;
 	}
@@ -399,6 +448,23 @@ void init_system_with_media(const char *path, system_type force_stype)
 	update_title(game_system->info.name);
 }
 
+char *parse_addr_port(char *arg)
+{
+	while (*arg && *arg != ':') {
+		++arg;
+	}
+	if (!*arg) {
+		return NULL;
+	}
+	char *end;
+	int port = strtol(arg + 1, &end, 10);
+	if (port && !*end) {
+		*arg = 0;
+		return arg + 1;
+	}
+	return NULL;
+}
+
 int main(int argc, char ** argv)
 {
 	set_exe_str(argv[0]);
@@ -410,10 +476,13 @@ int main(int argc, char ** argv)
 	system_type stype = SYSTEM_UNKNOWN, force_stype = SYSTEM_UNKNOWN;
 	char * romfname = NULL;
 	char * statefile = NULL;
+	char *reader_addr = NULL, *reader_port = NULL;
+	event_reader reader = {0};
 	debugger_type dtype = DEBUGGER_NATIVE;
 	uint8_t start_in_debugger = 0;
 	uint8_t fullscreen = FULLSCREEN_DEFAULT, use_gl = 1;
 	uint8_t debug_target = 0;
+	char *port;
 	for (int i = 1; i < argc; i++) {
 		if (argv[i][0] == '-') {
 			switch(argv[i][1]) {
@@ -436,6 +505,18 @@ int main(int argc, char ** argv)
 				gdb_remote_init();
 				dtype = DEBUGGER_GDB;
 				start_in_debugger = 1;
+				break;
+			case 'e':
+				i++;
+				if (i >= argc) {
+					fatal_error("-e must be followed by a file name\n");
+				}
+				port = parse_addr_port(argv[i]);
+				if (port) {
+					event_log_tcp(argv[i], port);
+				} else {
+					event_log_file(argv[i]);
+				}
 				break;
 			case 'f':
 				fullscreen = !fullscreen;
@@ -521,14 +602,20 @@ int main(int argc, char ** argv)
 					"	-v          Display version number and exit\n"
 					"	-l          Log 68K code addresses (useful for assemblers)\n"
 					"	-y          Log individual YM-2612 channels to WAVE files\n"
+					"   -e FILE     Write hardware event log to FILE\n"
 				);
 				return 0;
 			default:
 				fatal_error("Unrecognized switch %s\n", argv[i]);
 			}
 		} else if (!loaded) {
+			reader_port = parse_addr_port(argv[i]);
+			if (reader_port) {
+				reader_addr = argv[i];
+			} else {
 			if (!load_media(argv[i], &cart, stype == SYSTEM_UNKNOWN ? &stype : NULL)) {
 				fatal_error("Failed to open %s for reading\n", argv[i]);
+			}
 			}
 			romfname = argv[i];
 			loaded = 1;
@@ -538,7 +625,7 @@ int main(int argc, char ** argv)
 			height = atoi(argv[i]);
 		}
 	}
-	
+
 	int def_width = 0, def_height = 0;
 	char *config_width = tern_find_path(config, "video\0width\0", TVAL_PTR).ptrval;
 	if (config_width) {
@@ -562,11 +649,14 @@ int main(int argc, char ** argv)
 		fullscreen = !fullscreen;
 	}
 	if (!headless) {
+		if (reader_addr) {
+			render_set_external_sync(1);
+		}
 		render_init(width, height, "BlastEm", fullscreen);
 		render_set_drag_drop_handler(on_drag_drop);
 	}
 	set_bindings();
-	
+
 	uint8_t menu = !loaded;
 	uint8_t use_nuklear = 0;
 #ifndef DISABLE_NUKLEAR
@@ -607,18 +697,19 @@ int main(int argc, char ** argv)
 		warning("%s is not a valid value for the ui.state_format setting. Valid values are gst and native\n", state_format);
 	}
 
-	if (loaded) {
+	if (loaded && !reader_addr) {
 		if (stype == SYSTEM_UNKNOWN) {
 			stype = detect_system_type(&cart);
 		}
 		if (stype == SYSTEM_UNKNOWN) {
 			fatal_error("Failed to detect system type for %s\n", romfname);
 		}
+
 		current_system = alloc_config_system(stype, &cart, menu ? 0 : opts, force_region);
 		if (!current_system) {
 			fatal_error("Failed to configure emulated machine for %s\n", romfname);
 		}
-	
+
 		setup_saves(&cart, current_system);
 		update_title(current_system->info.name);
 		if (menu) {
@@ -627,7 +718,7 @@ int main(int argc, char ** argv)
 			game_system = current_system;
 		}
 	}
-	
+
 #ifndef DISABLE_NUKLEAR
 	if (use_nuklear) {
 		blastem_nuklear_init(!menu);
@@ -635,10 +726,24 @@ int main(int argc, char ** argv)
 		menu = 0;
 	}
 #endif
-	
+
+	if (reader_addr) {
+		init_event_reader_tcp(&reader, reader_addr, reader_port);
+		stype = reader_system_type(&reader);
+		if (stype == SYSTEM_UNKNOWN) {
+			fatal_error("Failed to detect system type for %s\n", romfname);
+		}
+		game_system = current_system = alloc_config_player(stype, &reader);
+		//free inflate stream as it was inflateCopied to an internal event reader in the player
+		inflateEnd(&reader.input_stream);
+		setup_saves(&cart, current_system);
+		update_title(current_system->info.name);
+	}
+
 	current_system->debugger_type = dtype;
 	current_system->enter_debugger = start_in_debugger && menu == debug_target;
 	current_system->start_context(current_system,  menu ? NULL : statefile);
+	render_video_loop();
 	for(;;)
 	{
 		if (current_system->should_exit) {
@@ -654,6 +759,7 @@ int main(int argc, char ** argv)
 			current_system->debugger_type = dtype;
 			current_system->enter_debugger = start_in_debugger && menu == debug_target;
 			current_system->start_context(current_system, statefile);
+			render_video_loop();
 		} else if (menu && game_system) {
 			current_system->arena = set_current_arena(game_system->arena);
 			current_system = game_system;
@@ -671,6 +777,7 @@ int main(int argc, char ** argv)
 			}
 			if (!current_system->next_rom) {
 				current_system->resume_context(current_system);
+				render_video_loop();
 			}
 		} else {
 			break;

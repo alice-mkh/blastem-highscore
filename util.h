@@ -32,6 +32,8 @@ long file_size(FILE * f);
 char * strip_ws(char * text);
 //Inserts a null after the first word, returns a pointer to the second word
 char * split_keyval(char * text);
+//Checks if haystack starts with prefix
+uint8_t startswith(const char *haystack, const char *prefix);
 //Takes a binary byte buffer and produces a lowercase hex string
 void bin_to_hex(uint8_t *output, uint8_t *input, uint64_t size);
 //Takes an (optionally) null-terminated UTF16-BE string and converts a maximum of max_size code-units to UTF-8
@@ -82,5 +84,23 @@ void fatal_error(char *format, ...);
 void info_message(char *format, ...);
 //Prints an information message to stderr and to a message box if not in headless mode and not attached to a console
 void warning(char *format, ...);
+//Prints a debug message to stdout
+void debug_message(char *format, ...);
+//Disables output of info and debug messages to stdout
+void disable_stdout_messages(void);
+//Returns stdout disable status
+uint8_t is_stdout_enabled(void);
+//Deletes a file, returns true on success, false on failure
+uint8_t delete_file(char *path);
+//Initializes the socket library on platforms that need it
+void socket_init(void);
+//Sets a sockt to blocking or non-blocking mode
+int socket_blocking(int sock, int should_block);
+//Close a socket
+void socket_close(int sock);
+//Return the last error on a socket operation
+int socket_last_error(void);
+//Returns if the last socket error was EAGAIN/EWOULDBLOCK
+int socket_error_is_wouldblock(void);
 
 #endif //UTIL_H_

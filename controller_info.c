@@ -1,8 +1,13 @@
 #include <string.h>
+#include <stdlib.h>
+#ifndef USE_FBDEV
 #include "render_sdl.h"
+#endif
 #include "controller_info.h"
 #include "config.h"
 #include "util.h"
+#include "blastem.h"
+#include "bindings.h"
 
 typedef struct {
 	char const      *name;
@@ -57,19 +62,23 @@ static const char *subtype_human_names[] = {
 static const char *variant_names[] = {
 	"normal",
 	"6b bumpers",
-	"6b right"
+	"6b right",
+	"3button",
+	"6button",
+	"8button"
 };
 
 static void load_ctype_config(void)
 {
 	if (!loaded) {
-		info_config = load_overrideable_config("controller_types.cfg", "controller_types.cfg");
+		info_config = load_overrideable_config("controller_types.cfg", "controller_types.cfg", NULL);
 		loaded = 1;
 	}
 }
 
 controller_info get_controller_info(int joystick)
 {
+#ifndef USE_FBDEV
 	load_ctype_config();
 	char guid_string[33];
 	SDL_Joystick *stick = render_get_joystick(joystick);
@@ -148,6 +157,9 @@ controller_info get_controller_info(int joystick)
 			return res;
 		}
 	}
+#else
+	const char *name = "Unknown";
+#endif
 	//default to a 360
 	return (controller_info){
 		.type = TYPE_GENERIC_MAPPING,
@@ -159,6 +171,7 @@ controller_info get_controller_info(int joystick)
 
 static void mappings_iter(char *key, tern_val val, uint8_t valtype, void *data)
 {
+#ifndef USE_FBDEV
 	if (valtype != TVAL_NODE) {
 		return;
 	}
@@ -169,6 +182,7 @@ static void mappings_iter(char *key, tern_val val, uint8_t valtype, void *data)
 		SDL_GameControllerAddMapping(full);
 		free(full);
 	}
+#endif
 }
 
 void controller_add_mappings(void)
@@ -181,24 +195,42 @@ void controller_add_mappings(void)
 
 void save_controller_info(int joystick, controller_info *info)
 {
+#ifndef USE_FBDEV
 	char guid_string[33];
 	SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(render_get_joystick(joystick)), guid_string, sizeof(guid_string));
 	tern_node *existing = tern_find_node(info_config, guid_string);
-	existing = tern_insert_ptr(existing, "subtype", (void *)subtype_names[info->subtype]);
-	existing = tern_insert_ptr(existing, "variant",  (void *)variant_names[info->variant]);
+	existing = tern_insert_ptr(existing, "subtype", strdup(subtype_names[info->subtype]));
+	existing = tern_insert_ptr(existing, "variant", strdup(variant_names[info->variant]));
 	info_config = tern_insert_node(info_config, guid_string, existing);
-	persist_config_at(info_config, "controller_types.cfg");
-	
+	persist_config_at(config, info_config, "controller_types.cfg");
+	handle_joy_added(joystick);
+#endif	
 }
 
 void save_controller_mapping(int joystick, char *mapping_string)
 {
+#ifndef USE_FBDEV
 	char guid_string[33];
 	SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(render_get_joystick(joystick)), guid_string, sizeof(guid_string));
 	tern_node *existing = tern_find_node(info_config, guid_string);
 	existing = tern_insert_ptr(existing, "mapping", mapping_string);
 	info_config = tern_insert_node(info_config, guid_string, existing);
-	persist_config_at(info_config, "controller_types.cfg");
+	persist_config_at(config, info_config, "controller_types.cfg");
+	const char *parts[] = {guid_string, ",", mapping_string};
+	char * full = alloc_concat_m(3, parts);
+	SDL_GameControllerAddMapping(full);
+	free(full);
+	handle_joy_added(joystick);
+#endif
+}
+
+void delete_controller_info(void)
+{
+	delete_custom_config_at("controller_types.cfg");
+	loaded = 0;
+	tern_free(info_config);
+	info_config = NULL;
+	render_reset_mappings();
 }
 
 char const *labels_xbox[] = {
@@ -221,6 +253,12 @@ static char const *labels_nintendo[] = {
 };
 static char const *labels_genesis[] = {
 	"A", "B", "X", "Y", NULL, NULL, "Start", NULL, NULL, "Z", "C", NULL, "Mode"
+};
+static char const *labels_genesis_3button[] = {
+	"A", "B", NULL, NULL, NULL, NULL, "Start", NULL, NULL, NULL, "C", NULL, "Mode"
+};
+static char const *labels_genesis_8button[] = {
+	"A", "B", "X", "Y", "Mode", NULL, "Start", NULL, NULL, "Z", "C", "L", "R"
 };
 static char const *labels_saturn[] = {
 	"A", "B", "X", "Y", NULL, NULL, "Start", NULL, NULL, "Z", "C", "LT", "RT"
@@ -246,7 +284,13 @@ static const char** label_source(controller_info *info)
 		}
 	} else {
 		if (info->subtype == SUBTYPE_GENESIS) {
-			return labels_genesis;
+			if (info->variant == VARIANT_8BUTTON) {
+				return labels_genesis_8button;
+			} else if (info->variant == VARIANT_3BUTTON) {
+				return labels_genesis_3button;
+			} else {
+				return labels_genesis;
+			}
 		} else {
 			return labels_saturn;
 		}
@@ -255,10 +299,12 @@ static const char** label_source(controller_info *info)
 
 const char *get_button_label(controller_info *info, int button)
 {
+#ifndef USE_FBDEV
 	if (button >= SDL_CONTROLLER_BUTTON_DPAD_UP) {
 		static char const * dirs[] = {"Up", "Down", "Left", "Right"};
 		return dirs[button - SDL_CONTROLLER_BUTTON_DPAD_UP];
 	}
+#endif
 	return label_source(info)[button];
 }
 
@@ -267,11 +313,15 @@ static char const *axis_labels[] = {
 };
 const char *get_axis_label(controller_info *info, int axis)
 {
+#ifndef USE_FBDEV
 	if (axis < SDL_CONTROLLER_AXIS_TRIGGERLEFT) {
 		return axis_labels[axis];
 	} else {
 		return label_source(info)[axis - SDL_CONTROLLER_AXIS_TRIGGERLEFT + SDL_CONTROLLER_BUTTON_RIGHTSHOULDER + 1];
 	}
+#else
+	return NULL;
+#endif
 }
 
 char *make_controller_type_key(controller_info *info)
@@ -316,6 +366,9 @@ char *make_human_readable_type_name(controller_info *info)
 		prefix = "Normal ";
 	} else {
 		static const char *parts[] = {"6 button (", NULL, "/", NULL, ") "};
+#ifdef USE_FBDEV
+		parts[1] = parts[3] = "??";
+#else
 		if (info->variant == VARIANT_6B_BUMPERS) {
 			parts[1] = get_button_label(info, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
 			parts[3] = get_button_label(info, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
@@ -323,6 +376,7 @@ char *make_human_readable_type_name(controller_info *info)
 			parts[1] = get_button_label(info, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
 			parts[3] = get_axis_label(info, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
 		}
+#endif
 		prefix = alloc_concat_m(5, parts);
 	}
 	char *ret = alloc_concat(prefix, base);

@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdlib.h>
 #include "render.h"
 #include "system.h"
 #include "io.h"
@@ -35,6 +36,7 @@ typedef enum {
 	UI_RELOAD,
 	UI_SMS_PAUSE,
 	UI_SCREENSHOT,
+	UI_VGM_LOG,
 	UI_EXIT,
 	UI_PLANE_DEBUG,
 	UI_VRAM_DEBUG,
@@ -257,17 +259,51 @@ static uint8_t mouse_captured;
 #define localtime_r(a,b) localtime(a)
 #endif
 
+char *get_content_config_path(char *config_path, char *config_template, char *default_name)
+{
+	char *base = tern_find_path(config, config_path, TVAL_PTR).ptrval;
+	if (!base) {
+		base = "$HOME";
+	}
+	const system_media *media = current_media();
+	tern_node *vars = tern_insert_ptr(NULL, "HOME", get_home_dir());
+	vars = tern_insert_ptr(vars, "EXEDIR", get_exe_dir());
+	vars = tern_insert_ptr(vars, "USERDATA", (char *)get_userdata_dir());
+	vars = tern_insert_ptr(vars, "ROMNAME", media->name);
+	vars = tern_insert_ptr(vars, "ROMDIR", media->dir);
+	base = replace_vars(base, vars, 1);
+	tern_free(vars);
+	ensure_dir_exists(base);
+	time_t now = time(NULL);
+	struct tm local_store;
+	char fname_part[256];
+	char *template = tern_find_path(config, config_template, TVAL_PTR).ptrval;
+	if (template) {
+		vars = tern_insert_ptr(NULL, "ROMNAME", media->name);
+		template = replace_vars(template, vars, 0);
+	} else {
+		template = strdup(default_name);
+	}
+	strftime(fname_part, sizeof(fname_part), template, localtime_r(&now, &local_store));
+	char const *parts[] = {base, PATH_SEP, fname_part};
+	char *path = alloc_concat_m(3, parts);
+	free(base);
+	free(template);
+	return path;
+}
+
 void handle_binding_up(keybinding * binding)
 {
+	uint8_t allow_content_binds = content_binds_enabled && current_system;
 	switch(binding->bind_type)
 	{
 	case BIND_GAMEPAD:
-		if (content_binds_enabled && current_system->gamepad_up) {
+		if (allow_content_binds && current_system->gamepad_up) {
 			current_system->gamepad_up(current_system, binding->subtype_a, binding->subtype_b);
 		}
 		break;
 	case BIND_MOUSE:
-		if (content_binds_enabled && current_system->mouse_up) {
+		if (allow_content_binds && current_system->mouse_up) {
 			current_system->mouse_up(current_system, binding->subtype_a, binding->subtype_b);
 		}
 		break;
@@ -275,22 +311,22 @@ void handle_binding_up(keybinding * binding)
 		switch (binding->subtype_a)
 		{
 		case UI_DEBUG_MODE_INC:
-			if (content_binds_enabled) {
+			if (allow_content_binds) {
 				current_system->inc_debug_mode(current_system);
 			}
 			break;
 		case UI_ENTER_DEBUGGER:
-			if (content_binds_enabled) {
+			if (allow_content_binds) {
 				current_system->enter_debugger = 1;
 			}
 			break;
 		case UI_SAVE_STATE:
-			if (content_binds_enabled) {
+			if (allow_content_binds) {
 				current_system->save_state = QUICK_SAVE_SLOT+1;
 			}
 			break;
 		case UI_NEXT_SPEED:
-			if (content_binds_enabled) {
+			if (allow_content_binds) {
 				current_speed++;
 				if (current_speed >= num_speeds) {
 					current_speed = 0;
@@ -300,7 +336,7 @@ void handle_binding_up(keybinding * binding)
 			}
 			break;
 		case UI_PREV_SPEED:
-			if (content_binds_enabled) {
+			if (allow_content_binds) {
 				current_speed--;
 				if (current_speed < 0) {
 					current_speed = num_speeds - 1;
@@ -310,7 +346,7 @@ void handle_binding_up(keybinding * binding)
 			}
 			break;
 		case UI_SET_SPEED:
-			if (content_binds_enabled) {
+			if (allow_content_binds) {
 				if (binding->subtype_b < num_speeds) {
 					current_speed = binding->subtype_b;
 					printf("Setting speed to %d: %d\n", current_speed, speeds[current_speed]);
@@ -328,7 +364,7 @@ void handle_binding_up(keybinding * binding)
 			}
 			break;
 		case UI_TOGGLE_KEYBOARD_CAPTURE:
-			if (content_binds_enabled && current_system->has_keyboard) {
+			if (allow_content_binds && current_system->has_keyboard) {
 				keyboard_captured = !keyboard_captured;
 			}
 			break;
@@ -336,52 +372,44 @@ void handle_binding_up(keybinding * binding)
 			render_toggle_fullscreen();
 			break;
 		case UI_SOFT_RESET:
-			if (content_binds_enabled) {
+			if (allow_content_binds) {
 				current_system->soft_reset(current_system);
 			}
 			break;
 		case UI_RELOAD:
-			if (content_binds_enabled) {
+			if (allow_content_binds) {
 				reload_media();
 			}
 			break;
 		case UI_SMS_PAUSE:
-			if (content_binds_enabled && current_system->gamepad_down) {
+			if (allow_content_binds && current_system->gamepad_down) {
 				current_system->gamepad_down(current_system, GAMEPAD_MAIN_UNIT, MAIN_UNIT_PAUSE);
 			}
 			break;
-		case UI_SCREENSHOT: {
-			if (content_binds_enabled) {
-				char *screenshot_base = tern_find_path(config, "ui\0screenshot_path\0", TVAL_PTR).ptrval;
-				if (!screenshot_base) {
-					screenshot_base = "$HOME";
-				}
-				tern_node *vars = tern_insert_ptr(NULL, "HOME", get_home_dir());
-				vars = tern_insert_ptr(vars, "EXEDIR", get_exe_dir());
-				screenshot_base = replace_vars(screenshot_base, vars, 1);
-				tern_free(vars);
-				time_t now = time(NULL);
-				struct tm local_store;
-				char fname_part[256];
-				char *template = tern_find_path(config, "ui\0screenshot_template\0", TVAL_PTR).ptrval;
-				if (!template) {
-					template = "blastem_%c.ppm";
-				}
-				strftime(fname_part, sizeof(fname_part), template, localtime_r(&now, &local_store));
-				char const *parts[] = {screenshot_base, PATH_SEP, fname_part};
-				char *path = alloc_concat_m(3, parts);
-				free(screenshot_base);
+		case UI_SCREENSHOT:
+			if (allow_content_binds) {
+				char *path = get_content_config_path("ui\0screenshot_path\0", "ui\0screenshot_template\0", "blastem_%c.ppm");
 				render_save_screenshot(path);
 			}
 			break;
-		}
+		case UI_VGM_LOG:
+			if (allow_content_binds && current_system->start_vgm_log) {
+				if (current_system->vgm_logging) {
+					current_system->stop_vgm_log(current_system);
+				} else {
+					char *path = get_content_config_path("ui\0vgm_path\0", "ui\0vgm_template\0", "blastem_%c.vgm");
+					current_system->start_vgm_log(current_system, path);
+					free(path);
+				}
+			}
+			break;
 		case UI_EXIT:
 #ifndef DISABLE_NUKLEAR
 			if (is_nuklear_active()) {
 				show_pause_menu();
 			} else {
 #endif
-			current_system->request_exit(current_system);
+			system_request_exit(current_system, 1);
 			if (current_system->type == SYSTEM_GENESIS) {
 				genesis_context *gen = (genesis_context *)current_system;
 				if (gen->extra) {
@@ -398,7 +426,7 @@ void handle_binding_up(keybinding * binding)
 		case UI_VRAM_DEBUG: 
 		case UI_CRAM_DEBUG:
 		case UI_COMPOSITE_DEBUG:
-			if (content_binds_enabled) {
+			if (allow_content_binds) {
 				vdp_context *vdp = NULL;
 				if (current_system->type == SYSTEM_GENESIS) {
 					genesis_context *gen = (genesis_context *)current_system;
@@ -556,7 +584,7 @@ int parse_binding_target(int device_num, char * target, tern_node * padbuttons, 
 {
 	const int gpadslen = strlen("gamepads.");
 	const int mouselen = strlen("mouse.");
-	if (!strncmp(target, "gamepads.", gpadslen)) {
+	if (startswith(target, "gamepads.")) {
 		int padnum = target[gpadslen] == 'n' ? device_num + 1 : target[gpadslen] - '0';
 		if (padnum >= 1 && padnum <= 8) {
 			int button = tern_find_int(padbuttons, target + gpadslen + 1, 0);
@@ -574,7 +602,7 @@ int parse_binding_target(int device_num, char * target, tern_node * padbuttons, 
 		} else {
 			warning("Gamepad mapping string '%s' refers to an invalid gamepad number %c\n", target, target[gpadslen]);
 		}
-	} else if(!strncmp(target, "mouse.", mouselen)) {
+	} else if(startswith(target, "mouse.")) {
 		int mousenum = target[mouselen] == 'n' ? device_num + 1 : target[mouselen] - '0';
 		if (mousenum >= 1 && mousenum <= 8) {
 			int button = tern_find_int(mousebuttons, target + mouselen + 1, 0);
@@ -592,7 +620,7 @@ int parse_binding_target(int device_num, char * target, tern_node * padbuttons, 
 		} else {
 			warning("Gamepad mapping string '%s' refers to an invalid mouse number %c\n", target, target[mouselen]);
 		}
-	} else if(!strncmp(target, "ui.", strlen("ui."))) {
+	} else if(startswith(target, "ui.")) {
 		if (!strcmp(target + 3, "vdp_debug_mode")) {
 			*subtype_a = UI_DEBUG_MODE_INC;
 		} else if(!strcmp(target + 3, "vdp_debug_pal")) {
@@ -602,7 +630,7 @@ int parse_binding_target(int device_num, char * target, tern_node * padbuttons, 
 			*subtype_a = UI_ENTER_DEBUGGER;
 		} else if(!strcmp(target + 3, "save_state")) {
 			*subtype_a = UI_SAVE_STATE;
-		} else if(!strncmp(target + 3, "set_speed.", strlen("set_speed."))) {
+		} else if(startswith(target + 3, "set_speed.")) {
 			*subtype_a = UI_SET_SPEED;
 			*subtype_b = atoi(target + 3 + strlen("set_speed."));
 		} else if(!strcmp(target + 3, "next_speed")) {
@@ -623,6 +651,8 @@ int parse_binding_target(int device_num, char * target, tern_node * padbuttons, 
 			*subtype_a = UI_SMS_PAUSE;
 		} else if (!strcmp(target + 3, "screenshot")) {
 			*subtype_a = UI_SCREENSHOT;
+		} else if (!strcmp(target + 3, "vgm_log")) {
+			*subtype_a = UI_VGM_LOG;
 		} else if(!strcmp(target + 3, "exit")) {
 			*subtype_a = UI_EXIT;
 		} else if (!strcmp(target + 3, "plane_debug")) {
@@ -814,7 +844,7 @@ void process_pad_button(char *key, tern_val val, uint8_t valtype, void *data)
 			if (hostbutton == RENDER_INVALID_NAME) {
 				warning("%s is not a valid gamepad input name\n", key);
 			} else if (hostbutton == RENDER_NOT_MAPPED && hostpadnum != map_warning_pad) {
-				warning("No SDL 2 mapping exists for input %s on gamepad %d\n", key, hostpadnum);
+				debug_message("No SDL 2 mapping exists for input %s on gamepad %d\n", key, hostpadnum);
 				map_warning_pad = hostpadnum;
 			}
 			return;
@@ -823,7 +853,7 @@ void process_pad_button(char *key, tern_val val, uint8_t valtype, void *data)
 			bind_dpad(hostpadnum, render_dpad_part(hostbutton), render_direction_part(hostbutton), bindtype, subtype_a, subtype_b);
 			return;
 		} else if (hostbutton & RENDER_AXIS_BIT) {
-			bind_axis(hostpadnum, render_axis_part(hostbutton), 1, bindtype, subtype_a, subtype_b);
+			bind_axis(hostpadnum, render_axis_part(hostbutton), hostbutton & RENDER_AXIS_POS, bindtype, subtype_a, subtype_b);
 			return;
 		}
 	}
@@ -861,7 +891,7 @@ void process_pad_axis(char *key, tern_val val, uint8_t valtype, void *data)
 			if (axis == RENDER_INVALID_NAME) {
 				warning("%s is not a valid gamepad input name\n", key);
 			} else if (axis == RENDER_NOT_MAPPED && hostpadnum != map_warning_pad) {
-				warning("No SDL 2 mapping exists for input %s on gamepad %d\n", key, hostpadnum);
+				debug_message("No SDL 2 mapping exists for input %s on gamepad %d\n", key, hostpadnum);
 				map_warning_pad = hostpadnum;
 			}
 			goto done;
@@ -957,14 +987,26 @@ void handle_joy_added(int joystick)
 			char numstr[2] = {dpad + '0', 0};
 			tern_node * pad_dpad = tern_find_node(dpad_node, numstr);
 			char * dirs[] = {"up", "down", "left", "right"};
-			//TODO: Support controllers that have d-pads implemented as analog axes or buttons
+			char *render_dirs[] = {"dpup", "dpdown", "dpleft", "dpright"};
 			int dirnums[] = {RENDER_DPAD_UP, RENDER_DPAD_DOWN, RENDER_DPAD_LEFT, RENDER_DPAD_RIGHT};
 			for (int dir = 0; dir < sizeof(dirs)/sizeof(dirs[0]); dir++) {
 				char * target = tern_find_ptr(pad_dpad, dirs[dir]);
 				if (target) {
 					uint8_t subtype_a = 0, subtype_b = 0;
 					int bindtype = parse_binding_target(joystick, target, get_pad_buttons(), get_mouse_buttons(), &subtype_a, &subtype_b);
-					bind_dpad(joystick, dpad, dirnums[dir], bindtype, subtype_a, subtype_b);
+					int32_t hostbutton = dpad >0 ? -1 : render_translate_input_name(joystick, render_dirs[dir], 0);
+					if (hostbutton < 0) {
+						//assume this is a raw dpad mapping
+						bind_dpad(joystick, dpad, dirnums[dir], bindtype, subtype_a, subtype_b);
+					} else if (hostbutton & RENDER_DPAD_BIT) {
+						bind_dpad(joystick, render_dpad_part(hostbutton), render_direction_part(hostbutton), bindtype, subtype_a, subtype_b);
+					} else if (hostbutton & RENDER_AXIS_BIT) {
+						//SDL2 knows internally whether this should be a positive or negative binding, but doesn't expose that externally
+						//for now I'll just assume that any controller with axes for a d-pad has these mapped the "sane" way
+						bind_axis(joystick, render_axis_part(hostbutton), dir == 1 || dir == 3 ? 1 : 0, bindtype, subtype_a, subtype_b);
+					} else {
+						bind_button(joystick, hostbutton, bindtype, subtype_a, subtype_b);
+					}
 				}
 			}
 		}

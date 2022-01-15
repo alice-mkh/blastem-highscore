@@ -24,7 +24,9 @@ enum {
 	IO_EA_MULTI_A,
 	IO_EA_MULTI_B,
 	IO_SEGA_PARALLEL,
-	IO_GENERIC
+	IO_GENERIC,
+	IO_GENERIC_SERIAL,
+	IO_HEARTBEAT_TRAINER
 };
 
 typedef struct {
@@ -57,13 +59,37 @@ typedef struct {
 			uint8_t  mode;
 			uint8_t  cmd;
 		} keyboard;
+		struct {
+			uint8_t  *nv_memory;
+			uint8_t  *cur_buffer;
+			uint64_t rtc_base_timestamp;
+			uint8_t  rtc_base[5];
+			uint8_t  bpm;
+			uint8_t  cadence;
+			uint8_t  buttons;
+			uint8_t  nv_page_size;
+			uint8_t  nv_pages;
+			uint8_t  param;
+			uint8_t  state;
+			uint8_t  status;
+			uint8_t  device_num;
+			uint8_t  cmd;
+			uint8_t  remaining_bytes;
+		} heartbeat_trainer;
 	} device;
 	uint8_t  output;
 	uint8_t  control;
 	uint8_t  input[3];
 	uint32_t slow_rise_start[8];
+	uint32_t serial_cycle;
+	uint32_t serial_divider;
+	uint32_t last_poll_cycle;
+	uint32_t transmit_end;
+	uint32_t receive_end;
 	uint8_t  serial_out;
+	uint8_t  serial_transmitting;
 	uint8_t  serial_in;
+	uint8_t  serial_receiving;
 	uint8_t  serial_ctrl;
 	uint8_t  device_type;
 } io_port;
@@ -106,9 +132,15 @@ enum {
 
 void setup_io_devices(tern_node * config, rom_info *rom, sega_io *io);
 void io_adjust_cycles(io_port * pad, uint32_t current_cycle, uint32_t deduction);
+void io_run(io_port *port, uint32_t current_cycle);
 void io_control_write(io_port *port, uint8_t value, uint32_t current_cycle);
 void io_data_write(io_port * pad, uint8_t value, uint32_t current_cycle);
+void io_tx_write(io_port *port, uint8_t value, uint32_t current_cycle);
+void io_sctrl_write(io_port *port, uint8_t value, uint32_t current_cycle);
 uint8_t io_data_read(io_port * pad, uint32_t current_cycle);
+uint8_t io_rx_read(io_port * port, uint32_t current_cycle);
+uint8_t io_sctrl_read(io_port *port, uint32_t current_cycle);
+uint32_t io_next_interrupt(io_port *port, uint32_t current_cycle);
 void io_serialize(io_port *port, serialize_buffer *buf);
 void io_deserialize(deserialize_buffer *buf, void *vport);
 

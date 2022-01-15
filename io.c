@@ -39,7 +39,9 @@ const char * device_type_names[] = {
 	"EA 4-way Play cable A",
 	"EA 4-way Play cable B",
 	"Sega Parallel Transfer Board",
-	"Generic Device"
+	"Generic Device",
+	"Generic Serial",
+	"Heartbeat Personal Trainer"
 };
 
 #define GAMEPAD_TH0 0
@@ -56,6 +58,13 @@ enum {
 	IO_WRITTEN,
 	IO_READ_PENDING,
 	IO_READ
+};
+
+enum {
+	HBPT_NEED_INIT,
+	HBPT_IDLE,
+	HBPT_CMD_PAYLOAD,
+	HBPT_REPLY
 };
 
 typedef struct {
@@ -86,6 +95,9 @@ static io_port *find_gamepad(sega_io *io, uint8_t gamepad_num)
 		if (port->device_type < IO_MOUSE && port->device.pad.gamepad_num == gamepad_num) {
 			return port;
 		}
+		if (port->device_type == IO_HEARTBEAT_TRAINER && port->device.heartbeat_trainer.device_num == gamepad_num) {
+			return port;
+		} 
 	}
 	return NULL;
 }
@@ -210,8 +222,20 @@ uint8_t io_has_keyboard(sega_io *io)
 	return find_keyboard(io) != NULL;
 }
 
+static void set_serial_clock(io_port *port)
+{
+	switch(port->serial_ctrl >> 6)
+	{
+	case 0: port->serial_divider = 11186; break; //4800 bps
+	case 1: port->serial_divider = 22372; break; //2400 bps
+	case 2: port->serial_divider = 44744; break; //1200 bps
+	case 3: port->serial_divider = 178976; break; //300 bps
+	}
+}
+
 void process_device(char * device_type, io_port * port)
 {
+	set_serial_clock(port);
 	//assuming that the io_port struct has been zeroed if this is the first time this has been called
 	if (!device_type)
 	{
@@ -219,8 +243,7 @@ void process_device(char * device_type, io_port * port)
 	}
 
 	const int gamepad_len = strlen("gamepad");
-	const int mouse_len = strlen("mouse");
-	if (!strncmp(device_type, "gamepad", gamepad_len))
+	if (startswith(device_type, "gamepad"))
 	{
 		if (
 			(device_type[gamepad_len] != '3' && device_type[gamepad_len] != '6' && device_type[gamepad_len] != '2')
@@ -236,10 +259,14 @@ void process_device(char * device_type, io_port * port)
 			port->device_type = IO_GAMEPAD6;
 		}
 		port->device.pad.gamepad_num = device_type[gamepad_len+2] - '0';
-	} else if(!strncmp(device_type, "mouse", mouse_len)) {
+	} else if(startswith(device_type, "heartbeat_trainer.")) {
+		port->device_type = IO_HEARTBEAT_TRAINER;
+		port->device.heartbeat_trainer.nv_memory = NULL;
+		port->device.heartbeat_trainer.device_num = device_type[strlen("heartbeat_trainer.")] - '0';
+	} else if(startswith(device_type, "mouse")) {
 		if (port->device_type != IO_MOUSE) {
 			port->device_type = IO_MOUSE;
-			port->device.mouse.mouse_num = device_type[mouse_len+1] - '0';
+			port->device.mouse.mouse_num = device_type[strlen("mouse")+1] - '0';
 			port->device.mouse.last_read_x = 0;
 			port->device.mouse.last_read_y = 0;
 			port->device.mouse.cur_x = 0;
@@ -273,6 +300,12 @@ void process_device(char * device_type, io_port * port)
 			port->device.stream.data_fd = -1;
 			port->device.stream.listen_fd = -1;
 		}
+	} else if(!strcmp(device_type, "serial")) {
+		if (port->device_type != IO_GENERIC_SERIAL) {
+			port->device_type = IO_GENERIC_SERIAL;
+			port->device.stream.data_fd = -1;
+			port->device.stream.listen_fd = -1;
+		}
 	}
 }
 
@@ -301,9 +334,9 @@ void setup_io_devices(tern_node * config, rom_info *rom, sega_io *io)
 {
 	io_port * ports = io->ports;
 	tern_node *io_nodes = tern_find_path(config, "io\0devices\0", TVAL_NODE).ptrval;
-	char * io_1 = rom->port1_override ? rom->port1_override : io_nodes ? tern_find_ptr(io_nodes, "1") : NULL;
-	char * io_2 = rom->port2_override ? rom->port2_override : io_nodes ? tern_find_ptr(io_nodes, "2") : NULL;
-	char * io_ext = rom->ext_override ? rom->ext_override : io_nodes ? tern_find_ptr(io_nodes, "ext") : NULL;
+	char * io_1 = rom->port1_override ? rom->port1_override : tern_find_ptr_default(io_nodes, "1", "gamepad6.1");
+	char * io_2 = rom->port2_override ? rom->port2_override : tern_find_ptr_default(io_nodes, "2", "gamepad6.2");
+	char * io_ext = rom->ext_override ? rom->ext_override : tern_find_ptr(io_nodes, "ext");
 
 	process_device(io_1, ports);
 	process_device(io_2, ports+1);
@@ -336,7 +369,7 @@ void setup_io_devices(tern_node * config, rom_info *rom, sega_io *io)
 				warning("IO port %s is configured to use the sega parallel board, but no paralell_pipe is set!\n", io_name(i));
 				ports[i].device_type = IO_NONE;
 			} else {
-				printf("IO port: %s connected to device '%s' with pipe name: %s\n", io_name(i), device_type_names[ports[i].device_type], pipe_name);
+				debug_message("IO port: %s connected to device '%s' with pipe name: %s\n", io_name(i), device_type_names[ports[i].device_type], pipe_name);
 				if (!strcmp("stdin", pipe_name))
 				{
 					ports[i].device.stream.data_fd = STDIN_FILENO;
@@ -355,14 +388,14 @@ void setup_io_devices(tern_node * config, rom_info *rom, sega_io *io)
 					}
 				}
 			}
-		} else if (ports[i].device_type == IO_GENERIC && ports[i].device.stream.data_fd == -1) {
+		} else if (ports[i].device_type == IO_GENERIC || ports[i].device_type == IO_GENERIC_SERIAL && ports[i].device.stream.data_fd == -1) {
 			char *sock_name = tern_find_path(config, "io\0socket\0", TVAL_PTR).ptrval;
 			if (!sock_name)
 			{
 				warning("IO port %s is configured to use generic IO, but no socket is set!\n", io_name(i));
 				ports[i].device_type = IO_NONE;
 			} else {
-				printf("IO port: %s connected to device '%s' with socket name: %s\n", io_name(i), device_type_names[ports[i].device_type], sock_name);
+				debug_message("IO port: %s connected to device '%s' with socket name: %s\n", io_name(i), device_type_names[ports[i].device_type], sock_name);
 				ports[i].device.stream.data_fd = -1;
 				ports[i].device.stream.listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
 				size_t pathlen = strlen(sock_name);
@@ -392,9 +425,33 @@ cleanup_sock:
 		} else
 #endif
 		if (ports[i].device_type == IO_GAMEPAD3 || ports[i].device_type == IO_GAMEPAD6 || ports[i].device_type == IO_GAMEPAD2) {
-			printf("IO port %s connected to gamepad #%d with type '%s'\n", io_name(i), ports[i].device.pad.gamepad_num + 1, device_type_names[ports[i].device_type]);
+			debug_message("IO port %s connected to gamepad #%d with type '%s'\n", io_name(i), ports[i].device.pad.gamepad_num, device_type_names[ports[i].device_type]);
+		} else if (ports[i].device_type == IO_HEARTBEAT_TRAINER) {
+			debug_message("IO port %s connected to Heartbeat Personal Trainer #%d\n", io_name(i), ports[i].device.heartbeat_trainer.device_num);
+			if (rom->save_type == SAVE_HBPT) {
+				ports[i].device.heartbeat_trainer.nv_memory = rom->save_buffer;
+				uint32_t page_size = 16;
+				for (; page_size < 128; page_size *= 2)
+				{
+					if (rom->save_size / page_size < 256) {
+						break;
+					}
+				}
+				ports[i].device.heartbeat_trainer.nv_page_size = page_size;
+				uint32_t num_pages = rom->save_size / page_size;
+				ports[i].device.heartbeat_trainer.nv_pages = num_pages < 256 ? num_pages : 255;
+			} else {
+				ports[i].device.heartbeat_trainer.nv_page_size = 16;
+				ports[i].device.heartbeat_trainer.nv_pages = 32;
+				size_t bufsize = 
+					ports[i].device.heartbeat_trainer.nv_page_size * ports[i].device.heartbeat_trainer.nv_pages
+					+ 5 + 8;
+				ports[i].device.heartbeat_trainer.nv_memory = malloc(bufsize);
+				memset(ports[i].device.heartbeat_trainer.nv_memory, 0xFF, bufsize);
+			}
+			ports[i].device.heartbeat_trainer.state = HBPT_NEED_INIT;
 		} else {
-			printf("IO port %s connected to device '%s'\n", io_name(i), device_type_names[ports[i].device_type]);
+			debug_message("IO port %s connected to device '%s'\n", io_name(i), device_type_names[ports[i].device_type]);
 		}
 	}
 }
@@ -428,7 +485,6 @@ void mouse_check_ready(io_port *port, uint32_t current_cycle)
 	}
 }
 
-uint32_t last_poll_cycle;
 void io_adjust_cycles(io_port * port, uint32_t current_cycle, uint32_t deduction)
 {
 	/*uint8_t control = pad->control | 0x80;
@@ -460,25 +516,80 @@ void io_adjust_cycles(io_port * port, uint32_t current_cycle, uint32_t deduction
 			}
 		}
 	}
-	if (last_poll_cycle >= deduction) {
-		last_poll_cycle -= deduction;
+	if (port->transmit_end >= deduction) {
+		port->transmit_end -= deduction;
 	} else {
-		last_poll_cycle = 0;
+		port->transmit_end = 0;
+	}
+	if (port->receive_end >= deduction) {
+		port->receive_end -= deduction;
+	} else {
+		port->receive_end = 0;
+	}
+	if (port->last_poll_cycle >= deduction) {
+		port->last_poll_cycle -= deduction;
+	} else {
+		port->last_poll_cycle = 0;
 	}
 }
 
 #ifndef _WIN32
-static void wait_for_connection(io_port * port)
+static void wait_for_connection(io_port *port)
 {
 	if (port->device.stream.data_fd == -1)
 	{
-		puts("Waiting for socket connection...");
+		debug_message("Waiting for socket connection...\n");
 		port->device.stream.data_fd = accept(port->device.stream.listen_fd, NULL, NULL);
 		fcntl(port->device.stream.data_fd, F_SETFL, O_NONBLOCK | O_RDWR);
 	}
 }
 
-static void service_pipe(io_port * port)
+static void poll_for_connection(io_port *port)
+{
+	if (port->device.stream.data_fd == -1)
+	{
+		fcntl(port->device.stream.listen_fd, F_SETFL, O_NONBLOCK | O_RDWR);
+		port->device.stream.data_fd = accept(port->device.stream.listen_fd, NULL, NULL);
+		fcntl(port->device.stream.listen_fd, F_SETFL, O_RDWR);
+		if (port->device.stream.data_fd != -1) {
+			fcntl(port->device.stream.data_fd, F_SETFL, O_NONBLOCK | O_RDWR);
+		}
+	}
+}
+
+static void write_serial_byte(io_port *port)
+{
+	fcntl(port->device.stream.data_fd, F_SETFL, O_RDWR);
+	for (int sent = 0; sent != sizeof(port->serial_transmitting);)
+	{
+		sent = send(port->device.stream.data_fd, &port->serial_transmitting, sizeof(port->serial_transmitting), 0);
+		if (sent < 0) {
+			close(port->device.stream.data_fd);
+			port->device.stream.data_fd = -1;
+			wait_for_connection(port);
+			fcntl(port->device.stream.data_fd, F_SETFL, O_RDWR);
+		}
+	}
+	fcntl(port->device.stream.data_fd, F_SETFL, O_NONBLOCK | O_RDWR);
+}
+
+static void read_serial_byte(io_port *port)
+{
+	poll_for_connection(port);
+	if (port->device.stream.data_fd == -1) {
+		return;
+	}
+	int read = recv(port->device.stream.data_fd, &port->serial_receiving, sizeof(port->serial_receiving), 0);
+	if (read < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+		close(port->device.stream.data_fd);
+		port->device.stream.data_fd = -1;
+	}
+	if (read > 0) {
+		port->receive_end = port->serial_cycle + 10 * port->serial_divider;
+	}
+}
+
+static void service_pipe(io_port *port)
 {
 	uint8_t value;
 	int numRead = read(port->device.stream.data_fd, &value, sizeof(value));
@@ -569,6 +680,257 @@ static void service_socket(io_port *port)
 }
 #endif
 
+enum {
+	HBPT_UNKNOWN1 = 1,
+	HBPT_POLL,
+	HBPT_READ_PAGE = 5,
+	HBPT_WRITE_PAGE,
+	HBPT_READ_RTC,
+	HBPT_SET_RTC,
+	HBPT_GET_STATUS,
+	HBPT_ERASE_NVMEM,
+	HBPT_NVMEM_PARAMS,
+	HBPT_INIT
+};
+
+static void start_reply(io_port *port, uint8_t bytes, const uint8_t *src)
+{
+	port->device.heartbeat_trainer.remaining_bytes = bytes;
+	port->device.heartbeat_trainer.state = HBPT_REPLY;
+	port->device.heartbeat_trainer.cur_buffer = (uint8_t *)src;
+}
+
+static void simple_reply(io_port *port, uint8_t value)
+{
+	port->device.heartbeat_trainer.param = value;
+	start_reply(port, 1, &port->device.heartbeat_trainer.param);
+}
+
+static void expect_payload(io_port *port, uint8_t bytes, uint8_t *dst)
+{
+	port->device.heartbeat_trainer.remaining_bytes = bytes;
+	port->device.heartbeat_trainer.state = HBPT_CMD_PAYLOAD;
+	port->device.heartbeat_trainer.cur_buffer = dst;
+}
+
+void hbpt_check_init(io_port *port)
+{
+	if (port->device.heartbeat_trainer.state == HBPT_NEED_INIT) {
+		port->device.heartbeat_trainer.rtc_base_timestamp = 0;
+		for (int i = 0; i < 8; i ++)
+		{
+			port->device.heartbeat_trainer.rtc_base_timestamp <<= 8;
+			port->device.heartbeat_trainer.rtc_base_timestamp |= port->device.heartbeat_trainer.nv_memory[i];
+		}
+		memcpy(port->device.heartbeat_trainer.rtc_base, port->device.heartbeat_trainer.nv_memory + 8, 5);
+		if (port->device.heartbeat_trainer.rtc_base_timestamp == UINT64_MAX) {
+			//uninitialized save, set the appropriate status bit
+			port->device.heartbeat_trainer.status |= 1;
+		}
+		port->device.heartbeat_trainer.bpm = 60;
+		port->device.heartbeat_trainer.state = HBPT_IDLE;
+	}
+}
+
+void hbpt_check_send_reply(io_port *port)
+{
+	if (port->device.heartbeat_trainer.state == HBPT_REPLY && !port->receive_end) {
+		port->serial_receiving = *(port->device.heartbeat_trainer.cur_buffer++);
+		port->receive_end = port->serial_cycle + 10 * port->serial_divider;
+		if (!--port->device.heartbeat_trainer.remaining_bytes) {
+			port->device.heartbeat_trainer.state = HBPT_IDLE;
+		}
+	}
+}
+
+uint8_t is_leap_year(uint16_t year)
+{
+	if (year & 3) {
+		return 0;
+	}
+	if (year % 100) {
+		return 1;
+	}
+	if (year % 400) {
+		return 0;
+	}
+	return 1;
+}
+
+uint8_t days_in_month(uint8_t month, uint16_t year)
+{
+	static uint8_t days_per_month[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+	if (month == 2 && is_leap_year(year)) {
+		return 29;
+	}
+	if (month > 12 || !month) {
+		return 30;
+	}
+	return days_per_month[month-1];
+}
+
+void hbpt_write_byte(io_port *port)
+{
+	hbpt_check_init(port);
+	uint8_t reply;
+	switch (port->device.heartbeat_trainer.state)
+	{
+	case HBPT_IDLE:
+		port->device.heartbeat_trainer.cmd = port->serial_transmitting;
+		switch (port->device.heartbeat_trainer.cmd)
+		{
+		case HBPT_UNKNOWN1:
+			start_reply(port, 11, NULL);
+			break;
+		case HBPT_POLL:
+			start_reply(port, 3, &port->device.heartbeat_trainer.bpm);
+			if (port->serial_cycle - port->last_poll_cycle > MIN_POLL_INTERVAL) {
+				process_events();
+				port->last_poll_cycle = port->serial_cycle;
+			}
+			port->device.heartbeat_trainer.buttons = (port->input[GAMEPAD_TH0] << 2 & 0xC0) | (port->input[GAMEPAD_TH1] & 0x1F);
+			if (port->device.heartbeat_trainer.cadence && port->input[GAMEPAD_TH1] & 0x20) {
+				port->device.heartbeat_trainer.cadence--;
+				printf("Cadence: %d\n", port->device.heartbeat_trainer.cadence);
+			} else if (port->device.heartbeat_trainer.cadence < 255 && port->input[GAMEPAD_EXTRA] & 1) {
+				port->device.heartbeat_trainer.cadence++;
+				printf("Cadence: %d\n", port->device.heartbeat_trainer.cadence);
+			}
+			if (port->device.heartbeat_trainer.bpm && port->input[GAMEPAD_EXTRA] & 4) {
+				port->device.heartbeat_trainer.bpm--;
+				printf("Heart Rate: %d\n", port->device.heartbeat_trainer.bpm);
+			} else if (port->device.heartbeat_trainer.bpm < 255 && port->input[GAMEPAD_EXTRA] & 2) {
+				port->device.heartbeat_trainer.bpm++;
+				printf("Heart Rate: %d\n", port->device.heartbeat_trainer.bpm);
+			}
+			
+			break;
+		case HBPT_READ_PAGE:
+		case HBPT_WRITE_PAGE:
+			//strictly speaking for the write case, we want 1 + page size here
+			//but the rest of the payload goes to a different destination
+			expect_payload(port, 1, &port->device.heartbeat_trainer.param);
+			break;
+		case HBPT_READ_RTC: {
+			uint8_t *rtc = port->device.heartbeat_trainer.rtc_base;
+			start_reply(port, 5, rtc);
+			uint64_t now = time(NULL);
+			uint64_t delta = (now - port->device.heartbeat_trainer.rtc_base_timestamp + 30) / 60;
+			rtc[4] += delta % 60;
+			if (rtc[4] > 59) {
+				rtc[4] -= 60;
+				rtc[3]++;
+			}
+			delta /= 60;
+			if (delta) {
+				rtc[3] += delta % 24;
+				delta /= 24;
+				if (rtc[3] > 23) {
+					rtc[3] -= 24;
+					delta++;
+				}
+				if (delta) {
+					uint16_t year = rtc[0] < 81 ? 2000 + rtc[0] : 1900 + rtc[0];
+					uint8_t days_cur_month = days_in_month(rtc[1], year);
+					while (delta + rtc[2] > days_cur_month) {
+						delta -= days_cur_month + 1 - rtc[2];
+						rtc[2] = 1;
+						if (++rtc[1] == 13) {
+							rtc[1] = 1;
+							year++;
+						}
+						days_cur_month = days_in_month(rtc[1], year);
+					}
+					rtc[1] += delta;
+					rtc[0] = year % 100;
+				}
+			}
+			printf("RTC %02d-%02d-%02d %02d:%02d\n", rtc[0], rtc[1], rtc[2], rtc[3], rtc[4]);
+			port->device.heartbeat_trainer.rtc_base_timestamp = now;
+			break;
+		}
+		case HBPT_SET_RTC:
+			port->device.heartbeat_trainer.rtc_base_timestamp = time(NULL);
+			expect_payload(port, 5, port->device.heartbeat_trainer.rtc_base);
+			break;
+		case HBPT_GET_STATUS:
+			simple_reply(port, port->device.heartbeat_trainer.status);
+			break;
+		case HBPT_ERASE_NVMEM:
+			expect_payload(port, 1, &port->device.heartbeat_trainer.param);
+			break;
+		case HBPT_NVMEM_PARAMS:
+			start_reply(port, 2, &port->device.heartbeat_trainer.nv_page_size);
+			break;
+		case HBPT_INIT:
+			expect_payload(port, 19, NULL);
+			break;
+		default:
+			// it's unclear what these commands do as they are unused by Outback Joey
+			// just return 0 to indicate failure
+			simple_reply(port, 0);
+		}
+		break;
+	case HBPT_CMD_PAYLOAD:
+		if (port->device.heartbeat_trainer.cur_buffer) {
+			*(port->device.heartbeat_trainer.cur_buffer++) = port->serial_transmitting;
+		}
+		if (!--port->device.heartbeat_trainer.remaining_bytes) {
+			switch (port->device.heartbeat_trainer.cmd)
+			{
+			case HBPT_READ_PAGE:
+			case HBPT_WRITE_PAGE:
+				if (
+					port->device.heartbeat_trainer.cmd == HBPT_WRITE_PAGE 
+					&& port->device.heartbeat_trainer.cur_buffer != &port->device.heartbeat_trainer.param + 1) {
+					simple_reply(port, 1);
+					break;
+				}
+				port->device.heartbeat_trainer.remaining_bytes = port->device.heartbeat_trainer.nv_page_size;
+				port->device.heartbeat_trainer.cur_buffer =
+					port->device.heartbeat_trainer.param < port->device.heartbeat_trainer.nv_pages
+					? port->device.heartbeat_trainer.nv_memory + 5 + 8
+						+ port->device.heartbeat_trainer.param * port->device.heartbeat_trainer.nv_page_size
+					: NULL;
+				if (port->device.heartbeat_trainer.cmd == HBPT_WRITE_PAGE) {
+					return;
+				}
+				port->device.heartbeat_trainer.state = HBPT_REPLY;
+				break;
+			case HBPT_SET_RTC:
+				//save RTC base values back to nv memory area so it's saved to disk on exit
+				for (int i = 0; i < 8; i++)
+				{
+					port->device.heartbeat_trainer.nv_memory[i] = port->device.heartbeat_trainer.rtc_base_timestamp >> (56 - i*8);
+				}
+				memcpy(port->device.heartbeat_trainer.nv_memory + 8, port->device.heartbeat_trainer.rtc_base, 5);
+				simple_reply(port, 1);
+				break;
+			case HBPT_ERASE_NVMEM:
+				memset(
+					port->device.heartbeat_trainer.nv_memory + 5 + 8, 
+					port->device.heartbeat_trainer.param, 
+					port->device.heartbeat_trainer.nv_pages * port->device.heartbeat_trainer.nv_page_size
+				);
+				simple_reply(port, 1);
+				break;
+			case HBPT_INIT: {
+				static const char reply[] = "(C) HEARTBEAT CORP";
+				start_reply(port, strlen(reply), reply);
+				break;
+			}
+			}
+		}
+	}
+	hbpt_check_send_reply(port);
+}
+
+void hbpt_read_byte(io_port *port)
+{
+	hbpt_check_init(port);
+	hbpt_check_send_reply(port);
+}
+
 const int mouse_delays[] = {112*7, 120*7, 96*7, 132*7, 104*7, 96*7, 112*7, 96*7};
 
 enum {
@@ -576,6 +938,67 @@ enum {
 	KB_READ,
 	KB_WRITE
 };
+
+enum {
+	SCTRL_BIT_TX_FULL = 1,
+	SCTRL_BIT_RX_READY = 2,
+	SCTRL_BIT_RX_ERROR = 4,
+	SCTRL_BIT_RX_INTEN = 8,
+	SCTRL_BIT_TX_ENABLE = 0x10,
+	SCTRL_BIT_RX_ENABLE = 0x20
+};
+
+void io_run(io_port *port, uint32_t current_cycle)
+{
+	uint32_t new_serial_cycle = ((current_cycle - port->serial_cycle) / port->serial_divider) * port->serial_divider + port->serial_cycle;
+	if (port->transmit_end && port->transmit_end <= new_serial_cycle) {
+		port->transmit_end = 0;
+		
+		if (port->serial_ctrl & SCTRL_BIT_TX_ENABLE) {
+			switch (port->device_type)
+			{
+			case IO_HEARTBEAT_TRAINER:
+				hbpt_write_byte(port);
+				break;
+#ifndef _WIN32
+			case IO_GENERIC_SERIAL:
+				write_serial_byte(port);
+				break;
+#endif
+			//TODO: think about how serial mode might interact with non-serial peripherals
+			}
+		}
+	}
+	if (!port->transmit_end && new_serial_cycle != port->serial_cycle && (port->serial_ctrl & SCTRL_BIT_TX_FULL)) {
+		//there's a transmit byte pending and no byte is currently being sent
+		port->serial_transmitting = port->serial_out;
+		port->serial_ctrl &= ~SCTRL_BIT_TX_FULL;
+		//1 start bit, 8 data bits and 1 stop bit
+		port->transmit_end = new_serial_cycle + 10 * port->serial_divider;
+	}
+	port->serial_cycle = new_serial_cycle;
+	if (port->serial_ctrl && SCTRL_BIT_RX_ENABLE) {
+		if (port->receive_end && new_serial_cycle >= port->receive_end) {
+			port->serial_in = port->serial_receiving;
+			port->serial_ctrl |= SCTRL_BIT_RX_READY;
+			port->receive_end = 0;
+		}
+		if (!port->receive_end) {
+			switch(port->device_type)
+			{
+			case IO_HEARTBEAT_TRAINER:
+				hbpt_read_byte(port);
+				break;
+#ifndef _WIN32
+			case IO_GENERIC_SERIAL:
+				read_serial_byte(port);
+				break;
+#endif
+			//TODO: think about how serial mode might interact with non-serial peripherals
+			}
+		}
+	}
+}
 
 void io_control_write(io_port *port, uint8_t value, uint32_t current_cycle)
 {
@@ -724,6 +1147,20 @@ void io_data_write(io_port * port, uint8_t value, uint32_t current_cycle)
 
 }
 
+void io_tx_write(io_port *port, uint8_t value, uint32_t current_cycle)
+{
+	io_run(port, current_cycle);
+	port->serial_out = value;
+	port->serial_ctrl |= SCTRL_BIT_TX_FULL;
+}
+
+void io_sctrl_write(io_port *port, uint8_t value, uint32_t current_cycle)
+{
+	io_run(port, current_cycle);
+	port->serial_ctrl = (port->serial_ctrl & 0x7) | (value & 0xF8);
+	set_serial_clock(port);
+}
+
 uint8_t get_scancode_bytes(io_port *port)
 {
 	if (port->device.keyboard.read_pos == 0xFF) {
@@ -767,9 +1204,9 @@ uint8_t io_data_read(io_port * port, uint32_t current_cycle)
 	uint8_t th = output & 0x40;
 	uint8_t input;
 	uint8_t device_driven;
-	if (current_cycle - last_poll_cycle > MIN_POLL_INTERVAL) {
+	if (current_cycle - port->last_poll_cycle > MIN_POLL_INTERVAL) {
 		process_events();
-		last_poll_cycle = current_cycle;
+		port->last_poll_cycle = current_cycle;
 	}
 	switch (port->device_type)
 	{
@@ -1050,6 +1487,36 @@ uint8_t io_data_read(io_port * port, uint32_t current_cycle)
 	return value;
 }
 
+uint8_t io_rx_read(io_port * port, uint32_t current_cycle)
+{
+	io_run(port, current_cycle);
+	port->serial_ctrl &= ~SCTRL_BIT_RX_READY;
+	return port->serial_in;
+}
+
+uint8_t io_sctrl_read(io_port *port, uint32_t current_cycle)
+{
+	io_run(port, current_cycle);
+	return port->serial_ctrl;
+}
+
+uint32_t io_next_interrupt(io_port *port, uint32_t current_cycle)
+{
+	if (!(port->control & 0x80)) {
+		return CYCLE_NEVER;
+	}
+	if (port->serial_ctrl & SCTRL_BIT_RX_INTEN) {
+		if (port->serial_ctrl & SCTRL_BIT_RX_READY) {
+			return current_cycle;
+		}
+		if ((port->serial_ctrl & SCTRL_BIT_RX_ENABLE) && port->receive_end) {
+			return port->receive_end;
+		}
+	}
+	//TODO: handle external interrupts from TH transitions
+	return CYCLE_NEVER;
+}
+
 void io_serialize(io_port *port, serialize_buffer *buf)
 {
 	save_int8(buf, port->output);
@@ -1081,7 +1548,21 @@ void io_serialize(io_port *port, serialize_buffer *buf)
 			save_int8(buf, port->device.keyboard.cmd);
 		}
 		break;
+	case IO_HEARTBEAT_TRAINER:
+		save_int8(buf, port->device.heartbeat_trainer.bpm);
+		save_int8(buf, port->device.heartbeat_trainer.cadence);
+		save_int8(buf, port->device.heartbeat_trainer.param);
+		save_int8(buf, port->device.heartbeat_trainer.state);
+		save_int8(buf, port->device.heartbeat_trainer.status);
+		save_int8(buf, port->device.heartbeat_trainer.cmd);
+		save_int8(buf, port->device.heartbeat_trainer.remaining_bytes);
+		break;
 	}
+	save_int32(buf, port->serial_cycle);
+	save_int32(buf, port->transmit_end);
+	save_int32(buf, port->receive_end);
+	save_int8(buf, port->serial_transmitting);
+	save_int8(buf, port->serial_receiving);
 }
 
 void io_deserialize(deserialize_buffer *buf, void *vport)
@@ -1092,7 +1573,9 @@ void io_deserialize(deserialize_buffer *buf, void *vport)
 	port->serial_out = load_int8(buf);
 	port->serial_in = load_int8(buf);
 	port->serial_ctrl = load_int8(buf);
+	set_serial_clock(port);
 	uint8_t device_type = load_int8(buf);
+	load_buffer32(buf, port->slow_rise_start, 8);
 	if (device_type != port->device_type) {
 		warning("Loaded save state has a different device type from the current configuration");
 		return;
@@ -1119,5 +1602,21 @@ void io_deserialize(deserialize_buffer *buf, void *vport)
 			port->device.keyboard.cmd = load_int8(buf);
 		}
 		break;
+	case IO_HEARTBEAT_TRAINER:
+		port->device.heartbeat_trainer.bpm = load_int8(buf);
+		port->device.heartbeat_trainer.cadence = load_int8(buf);
+		port->device.heartbeat_trainer.param = load_int8(buf);
+		port->device.heartbeat_trainer.state = load_int8(buf);
+		port->device.heartbeat_trainer.status = load_int8(buf);
+		port->device.heartbeat_trainer.cmd = load_int8(buf);
+		port->device.heartbeat_trainer.remaining_bytes = load_int8(buf);
+		break;
+	}
+	if (buf->cur_pos < buf->size) {
+		port->serial_cycle = load_int32(buf);
+		port->transmit_end = load_int32(buf);
+		port->receive_end = load_int32(buf);
+		port->serial_transmitting = load_int8(buf);
+		port->serial_receiving = load_int8(buf);
 	}
 }

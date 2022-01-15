@@ -9,26 +9,35 @@
 #include "saves.h"
 #include "bindings.h"
 
+#ifdef NEW_CORE
+#define Z80_CYCLE cycles
+#define Z80_OPTS opts
+#define z80_handle_code_write(...)
+#else
+#define Z80_CYCLE current_cycle
+#define Z80_OPTS options
+#endif
+
 static void *memory_io_write(uint32_t location, void *vcontext, uint8_t value)
 {
 	z80_context *z80 = vcontext;
 	sms_context *sms = z80->system;
 	if (location & 1) {
 		uint8_t fuzzy_ctrl_0 = sms->io.ports[0].control, fuzzy_ctrl_1 = sms->io.ports[1].control;
-		io_control_write(sms->io.ports, (~value) << 5 & 0x60, z80->current_cycle);
+		io_control_write(sms->io.ports, (~value) << 5 & 0x60, z80->Z80_CYCLE);
 		fuzzy_ctrl_0 |= sms->io.ports[0].control;
-		io_control_write(sms->io.ports+1, (~value) << 3 & 0x60, z80->current_cycle);
+		io_control_write(sms->io.ports+1, (~value) << 3 & 0x60, z80->Z80_CYCLE);
 		fuzzy_ctrl_1 |= sms->io.ports[1].control;
 		if (
 			(fuzzy_ctrl_0 & 0x40 & (sms->io.ports[0].output ^ (value << 1)) & (value << 1))
 			|| (fuzzy_ctrl_0 & 0x40 & (sms->io.ports[1].output ^ (value >> 1)) & (value >> 1))
 		) {
 			//TH is an output and it went from 0 -> 1
-			vdp_run_context(sms->vdp, z80->current_cycle);
+			vdp_run_context(sms->vdp, z80->Z80_CYCLE);
 			vdp_latch_hv(sms->vdp);
 		}
-		io_data_write(sms->io.ports, value << 1, z80->current_cycle);
-		io_data_write(sms->io.ports + 1, value >> 1, z80->current_cycle);
+		io_data_write(sms->io.ports, value << 1, z80->Z80_CYCLE);
+		io_data_write(sms->io.ports + 1, value >> 1, z80->Z80_CYCLE);
 	} else {
 		//TODO: memory control write
 	}
@@ -39,7 +48,7 @@ static uint8_t hv_read(uint32_t location, void *vcontext)
 {
 	z80_context *z80 = vcontext;
 	sms_context *sms = z80->system;
-	vdp_run_context(sms->vdp, z80->current_cycle);
+	vdp_run_context(sms->vdp, z80->Z80_CYCLE);
 	uint16_t hv = vdp_hv_counter_read(sms->vdp);
 	if (location & 1) {
 		return hv;
@@ -52,7 +61,7 @@ static void *sms_psg_write(uint32_t location, void *vcontext, uint8_t value)
 {
 	z80_context *z80 = vcontext;
 	sms_context *sms = z80->system;
-	psg_run(sms->psg, z80->current_cycle);
+	psg_run(sms->psg, z80->Z80_CYCLE);
 	psg_write(sms->psg, value);
 	return vcontext;
 }
@@ -61,14 +70,19 @@ static void update_interrupts(sms_context *sms)
 {
 	uint32_t vint = vdp_next_vint(sms->vdp);
 	uint32_t hint = vdp_next_hint(sms->vdp);
+#ifdef NEW_CORE
+	sms->z80->int_cycle = vint < hint ? vint : hint;
+	z80_sync_cycle(sms->z80, sms->z80->sync_cycle);
+#else
 	sms->z80->int_pulse_start = vint < hint ? vint : hint;
+#endif
 }
 
 static uint8_t vdp_read(uint32_t location, void *vcontext)
 {
 	z80_context *z80 = vcontext;
 	sms_context *sms = z80->system;
-	vdp_run_context(sms->vdp, z80->current_cycle);
+	vdp_run_context(sms->vdp, z80->Z80_CYCLE);
 	if (location & 1) {
 		uint8_t ret = vdp_control_port_read(sms->vdp);
 		sms->vdp->flags2 &= ~(FLAG2_VINT_PENDING|FLAG2_HINT_PENDING);
@@ -84,11 +98,11 @@ static void *vdp_write(uint32_t location, void *vcontext, uint8_t value)
 	z80_context *z80 = vcontext;
 	sms_context *sms = z80->system;
 	if (location & 1) {
-		vdp_run_context_full(sms->vdp, z80->current_cycle);
+		vdp_run_context_full(sms->vdp, z80->Z80_CYCLE);
 		vdp_control_port_write_pbc(sms->vdp, value);
 		update_interrupts(sms);
 	} else {
-		vdp_run_context(sms->vdp, z80->current_cycle);
+		vdp_run_context(sms->vdp, z80->Z80_CYCLE);
 		vdp_data_port_write_pbc(sms->vdp, value);
 	}
 	return vcontext;
@@ -99,13 +113,13 @@ static uint8_t io_read(uint32_t location, void *vcontext)
 	z80_context *z80 = vcontext;
 	sms_context *sms = z80->system;
 	if (location == 0xC0 || location == 0xDC) {
-		uint8_t port_a = io_data_read(sms->io.ports, z80->current_cycle);
-		uint8_t port_b = io_data_read(sms->io.ports+1, z80->current_cycle);
+		uint8_t port_a = io_data_read(sms->io.ports, z80->Z80_CYCLE);
+		uint8_t port_b = io_data_read(sms->io.ports+1, z80->Z80_CYCLE);
 		return (port_a & 0x3F) | (port_b << 6);
 	}
 	if (location == 0xC1 || location == 0xDD) {
-		uint8_t port_a = io_data_read(sms->io.ports, z80->current_cycle);
-		uint8_t port_b = io_data_read(sms->io.ports+1, z80->current_cycle);
+		uint8_t port_a = io_data_read(sms->io.ports, z80->Z80_CYCLE);
+		uint8_t port_b = io_data_read(sms->io.ports+1, z80->Z80_CYCLE);
 		return (port_a & 0x40) | (port_b >> 2 & 0xF) | (port_b << 1 & 0x80) | 0x10;
 	}
 	return 0xFF;
@@ -235,6 +249,18 @@ void sms_serialize(sms_context *sms, serialize_buffer *buf)
 	end_section(buf);
 }
 
+static uint8_t *serialize(system_header *sys, size_t *size_out)
+{
+	sms_context *sms = (sms_context *)sys;
+	serialize_buffer state;
+	init_serialize(&state);
+	sms_serialize(sms, &state);
+	if (size_out) {
+		*size_out = state.size;
+	}
+	return state.data;
+}
+
 static void ram_deserialize(deserialize_buffer *buf, void *vsms)
 {
 	sms_context *sms = vsms;
@@ -290,6 +316,16 @@ void sms_deserialize(deserialize_buffer *buf, sms_context *sms)
 		//cart RAM is enabled, invalidate the region in case there is any code there
 		z80_invalidate_code_range(sms->z80, 0x8000, 0xC000);
 	}
+	free(buf->handlers);
+	buf->handlers = NULL;
+}
+
+static void deserialize(system_header *sys, uint8_t *data, size_t size)
+{
+	sms_context *sms = (sms_context *)sys;
+	deserialize_buffer buffer;
+	init_deserialize(&buffer, data, size);
+	sms_deserialize(&buffer, sms);
 }
 
 static void save_state(sms_context *sms, uint8_t slot)
@@ -321,6 +357,7 @@ static uint8_t load_state(system_header *system, uint8_t slot)
 	sms_context *sms = (sms_context *)system;
 	char *statepath = get_slot_name(system, slot, "state");
 	uint8_t ret;
+#ifndef NEW_CORE
 	if (!sms->z80->native_pc) {
 		ret = get_modification_time(statepath) != 0;
 		if (ret) {
@@ -329,6 +366,7 @@ static uint8_t load_state(system_header *system, uint8_t slot)
 		goto done;
 		
 	}
+#endif
 	ret = load_state_path(sms, statepath);
 done:
 	free(statepath);
@@ -338,7 +376,7 @@ done:
 static void run_sms(system_header *system)
 {
 	sms_context *sms = (sms_context *)system;
-	uint32_t target_cycle = sms->z80->current_cycle + 3420*16;
+	uint32_t target_cycle = sms->z80->Z80_CYCLE + 3420*16;
 	//TODO: PAL support
 	render_set_video_standard(VID_NTSC);
 	while (!sms->should_return)
@@ -352,7 +390,11 @@ static void run_sms(system_header *system)
 			system->enter_debugger = 0;
 			zdebugger(sms->z80, sms->z80->pc);
 		}
+#ifdef NEW_CORE
+		if (sms->z80->nmi_cycle == CYCLE_NEVER) {
+#else
 		if (sms->z80->nmi_start == CYCLE_NEVER) {
+#endif
 			uint32_t nmi = vdp_next_nmi(sms->vdp);
 			if (nmi != CYCLE_NEVER) {
 				z80_assert_nmi(sms->z80, nmi);
@@ -360,16 +402,16 @@ static void run_sms(system_header *system)
 		}
 		z80_run(sms->z80, target_cycle);
 		if (sms->z80->reset) {
-			z80_clear_reset(sms->z80, sms->z80->current_cycle + 128*15);
+			z80_clear_reset(sms->z80, sms->z80->Z80_CYCLE + 128*15);
 		}
-		target_cycle = sms->z80->current_cycle;
+		target_cycle = sms->z80->Z80_CYCLE;
 		vdp_run_context(sms->vdp, target_cycle);
 		psg_run(sms->psg, target_cycle);
 		
 		if (system->save_state) {
 			while (!sms->z80->pc) {
 				//advance Z80 to an instruction boundary
-				z80_run(sms->z80, sms->z80->current_cycle + 1);
+				z80_run(sms->z80, sms->z80->Z80_CYCLE + 1);
 			}
 			save_state(sms, system->save_state - 1);
 			system->save_state = 0;
@@ -377,27 +419,32 @@ static void run_sms(system_header *system)
 		
 		target_cycle += 3420*16;
 		if (target_cycle > 0x10000000) {
-			uint32_t adjust = sms->z80->current_cycle - 3420*262*2;
-			io_adjust_cycles(sms->io.ports, sms->z80->current_cycle, adjust);
-			io_adjust_cycles(sms->io.ports+1, sms->z80->current_cycle, adjust);
+			uint32_t adjust = sms->z80->Z80_CYCLE - 3420*262*2;
+			io_adjust_cycles(sms->io.ports, sms->z80->Z80_CYCLE, adjust);
+			io_adjust_cycles(sms->io.ports+1, sms->z80->Z80_CYCLE, adjust);
 			z80_adjust_cycles(sms->z80, adjust);
 			vdp_adjust_cycles(sms->vdp, adjust);
 			sms->psg->cycles -= adjust;
 			target_cycle -= adjust;
 		}
 	}
-	bindings_release_capture();
-	vdp_release_framebuffer(sms->vdp);
-	render_pause_source(sms->psg->audio);
+	if (sms->header.force_release || render_should_release_on_exit()) {
+		bindings_release_capture();
+		vdp_release_framebuffer(sms->vdp);
+		render_pause_source(sms->psg->audio);
+	}
 	sms->should_return = 0;
 }
 
 static void resume_sms(system_header *system)
 {
 	sms_context *sms = (sms_context *)system;
-	bindings_reacquire_capture();
-	vdp_reacquire_framebuffer(sms->vdp);
-	render_resume_source(sms->psg->audio);
+	if (sms->header.force_release || render_should_release_on_exit()) {
+		sms->header.force_release = 0;
+		bindings_reacquire_capture();
+		vdp_reacquire_framebuffer(sms->vdp);
+		render_resume_source(sms->psg->audio);
+	}
 	run_sms(system);
 }
 
@@ -423,15 +470,17 @@ static void start_sms(system_header *system, char *statefile)
 static void soft_reset(system_header *system)
 {
 	sms_context *sms = (sms_context *)system;
-	z80_assert_reset(sms->z80, sms->z80->current_cycle);
-	sms->z80->target_cycle = sms->z80->sync_cycle = sms->z80->current_cycle;
+	z80_assert_reset(sms->z80, sms->z80->Z80_CYCLE);
+#ifndef NEW_CORE
+	sms->z80->target_cycle = sms->z80->sync_cycle = sms->z80->Z80_CYCLE;
+#endif
 }
 
 static void free_sms(system_header *system)
 {
 	sms_context *sms = (sms_context *)system;
 	vdp_free(sms->vdp);
-	z80_options_free(sms->z80->options);
+	z80_options_free(sms->z80->Z80_OPTS);
 	free(sms->z80);
 	psg_free(sms->psg);
 	free(sms);
@@ -446,6 +495,9 @@ static void request_exit(system_header *system)
 {
 	sms_context *sms = (sms_context *)system;
 	sms->should_return = 1;
+#ifndef NEW_CORE
+	sms->z80->target_cycle = sms->z80->sync_cycle = sms->z80->Z80_CYCLE;
+#endif
 }
 
 static void inc_debug_mode(system_header *system)
@@ -518,6 +570,13 @@ static void keyboard_up(system_header *system, uint8_t scancode)
 	io_keyboard_up(&sms->io, scancode);
 }
 
+static void set_gain_config(sms_context *sms)
+{
+	char *config_gain;
+	config_gain = tern_find_path(config, "audio\0psg_gain\0", TVAL_PTR).ptrval;
+	render_audio_source_gaindb(sms->psg->audio, config_gain ? atof(config_gain) : 0.0f);
+}
+
 static void config_updated(system_header *system)
 {
 	sms_context *sms = (sms_context *)system;
@@ -550,7 +609,7 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_map, 4, 15, 0xFF);
 	sms->z80 = init_z80_context(zopts);
 	sms->z80->system = sms;
-	sms->z80->options->gen.debug_cmd_handler = debug_commands;
+	sms->z80->Z80_OPTS->gen.debug_cmd_handler = debug_commands;
 	
 	sms->rom = media->buffer;
 	sms->rom_size = rom_size;
@@ -569,7 +628,9 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->psg = malloc(sizeof(psg_context));
 	psg_init(sms->psg, sms->master_clock, 15*16);
 	
-	sms->vdp = init_vdp_context(0);
+	set_gain_config(sms);
+	
+	sms->vdp = init_vdp_context(0, 0);
 	sms->vdp->system = &sms->header;
 	
 	sms->header.info.save_type = SAVE_NONE;
@@ -598,6 +659,8 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.keyboard_down = keyboard_down;
 	sms->header.keyboard_up = keyboard_up;
 	sms->header.config_updated = config_updated;
+	sms->header.serialize = serialize;
+	sms->header.deserialize = deserialize;
 	sms->header.type = SYSTEM_SMS;
 	
 	return sms;

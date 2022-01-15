@@ -13,6 +13,7 @@
 #include "genesis.h"
 #include "bindings.h"
 #include "util.h"
+#include "paths.h"
 #include "ppm.h"
 #include "png.h"
 #include "config.h"
@@ -45,146 +46,56 @@ static uint8_t scanlines = 0;
 
 static uint32_t last_frame = 0;
 
-static uint32_t buffer_samples, sample_rate;
-static uint32_t missing_count;
-
-static SDL_mutex * audio_mutex;
-static SDL_cond * audio_ready;
+static SDL_mutex *audio_mutex, *frame_mutex, *free_buffer_mutex;
+static SDL_cond *audio_ready, *frame_ready;
 static uint8_t quitting = 0;
 
-struct audio_source {
-	SDL_cond *cond;
-	int16_t  *front;
-	int16_t  *back;
-	double   dt;
-	uint64_t buffer_fraction;
-	uint64_t buffer_inc;
-	uint32_t buffer_pos;
-	uint32_t read_start;
-	uint32_t read_end;
-	uint32_t lowpass_alpha;
-	uint32_t mask;
-	int16_t  last_left;
-	int16_t  last_right;
-	uint8_t  num_channels;
-	uint8_t  front_populated;
+enum {
+	SYNC_AUDIO,
+	SYNC_AUDIO_THREAD,
+	SYNC_VIDEO,
+	SYNC_EXTERNAL
 };
 
-static audio_source *audio_sources[8];
-static audio_source *inactive_audio_sources[8];
-static uint8_t num_audio_sources;
-static uint8_t num_inactive_audio_sources;
-static uint8_t sync_to_audio;
+static uint8_t sync_src;
 static uint32_t min_buffered;
 
-typedef int32_t (*mix_func)(audio_source *audio, void *vstream, int len);
+uint32_t **frame_buffers;
+uint32_t num_buffers;
+uint32_t buffer_storage;
 
-static int32_t mix_s16(audio_source *audio, void *vstream, int len)
+uint32_t render_min_buffered(void)
 {
-	int samples = len/(sizeof(int16_t)*2);
-	int16_t *stream = vstream;
-	int16_t *end = stream + 2*samples;
-	int16_t *src = audio->front;
-	uint32_t i = audio->read_start;
-	uint32_t i_end = audio->read_end;
-	int16_t *cur = stream;
-	if (audio->num_channels == 1) {
-		while (cur < end && i != i_end)
-		{
-			*(cur++) += src[i];
-			*(cur++) += src[i++];
-			i &= audio->mask;
-		}
-	} else {
-		while (cur < end && i != i_end)
-		{
-			*(cur++) += src[i++];
-			*(cur++) += src[i++];
-			i &= audio->mask;
-		}
-	}
-	
-	if (cur != end) {
-		printf("Underflow of %d samples, read_start: %d, read_end: %d, mask: %X\n", (int)(end-cur)/2, audio->read_start, audio->read_end, audio->mask);
-	}
-	if (!sync_to_audio) {
-		audio->read_start = i;
-	}
-	if (cur != end) {
-		//printf("Underflow of %d samples, read_start: %d, read_end: %d, mask: %X\n", (int)(end-cur)/2, audio->read_start, audio->read_end, audio->mask);
-		return (cur-end)/2;
-	} else {
-		return ((i_end - i) & audio->mask) / audio->num_channels;
-	}
+	return min_buffered;
 }
 
-static int32_t mix_f32(audio_source *audio, void *vstream, int len)
+uint8_t render_is_audio_sync(void)
 {
-	int samples = len/(sizeof(float)*2);
-	float *stream = vstream;
-	float *end = stream + 2*samples;
-	int16_t *src = audio->front;
-	uint32_t i = audio->read_start;
-	uint32_t i_end = audio->read_end;
-	float *cur = stream;
-	if (audio->num_channels == 1) {
-		while (cur < end && i != i_end)
-		{
-			*(cur++) += ((float)src[i]) / 0x7FFF;
-			*(cur++) += ((float)src[i++]) / 0x7FFF;
-			i &= audio->mask;
-		}
-	} else {
-		while(cur < end && i != i_end)
-		{
-			*(cur++) += ((float)src[i++]) / 0x7FFF;
-			*(cur++) += ((float)src[i++]) / 0x7FFF;
-			i &= audio->mask;
-		}
-	}
-	if (!sync_to_audio) {
-		audio->read_start = i;
-	}
-	if (cur != end) {
-		printf("Underflow of %d samples, read_start: %d, read_end: %d, mask: %X\n", (int)(end-cur)/2, audio->read_start, audio->read_end, audio->mask);
-		return (cur-end)/2;
-	} else {
-		return ((i_end - i) & audio->mask) / audio->num_channels;
-	}
+	return sync_src < SYNC_VIDEO;
 }
 
-static int32_t mix_null(audio_source *audio, void *vstream, int len)
+uint8_t render_should_release_on_exit(void)
 {
-	return 0;
+	return sync_src != SYNC_AUDIO_THREAD;
 }
 
-static mix_func mix;
+void render_buffer_consumed(audio_source *src)
+{
+	SDL_CondSignal(src->opaque);
+}
 
 static void audio_callback(void * userdata, uint8_t *byte_stream, int len)
 {
-	uint8_t num_populated;
-	memset(byte_stream, 0, len);
 	SDL_LockMutex(audio_mutex);
+		uint8_t all_ready;
 		do {
-			num_populated = 0;
-			for (uint8_t i = 0; i < num_audio_sources; i++)
-			{
-				if (audio_sources[i]->front_populated) {
-					num_populated++;
-				}
-			}
-			if (!quitting && num_populated < num_audio_sources) {
-				fflush(stdout);
+			all_ready = all_sources_ready();
+			if (!quitting && !all_ready) {
 				SDL_CondWait(audio_ready, audio_mutex);
 			}
-		} while(!quitting && num_populated < num_audio_sources);
+		} while(!quitting && !all_ready);
 		if (!quitting) {
-			for (uint8_t i = 0; i < num_audio_sources; i++)
-			{
-				mix(audio_sources[i], byte_stream, len);
-				audio_sources[i]->front_populated = 0;
-				SDL_CondSignal(audio_sources[i]->cond);
-			}
+			mix_and_convert(byte_stream, len, NULL);
 		}
 	SDL_UnlockMutex(audio_mutex);
 }
@@ -199,35 +110,33 @@ static int32_t cur_min_buffered;
 static uint32_t min_remaining_buffer;
 static void audio_callback_drc(void *userData, uint8_t *byte_stream, int len)
 {
-	memset(byte_stream, 0, len);
 	if (cur_min_buffered < 0) {
 		//underflow last frame, but main thread hasn't gotten a chance to call SDL_PauseAudio yet
 		return;
 	}
-	cur_min_buffered = 0x7FFFFFFF;
-	min_remaining_buffer = 0xFFFFFFFF;
-	for (uint8_t i = 0; i < num_audio_sources; i++)
-	{
-		
-		int32_t buffered = mix(audio_sources[i], byte_stream, len);
-		cur_min_buffered = buffered < cur_min_buffered ? buffered : cur_min_buffered;
-		uint32_t remaining = (audio_sources[i]->mask + 1)/audio_sources[i]->num_channels - buffered;
-		min_remaining_buffer = remaining < min_remaining_buffer ? remaining : min_remaining_buffer;
-	}
+	cur_min_buffered = mix_and_convert(byte_stream, len, &min_remaining_buffer);
 }
 
-static void lock_audio()
+static void audio_callback_run_on_audio(void *user_data, uint8_t *byte_stream, int len)
 {
-	if (sync_to_audio) {
+	if (current_system) {
+		current_system->resume_context(current_system);
+	}
+	mix_and_convert(byte_stream, len, NULL);
+}
+
+void render_lock_audio()
+{
+	if (sync_src == SYNC_AUDIO) {
 		SDL_LockMutex(audio_mutex);
 	} else {
 		SDL_LockAudio();
 	}
 }
 
-static void unlock_audio()
+void render_unlock_audio()
 {
-	if (sync_to_audio) {
+	if (sync_src == SYNC_AUDIO) {
 		SDL_UnlockMutex(audio_mutex);
 	} else {
 		SDL_UnlockAudio();
@@ -241,112 +150,86 @@ static void render_close_audio()
 		SDL_CondSignal(audio_ready);
 	SDL_UnlockMutex(audio_mutex);
 	SDL_CloseAudio();
-}
-
-#define BUFFER_INC_RES 0x40000000UL
-
-void render_audio_adjust_clock(audio_source *src, uint64_t master_clock, uint64_t sample_divider)
-{
-	src->buffer_inc = ((BUFFER_INC_RES * (uint64_t)sample_rate) / master_clock) * sample_divider;
-}
-
-audio_source *render_audio_source(uint64_t master_clock, uint64_t sample_divider, uint8_t channels)
-{
-	audio_source *ret = NULL;
-	uint32_t alloc_size = sync_to_audio ? channels * buffer_samples : nearest_pow2(min_buffered * 4 * channels);
-	lock_audio();
-		if (num_audio_sources < 8) {
-			ret = malloc(sizeof(audio_source));
-			ret->back = malloc(alloc_size * sizeof(int16_t));
-			ret->front = sync_to_audio ? malloc(alloc_size * sizeof(int16_t)) : ret->back;
-			ret->front_populated = 0;
-			ret->cond = SDL_CreateCond();
-			ret->num_channels = channels;
-			audio_sources[num_audio_sources++] = ret;
-		}
-	unlock_audio();
-	if (!ret) {
-		fatal_error("Too many audio sources!");
-	} else {
-		render_audio_adjust_clock(ret, master_clock, sample_divider);
-		double lowpass_cutoff = get_lowpass_cutoff(config);
-		double rc = (1.0 / lowpass_cutoff) / (2.0 * M_PI);
-		ret->dt = 1.0 / ((double)master_clock / (double)(sample_divider));
-		double alpha = ret->dt / (ret->dt + rc);
-		ret->lowpass_alpha = (int32_t)(((double)0x10000) * alpha);
-		ret->buffer_pos = 0;
-		ret->buffer_fraction = 0;
-		ret->last_left = ret->last_right = 0;
-		ret->read_start = 0;
-		ret->read_end = sync_to_audio ? buffer_samples * channels : 0;
-		ret->mask = sync_to_audio ? 0xFFFFFFFF : alloc_size-1;
+	/*
+	FIXME: move this to render_audio.c
+	if (mix_buf) {
+		free(mix_buf);
+		mix_buf = NULL;
 	}
-	if (sync_to_audio && SDL_GetAudioStatus() == SDL_AUDIO_PAUSED) {
-		SDL_PauseAudio(0);
-	}
-	return ret;
+	*/
 }
 
-void render_pause_source(audio_source *src)
+void *render_new_audio_opaque(void)
 {
-	uint8_t need_pause = 0;
-	lock_audio();
-		for (uint8_t i = 0; i < num_audio_sources; i++)
-		{
-			if (audio_sources[i] == src) {
-				audio_sources[i] = audio_sources[--num_audio_sources];
-				if (sync_to_audio) {
-					SDL_CondSignal(audio_ready);
-				}
-				break;
-			}
+	return SDL_CreateCond();
+}
+
+void render_free_audio_opaque(void *opaque)
+{
+	SDL_DestroyCond(opaque);
+}
+
+void render_audio_created(audio_source *source)
+{
+	if (sync_src == SYNC_AUDIO) {
+		//SDL_PauseAudio acquires the audio device lock, which is held while the callback runs
+		//since our callback can itself be stuck waiting on the audio_ready condition variable
+		//calling SDL_PauseAudio(0) again for audio sources after the first can deadlock
+		//fortunately SDL_GetAudioStatus does not acquire the lock so is safe to call here
+		if (SDL_GetAudioStatus() == SDL_AUDIO_PAUSED) {
+			SDL_PauseAudio(0);
 		}
-		if (!num_audio_sources) {
-			need_pause = 1;
-		}
-	unlock_audio();
-	if (need_pause) {
+	}
+	if (current_system && sync_src == SYNC_AUDIO_THREAD) {
+		system_request_exit(current_system, 0);
+	}
+}
+
+void render_source_paused(audio_source *src, uint8_t remaining_sources)
+{
+	if (sync_src == SYNC_AUDIO) {
+		SDL_CondSignal(audio_ready);
+	}
+	if (!remaining_sources && render_is_audio_sync()) {
 		SDL_PauseAudio(1);
-	}
-	inactive_audio_sources[num_inactive_audio_sources++] = src;
-}
-
-void render_resume_source(audio_source *src)
-{
-	lock_audio();
-		if (num_audio_sources < 8) {
-			audio_sources[num_audio_sources++] = src;
+		if (sync_src == SYNC_AUDIO_THREAD) {
+			SDL_CondSignal(frame_ready);
 		}
-	unlock_audio();
-	for (uint8_t i = 0; i < num_inactive_audio_sources; i++)
-	{
-		if (inactive_audio_sources[i] == src) {
-			inactive_audio_sources[i] = inactive_audio_sources[--num_inactive_audio_sources];
-		}
-	}
-	if (sync_to_audio) {
-		SDL_PauseAudio(0);
 	}
 }
 
-void render_free_source(audio_source *src)
+void render_source_resumed(audio_source *src)
 {
-	render_pause_source(src);
-	
-	free(src->front);
-	if (sync_to_audio) {
-		free(src->back);
-		SDL_DestroyCond(src->cond);
+	if (sync_src == SYNC_AUDIO) {
+		//SDL_PauseAudio acquires the audio device lock, which is held while the callback runs
+		//since our callback can itself be stuck waiting on the audio_ready condition variable
+		//calling SDL_PauseAudio(0) again for audio sources after the first can deadlock
+		//fortunately SDL_GetAudioStatus does not acquire the lock so is safe to call here
+		if (SDL_GetAudioStatus() == SDL_AUDIO_PAUSED) {
+			SDL_PauseAudio(0);
+		}
 	}
-	free(src);
+	if (current_system && sync_src == SYNC_AUDIO_THREAD) {
+		system_request_exit(current_system, 0);
+	}
 }
-static uint32_t sync_samples;
-static void do_audio_ready(audio_source *src)
+
+void render_do_audio_ready(audio_source *src)
 {
-	if (sync_to_audio) {
+	if (sync_src == SYNC_AUDIO_THREAD) {
+		int16_t *tmp = src->front;
+		src->front = src->back;
+		src->back = tmp;
+		src->front_populated = 1;
+		src->buffer_pos = 0;
+		if (all_sources_ready()) {
+			//we've emulated far enough to fill the current buffer
+			system_request_exit(current_system, 0);
+		}
+	} else if (sync_src == SYNC_AUDIO) {
 		SDL_LockMutex(audio_mutex);
 			while (src->front_populated) {
-				SDL_CondWait(src->cond, audio_mutex);
+				SDL_CondWait(src->opaque, audio_mutex);
 			}
 			int16_t *tmp = src->front;
 			src->front = src->back;
@@ -367,62 +250,9 @@ static void do_audio_ready(audio_source *src)
 	}
 }
 
-static int16_t lowpass_sample(audio_source *src, int16_t last, int16_t current)
-{
-	int32_t tmp = current * src->lowpass_alpha + last * (0x10000 - src->lowpass_alpha);
-	current = tmp >> 16;
-	return current;
-}
-
-static void interp_sample(audio_source *src, int16_t last, int16_t current)
-{
-	int64_t tmp = last * ((src->buffer_fraction << 16) / src->buffer_inc);
-	tmp += current * (0x10000 - ((src->buffer_fraction << 16) / src->buffer_inc));
-	src->back[src->buffer_pos++] = tmp >> 16;
-}
-
-void render_put_mono_sample(audio_source *src, int16_t value)
-{
-	value = lowpass_sample(src, src->last_left, value);
-	src->buffer_fraction += src->buffer_inc;
-	uint32_t base = sync_to_audio ? 0 : src->read_end;
-	while (src->buffer_fraction > BUFFER_INC_RES)
-	{
-		src->buffer_fraction -= BUFFER_INC_RES;
-		interp_sample(src, src->last_left, value);
-		
-		if (((src->buffer_pos - base) & src->mask) >= sync_samples) {
-			do_audio_ready(src);
-		}
-		src->buffer_pos &= src->mask;
-	}
-	src->last_left = value;
-}
-
-void render_put_stereo_sample(audio_source *src, int16_t left, int16_t right)
-{
-	left = lowpass_sample(src, src->last_left, left);
-	right = lowpass_sample(src, src->last_right, right);
-	src->buffer_fraction += src->buffer_inc;
-	uint32_t base = sync_to_audio ? 0 : src->read_end;
-	while (src->buffer_fraction > BUFFER_INC_RES)
-	{
-		src->buffer_fraction -= BUFFER_INC_RES;
-		
-		interp_sample(src, src->last_left, left);
-		interp_sample(src, src->last_right, right);
-		
-		if (((src->buffer_pos - base) & src->mask)/2 >= sync_samples) {
-			do_audio_ready(src);
-		}
-		src->buffer_pos &= src->mask;
-	}
-	src->last_left = left;
-	src->last_right = right;
-}
-
 static SDL_Joystick * joysticks[MAX_JOYSTICKS];
 static int joystick_sdl_index[MAX_JOYSTICKS];
+static uint8_t joystick_index_locked[MAX_JOYSTICKS];
 
 int render_width()
 {
@@ -448,8 +278,21 @@ uint32_t render_map_color(uint8_t r, uint8_t g, uint8_t b)
 #endif
 }
 
+static uint8_t external_sync;
+void render_set_external_sync(uint8_t ext_sync_on)
+{
+	if (ext_sync_on != external_sync) {
+		external_sync = ext_sync_on;
+		if (windowed_width) {
+			//only do this if render_init has already been called
+			render_config_updated();
+		}
+	}
+}
+
 #ifndef DISABLE_OPENGL
-static GLuint textures[3], buffers[2], vshader, fshader, program, un_textures[2], un_width, un_height, at_pos;
+static GLuint textures[3], buffers[2], vshader, fshader, program, un_textures[2], un_width, un_height, un_texsize, at_pos;
+static int tex_width, tex_height;
 
 static GLfloat vertex_data_default[] = {
 	-1.0f, -1.0f,
@@ -474,28 +317,39 @@ static const GLchar shader_prefix[] =
 
 static GLuint load_shader(char * fname, GLenum shader_type)
 {
+	char * shader_path;
+	FILE *f;
+	GLchar *text;
+	long fsize;
+#ifndef __ANDROID__
 	char const * parts[] = {get_home_dir(), "/.config/blastem/shaders/", fname};
-	char * shader_path = alloc_concat_m(3, parts);
-	FILE * f = fopen(shader_path, "rb");
+	shader_path = alloc_concat_m(3, parts);
+	f = fopen(shader_path, "rb");
 	free(shader_path);
-	if (!f) {
-		parts[0] = get_exe_dir();
-		parts[1] = "/shaders/";
-		shader_path = alloc_concat_m(3, parts);
-		f = fopen(shader_path, "rb");
+	if (f) {
+		fsize = file_size(f);
+		text = malloc(fsize);
+		if (fread(text, 1, fsize, f) != fsize) {
+			warning("Error reading from shader file %s\n", fname);
+			free(text);
+			return 0;
+		}
+	} else {
+#endif
+		shader_path = path_append("shaders", fname);
+		uint32_t fsize32;
+		text = read_bundled_file(shader_path, &fsize32);
 		free(shader_path);
-		if (!f) {
+		if (!text) {
 			warning("Failed to open shader file %s for reading\n", fname);
 			return 0;
 		}
+		fsize = fsize32;
+#ifndef __ANDROID__
 	}
-	long fsize = file_size(f);
-	GLchar * text = malloc(fsize);
-	if (fread(text, 1, fsize, f) != fsize) {
-		warning("Error reading from shader file %s\n", fname);
-		free(text);
-		return 0;
-	}
+#endif
+	text[fsize] = 0;
+	
 	if (strncmp(text, "#version", strlen("#version"))) {
 		GLchar *tmp = text;
 		text = alloc_concat(shader_prefix, tmp);
@@ -503,6 +357,10 @@ static GLuint load_shader(char * fname, GLenum shader_type)
 		fsize += strlen(shader_prefix);
 	}
 	GLuint ret = glCreateShader(shader_type);
+	if (!ret) {
+		warning("glCreateShader failed with error %d\n", glGetError());
+		return 0;
+	}
 	glShaderSource(ret, 1, (const GLchar **)&text, (const GLint *)&fsize);
 	free(text);
 	glCompileShader(ret);
@@ -522,7 +380,9 @@ static GLuint load_shader(char * fname, GLenum shader_type)
 #endif
 
 static uint32_t texture_buf[512 * 513];
-#ifndef DISABLE_OPENGL
+#ifdef DISABLE_OPENGL
+#define RENDER_FORMAT SDL_PIXELFORMAT_ARGB8888
+#else
 #ifdef USE_GLES
 #define INTERNAL_FORMAT GL_RGBA
 #define SRC_FORMAT GL_RGBA
@@ -538,6 +398,15 @@ static void gl_setup()
 	char *scaling = tern_find_path_default(config, "video\0scaling\0", def, TVAL_PTR).ptrval;
 	GLint filter = strcmp(scaling, "linear") ? GL_NEAREST : GL_LINEAR;
 	glGenTextures(3, textures);
+	def.ptrval = "off";
+	char *npot_textures = tern_find_path_default(config, "video\0npot_textures\0", def, TVAL_PTR).ptrval;
+	if (!strcmp(npot_textures, "on")) {
+		tex_width = LINEBUF_SIZE;
+		tex_height = 294; //PAL height with full borders
+	} else {
+		tex_width = tex_height = 512;
+	}
+	debug_message("Using %dx%d textures\n", tex_width, tex_height);
 	for (int i = 0; i < 3; i++)
 	{
 		glBindTexture(GL_TEXTURE_2D, textures[i]);
@@ -547,7 +416,7 @@ static void gl_setup()
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		if (i < 2) {
 			//TODO: Fixme for PAL + invalid display mode
-			glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, 512, 512, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, texture_buf);
+			glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, tex_width, tex_height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, texture_buf);
 		} else {
 			uint32_t blank = 255 << 24;
 			glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, 1, 1, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, &blank);
@@ -576,6 +445,7 @@ static void gl_setup()
 	un_textures[1] = glGetUniformLocation(program, "textures[1]");
 	un_width = glGetUniformLocation(program, "width");
 	un_height = glGetUniformLocation(program, "height");
+	un_texsize = glGetUniformLocation(program, "texsize");
 	at_pos = glGetAttribLocation(program, "pos");
 }
 
@@ -595,12 +465,11 @@ static void render_alloc_surfaces()
 	if (texture_init) {
 		return;
 	}
-	sdl_textures= malloc(sizeof(SDL_Texture *) * 2);
-	num_textures = 2;
+	sdl_textures= calloc(sizeof(SDL_Texture *), 3);
+	num_textures = 3;
 	texture_init = 1;
 #ifndef DISABLE_OPENGL
 	if (render_gl) {
-		sdl_textures[0] = sdl_textures[1] = NULL;
 		gl_setup();
 	} else {
 #endif
@@ -667,7 +536,9 @@ static float config_aspect()
 static void update_aspect()
 {
 	//reset default values
+#ifndef DISABLE_OPENGL
 	memcpy(vertex_data, vertex_data_default, sizeof(vertex_data));
+#endif
 	main_clip.w = main_width;
 	main_clip.h = main_height;
 	main_clip.x = main_clip.y = 0;
@@ -699,11 +570,16 @@ static void update_aspect()
 	}
 }
 
-static ui_render_fun on_context_destroyed, on_context_created;
+static ui_render_fun on_context_destroyed, on_context_created, on_ui_fb_resized;
 void render_set_gl_context_handlers(ui_render_fun destroy, ui_render_fun create)
 {
 	on_context_destroyed = destroy;
 	on_context_created = create;
+}
+
+void render_set_ui_fb_resize_handler(ui_render_fun resize)
+{
+	on_ui_fb_resized = resize;
 }
 
 static uint8_t scancode_map[SDL_NUM_SCANCODES] = {
@@ -842,6 +718,16 @@ static int lowest_unused_joystick_index()
 	return -1;
 }
 
+static int lowest_unlocked_joystick_index(void)
+{
+	for (int i = 0; i < MAX_JOYSTICKS; i++) {
+		if (!joystick_index_locked[i]) {
+			return i;
+		}
+	}
+	return -1;
+}
+
 SDL_Joystick *render_get_joystick(int index)
 {
 	if (index >= MAX_JOYSTICKS) {
@@ -863,10 +749,27 @@ char* render_joystick_type_id(int index)
 
 SDL_GameController *render_get_controller(int index)
 {
-	if (index >= MAX_JOYSTICKS) {
+	if (index >= MAX_JOYSTICKS || !joysticks[index]) {
 		return NULL;
 	}
 	return SDL_GameControllerOpen(joystick_sdl_index[index]);
+}
+
+static uint8_t gc_events_enabled;
+static SDL_GameController *controllers[MAX_JOYSTICKS];
+void render_enable_gamepad_events(uint8_t enabled)
+{
+	if (enabled != gc_events_enabled) {
+		gc_events_enabled = enabled;
+		for (int i = 0; i < MAX_JOYSTICKS; i++) {
+			if (enabled) {
+				controllers[i] = render_get_controller(i);
+			} else if (controllers[i]) {
+				SDL_GameControllerClose(controllers[i]);
+				controllers[i] = NULL;
+			}
+		}
+	}
 }
 
 static uint32_t overscan_top[NUM_VID_STD] = {2, 21};
@@ -874,6 +777,31 @@ static uint32_t overscan_bot[NUM_VID_STD] = {1, 17};
 static uint32_t overscan_left[NUM_VID_STD] = {13, 13};
 static uint32_t overscan_right[NUM_VID_STD] = {14, 14};
 static vid_std video_standard = VID_NTSC;
+static uint8_t need_ui_fb_resize;
+
+int lock_joystick_index(int joystick, int desired_index)
+{
+	if (desired_index < 0) {
+		desired_index = lowest_unlocked_joystick_index();
+		if (desired_index < 0 || desired_index >= joystick) {
+			return joystick;
+		}
+	}
+	SDL_Joystick *tmp_joy = joysticks[joystick];
+	int tmp_index = joystick_sdl_index[joystick];
+	joysticks[joystick] = joysticks[desired_index];
+	joystick_sdl_index[joystick] = joystick_sdl_index[desired_index];
+	joystick_index_locked[joystick] = joystick_sdl_index[desired_index];
+	joysticks[desired_index] = tmp_joy;
+	joystick_sdl_index[desired_index] = tmp_index;
+	joystick_index_locked[desired_index] = 1;
+	//update bindings as the controllers being swapped may have different mappings
+	handle_joy_added(desired_index);
+	if (joysticks[joystick]) {
+		handle_joy_added(joystick);
+	}
+	return desired_index;
+}
 
 static int32_t handle_event(SDL_Event *event)
 {
@@ -891,13 +819,13 @@ static int32_t handle_event(SDL_Event *event)
 		handle_joydown(find_joystick_index(event->jbutton.which), event->jbutton.button);
 		break;
 	case SDL_JOYBUTTONUP:
-		handle_joyup(find_joystick_index(event->jbutton.which), event->jbutton.button);
+		handle_joyup(lock_joystick_index(find_joystick_index(event->jbutton.which), -1), event->jbutton.button);
 		break;
 	case SDL_JOYHATMOTION:
-		handle_joy_dpad(find_joystick_index(event->jhat.which), event->jhat.hat, event->jhat.value);
+		handle_joy_dpad(lock_joystick_index(find_joystick_index(event->jhat.which), -1), event->jhat.hat, event->jhat.value);
 		break;
 	case SDL_JOYAXISMOTION:
-		handle_joy_axis(find_joystick_index(event->jaxis.which), event->jaxis.axis, event->jaxis.value);
+		handle_joy_axis(lock_joystick_index(find_joystick_index(event->jaxis.which), -1), event->jaxis.axis, event->jaxis.value);
 		break;
 	case SDL_JOYDEVICEADDED:
 		if (event->jdevice.which < MAX_JOYSTICKS) {
@@ -905,9 +833,13 @@ static int32_t handle_event(SDL_Event *event)
 			if (index >= 0) {
 				SDL_Joystick * joy = joysticks[index] = SDL_JoystickOpen(event->jdevice.which);
 				joystick_sdl_index[index] = event->jdevice.which;
+				joystick_index_locked[index] = 0;
+				if (gc_events_enabled) {
+					controllers[index] = SDL_GameControllerOpen(event->jdevice.which);
+				}
 				if (joy) {
-					printf("Joystick %d added: %s\n", index, SDL_JoystickName(joy));
-					printf("\tNum Axes: %d\n\tNum Buttons: %d\n\tNum Hats: %d\n", SDL_JoystickNumAxes(joy), SDL_JoystickNumButtons(joy), SDL_JoystickNumHats(joy));
+					debug_message("Joystick %d added: %s\n", index, SDL_JoystickName(joy));
+					debug_message("\tNum Axes: %d\n\tNum Buttons: %d\n\tNum Hats: %d\n", SDL_JoystickNumAxes(joy), SDL_JoystickNumButtons(joy), SDL_JoystickNumHats(joy));
 					handle_joy_added(index);
 				}
 			}
@@ -918,9 +850,13 @@ static int32_t handle_event(SDL_Event *event)
 		if (index >= 0) {
 			SDL_JoystickClose(joysticks[index]);
 			joysticks[index] = NULL;
-			printf("Joystick %d removed\n", index);
+			if (controllers[index]) {
+				SDL_GameControllerClose(controllers[index]);
+				controllers[index] = NULL;
+			}
+			debug_message("Joystick %d removed\n", index);
 		} else {
-			printf("Failed to find removed joystick with instance ID: %d\n", index);
+			debug_message("Failed to find removed joystick with instance ID: %d\n", index);
 		}
 		break;
 	}
@@ -937,8 +873,12 @@ static int32_t handle_event(SDL_Event *event)
 		switch (event->window.event)
 		{
 		case SDL_WINDOWEVENT_SIZE_CHANGED:
+			if (!main_window) {
+				break;
+			}
 			main_width = event->window.data1;
 			main_height = event->window.data2;
+			need_ui_fb_resize = 1;
 			update_aspect();
 #ifndef DISABLE_OPENGL
 			if (render_gl) {
@@ -956,7 +896,7 @@ static int32_t handle_event(SDL_Event *event)
 #endif
 			break;
 		case SDL_WINDOWEVENT_CLOSE:
-			if (SDL_GetWindowID(main_window) == event->window.windowID) {
+			if (main_window && SDL_GetWindowID(main_window) == event->window.windowID) {
 				exit(0);
 			} else {
 				for (int i = 0; i < num_textures - FRAMEBUFFER_USER_START; i++)
@@ -1001,6 +941,7 @@ static int source_frame;
 static int source_frame_count;
 static int frame_repeat[60];
 
+static uint32_t sample_rate;
 static void init_audio()
 {
 	SDL_AudioSpec desired, actual;
@@ -1010,35 +951,46 @@ static void init_audio()
    		rate = 48000;
    	}
     desired.freq = rate;
-	desired.format = AUDIO_S16SYS;
+	char *config_format = tern_find_path_default(config, "audio\0format\0", (tern_val){.ptrval="f32"}, TVAL_PTR).ptrval;
+	desired.format = !strcmp(config_format, "s16") ? AUDIO_S16SYS : AUDIO_F32SYS;
 	desired.channels = 2;
     char * samples_str = tern_find_path(config, "audio\0buffer\0", TVAL_PTR).ptrval;
    	int samples = samples_str ? atoi(samples_str) : 0;
    	if (!samples) {
    		samples = 512;
    	}
-    printf("config says: %d\n", samples);
+    debug_message("config says: %d\n", samples);
     desired.samples = samples*2;
-	desired.callback = sync_to_audio ? audio_callback : audio_callback_drc;
+	switch (sync_src)
+	{
+	case SYNC_AUDIO:
+		desired.callback = audio_callback;
+		break;
+	case SYNC_AUDIO_THREAD:
+		desired.callback = audio_callback_run_on_audio;
+		break;
+	default:
+		desired.callback = audio_callback_drc;
+	}
 	desired.userdata = NULL;
 
 	if (SDL_OpenAudio(&desired, &actual) < 0) {
 		fatal_error("Unable to open SDL audio: %s\n", SDL_GetError());
 	}
-	buffer_samples = actual.samples;
 	sample_rate = actual.freq;
-	printf("Initialized audio at frequency %d with a %d sample buffer, ", actual.freq, actual.samples);
+	debug_message("Initialized audio at frequency %d with a %d sample buffer, ", actual.freq, actual.samples);
+	render_audio_format format = RENDER_AUDIO_UNKNOWN;
 	if (actual.format == AUDIO_S16SYS) {
-		puts("signed 16-bit int format");
-		mix = mix_s16;
+		debug_message("signed 16-bit int format\n");
+		format = RENDER_AUDIO_S16;
 	} else if (actual.format == AUDIO_F32SYS) {
-		puts("32-bit float format");
-		mix = mix_f32;
+		debug_message("32-bit float format\n");
+		format = RENDER_AUDIO_FLOAT;
 	} else {
-		printf("unsupported format %X\n", actual.format);
+		debug_message("unsupported format %X\n", actual.format);
 		warning("Unsupported audio sample format: %X\n", actual.format);
-		mix = mix_null;
 	}
+	render_audio_initialized(format, actual.freq, actual.channels, actual.samples, SDL_AUDIO_BITSIZE(actual.format) / 8);
 }
 
 void window_setup(void)
@@ -1049,11 +1001,31 @@ void window_setup(void)
 	}
 	
 	tern_val def = {.ptrval = "audio"};
-	char *sync_src = tern_find_path_default(config, "system\0sync_source\0", def, TVAL_PTR).ptrval;
-	sync_to_audio = !strcmp(sync_src, "audio");
+	if (external_sync) {
+		sync_src = SYNC_EXTERNAL;
+	} else {
+		char *sync_src_str = tern_find_path_default(config, "system\0sync_source\0", def, TVAL_PTR).ptrval;
+		if (!strcmp(sync_src_str, "audio")) {
+			sync_src = SYNC_AUDIO;
+		} else if (!strcmp(sync_src_str, "audio_thread")) {
+			sync_src = SYNC_AUDIO_THREAD;
+		} else {
+			sync_src = SYNC_VIDEO;
+		}
+	}
+	
+	if (!num_buffers && (sync_src == SYNC_AUDIO_THREAD || sync_src == SYNC_EXTERNAL)) {
+		frame_mutex = SDL_CreateMutex();
+		free_buffer_mutex = SDL_CreateMutex();
+		frame_ready = SDL_CreateCond();
+		buffer_storage = 4;
+		frame_buffers = calloc(buffer_storage, sizeof(uint32_t*));
+		frame_buffers[0] = texture_buf;
+		num_buffers = 1;
+	}
 	
 	const char *vsync;
-	if (sync_to_audio) {
+	if (sync_src == SYNC_AUDIO) {
 		def.ptrval = "off";
 		vsync = tern_find_path_default(config, "video\0vsync\0", def, TVAL_PTR).ptrval;
 	} else {
@@ -1137,7 +1109,11 @@ void window_setup(void)
 			}
 			if (vsync) {
 				if (SDL_GL_SetSwapInterval(!strcmp("on", vsync)) < 0) {
+#ifdef __ANDROID__
+					debug_message("Failed to set vsync to %s: %s\n", vsync, SDL_GetError());
+#else
 					warning("Failed to set vsync to %s: %s\n", vsync, SDL_GetError());
+#endif
 				}
 			}
 		} else {
@@ -1157,7 +1133,7 @@ void window_setup(void)
 		}
 		SDL_RendererInfo rinfo;
 		SDL_GetRendererInfo(main_renderer, &rinfo);
-		printf("SDL2 Render Driver: %s\n", rinfo.name);
+		debug_message("SDL2 Render Driver: %s\n", rinfo.name);
 		main_clip.x = main_clip.y = 0;
 		main_clip.w = main_width;
 		main_clip.h = main_height;
@@ -1166,7 +1142,7 @@ void window_setup(void)
 #endif
 
 	SDL_GetWindowSize(main_window, &main_width, &main_height);
-	printf("Window created with size: %d x %d\n", main_width, main_height);
+	debug_message("Window created with size: %d x %d\n", main_width, main_height);
 	update_aspect();
 	render_alloc_surfaces();
 	def.ptrval = "off";
@@ -1183,7 +1159,7 @@ void render_init(int width, int height, char * title, uint8_t fullscreen)
 		float aspect = config_aspect() > 0.0f ? config_aspect() : 4.0f/3.0f;
 		height = ((float)width / aspect) + 0.5f;
 	}
-	printf("width: %d, height: %d\n", width, height);
+	debug_message("width: %d, height: %d\n", width, height);
 	windowed_width = width;
 	windowed_height = height;
 	
@@ -1216,7 +1192,7 @@ void render_init(int width, int height, char * title, uint8_t fullscreen)
 	if (db_data) {
 		int added = SDL_GameControllerAddMappingsFromRW(SDL_RWFromMem(db_data, db_size), 1);
 		free(db_data);
-		printf("Added %d game controller mappings from gamecontrollerdb.txt\n", added);
+		debug_message("Added %d game controller mappings from gamecontrollerdb.txt\n", added);
 	}
 	
 	controller_add_mappings();
@@ -1227,33 +1203,23 @@ void render_init(int width, int height, char * title, uint8_t fullscreen)
 
 	atexit(render_quit);
 }
-#include<unistd.h>
-static int in_toggle;
-static void update_source(audio_source *src, double rc, uint8_t sync_changed)
+
+void render_reset_mappings(void)
 {
-	double alpha = src->dt / (src->dt + rc);
-	int32_t lowpass_alpha = (int32_t)(((double)0x10000) * alpha);
-	src->lowpass_alpha = lowpass_alpha;
-	if (sync_changed) {
-		uint32_t alloc_size = sync_to_audio ? src->num_channels * buffer_samples : nearest_pow2(min_buffered * 4 * src->num_channels);
-		src->back = realloc(src->back, alloc_size * sizeof(int16_t));
-		if (sync_to_audio) {
-			src->front = malloc(alloc_size * sizeof(int16_t));
-		} else {
-			free(src->front);
-			src->front = src->back;
-		}
-		src->mask = sync_to_audio ? 0xFFFFFFFF : alloc_size-1;
-		src->read_start = 0;
-		src->read_end = sync_to_audio ? buffer_samples * src->num_channels : 0;
-		src->buffer_pos = 0;
+	SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);
+	SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+	uint32_t db_size;
+	char *db_data = read_bundled_file("gamecontrollerdb.txt", &db_size);
+	if (db_data) {
+		int added = SDL_GameControllerAddMappingsFromRW(SDL_RWFromMem(db_data, db_size), 1);
+		free(db_data);
+		debug_message("Added %d game controller mappings from gamecontrollerdb.txt\n", added);
 	}
 }
+static int in_toggle;
 
 void render_config_updated(void)
 {
-	uint8_t old_sync_to_audio = sync_to_audio;
-	
 	free_surfaces();
 #ifndef DISABLE_OPENGL
 	if (render_gl) {
@@ -1270,6 +1236,7 @@ void render_config_updated(void)
 #endif
 	in_toggle = 1;
 	SDL_DestroyWindow(main_window);
+	main_window = NULL;
 	drain_events();
 	
 	char *config_width = tern_find_path(config, "video\0width\0", TVAL_PTR).ptrval;
@@ -1295,6 +1262,9 @@ void render_config_updated(void)
 		main_width = windowed_width;
 		main_height = windowed_height;
 	}
+	if (on_ui_fb_resized) {
+		on_ui_fb_resized();
+	}
 	
 	window_setup();
 	update_aspect();
@@ -1311,18 +1281,6 @@ void render_config_updated(void)
 	init_audio();
 	render_set_video_standard(video_standard);
 	
-	double lowpass_cutoff = get_lowpass_cutoff(config);
-	double rc = (1.0 / lowpass_cutoff) / (2.0 * M_PI);
-	lock_audio();
-		for (uint8_t i = 0; i < num_audio_sources; i++)
-		{
-			update_source(audio_sources[i], rc, old_sync_to_audio != sync_to_audio);
-		}
-	unlock_audio();
-	for (uint8_t i = 0; i < num_inactive_audio_sources; i++)
-	{
-		update_source(inactive_audio_sources[i], rc, old_sync_to_audio != sync_to_audio);
-	}
 	drain_events();
 	in_toggle = 0;
 	if (!was_paused) {
@@ -1335,9 +1293,18 @@ SDL_Window *render_get_window(void)
 	return main_window;
 }
 
+uint32_t render_audio_syncs_per_sec(void)
+{
+	//sync samples with audio thread approximately every 8 lines when doing sync to video
+	return render_is_audio_sync() ? 0 : source_hz * (video_standard == VID_PAL ? 313 : 262) / 8;
+}
+
 void render_set_video_standard(vid_std std)
 {
 	video_standard = std;
+	if (render_is_audio_sync()) {
+		return;
+	}
 	source_hz = std == VID_PAL ? 50 : 60;
 	uint32_t max_repeat = 0;
 	if (abs(source_hz - display_hz) < 2) {
@@ -1364,12 +1331,10 @@ void render_set_video_standard(vid_std std)
 	}
 	source_frame = 0;
 	source_frame_count = frame_repeat[0];
-	//sync samples with audio thread approximately every 8 lines
-	sync_samples = sync_to_audio ? buffer_samples : 8 * sample_rate / (source_hz * (VID_PAL ? 313 : 262));
 	max_repeat++;
 	min_buffered = (((float)max_repeat * (float)sample_rate/(float)source_hz)/* / (float)buffer_samples*/);// + 0.9999;
 	//min_buffered *= buffer_samples;
-	printf("Min samples buffered before audio start: %d\n", min_buffered);
+	debug_message("Min samples buffered before audio start: %d\n", min_buffered);
 	max_adjust = BASE_MAX_ADJUST / source_hz;
 }
 
@@ -1448,24 +1413,40 @@ uint32_t *locked_pixels;
 uint32_t locked_pitch;
 uint32_t *render_get_framebuffer(uint8_t which, int *pitch)
 {
+	if (sync_src == SYNC_AUDIO_THREAD || sync_src == SYNC_EXTERNAL) {
+		*pitch = LINEBUF_SIZE * sizeof(uint32_t);
+		uint32_t *buffer;
+		SDL_LockMutex(free_buffer_mutex);
+			if (num_buffers) {
+				buffer = frame_buffers[--num_buffers];
+			} else {
+				buffer = calloc(tex_width*(tex_height + 1), sizeof(uint32_t));
+			}
+		SDL_UnlockMutex(free_buffer_mutex);
+		locked_pixels = buffer;
+		return buffer;
+	}
 #ifndef DISABLE_OPENGL
 	if (render_gl && which <= FRAMEBUFFER_EVEN) {
 		*pitch = LINEBUF_SIZE * sizeof(uint32_t);
 		return texture_buf;
 	} else {
 #endif
+		if (which == FRAMEBUFFER_UI && !sdl_textures[which]) {
+			sdl_textures[which] = SDL_CreateTexture(main_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, main_width, main_height);
+		}
 		if (which >= num_textures) {
 			warning("Request for invalid framebuffer number %d\n", which);
 			return NULL;
 		}
-		void *pixels;
-		if (SDL_LockTexture(sdl_textures[which], NULL, &pixels, pitch) < 0) {
+		uint8_t *pixels;
+		if (SDL_LockTexture(sdl_textures[which], NULL, (void **)&pixels, pitch) < 0) {
 			warning("Failed to lock texture: %s\n", SDL_GetError());
 			return NULL;
 		}
 		static uint8_t last;
 		if (which <= FRAMEBUFFER_EVEN) {
-			locked_pixels = pixels;
+			locked_pixels = (uint32_t *)pixels;
 			if (which == FRAMEBUFFER_EVEN) {
 				pixels += *pitch;
 			}
@@ -1475,10 +1456,21 @@ uint32_t *render_get_framebuffer(uint8_t which, int *pitch)
 			}
 			last = which;
 		}
-		return pixels;
+		return (uint32_t *)pixels;
 #ifndef DISABLE_OPENGL
 	}
 #endif
+}
+
+static void release_buffer(uint32_t *buffer)
+{
+	SDL_LockMutex(free_buffer_mutex);
+		if (num_buffers == buffer_storage) {
+			buffer_storage *= 2;
+			frame_buffers = realloc(frame_buffers, sizeof(uint32_t*)*buffer_storage);
+		}
+		frame_buffers[num_buffers++] = buffer;
+	SDL_UnlockMutex(free_buffer_mutex);
 }
 
 uint8_t events_processed;
@@ -1490,10 +1482,10 @@ uint8_t events_processed;
 
 static uint32_t last_width, last_height;
 static uint8_t interlaced;
-void render_framebuffer_updated(uint8_t which, int width)
+static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 {
 	static uint8_t last;
-	if (!sync_to_audio && which <= FRAMEBUFFER_EVEN && source_frame_count < 0) {
+	if (sync_src == SYNC_VIDEO && which <= FRAMEBUFFER_EVEN && source_frame_count < 0) {
 		source_frame++;
 		if (source_frame >= source_hz) {
 			source_frame = 0;
@@ -1516,7 +1508,7 @@ void render_framebuffer_updated(uint8_t which, int width)
 #ifndef DISABLE_ZLIB
 			ext = path_extension(screenshot_path);
 #endif
-			info_message("Saving screenshot to %s\n", screenshot_path);
+			debug_message("Saving screenshot to %s\n", screenshot_path);
 		} else {
 			warning("Failed to open screenshot file %s for writing\n", screenshot_path);
 		}
@@ -1531,24 +1523,25 @@ void render_framebuffer_updated(uint8_t which, int width)
 	if (render_gl && which <= FRAMEBUFFER_EVEN) {
 		SDL_GL_MakeCurrent(main_window, main_context);
 		glBindTexture(GL_TEXTURE_2D, textures[which]);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LINEBUF_SIZE, height, SRC_FORMAT, GL_UNSIGNED_BYTE, texture_buf + overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard]);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LINEBUF_SIZE, height, SRC_FORMAT, GL_UNSIGNED_BYTE, buffer + overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard]);
 		
 		if (screenshot_file) {
 			//properly supporting interlaced modes here is non-trivial, so only save the odd field for now
 #ifndef DISABLE_ZLIB
 			if (!strcasecmp(ext, "png")) {
 				free(ext);
-				save_png(screenshot_file, texture_buf, shot_width, shot_height, LINEBUF_SIZE*sizeof(uint32_t));
+				save_png(screenshot_file, buffer, shot_width, shot_height, LINEBUF_SIZE*sizeof(uint32_t));
 			} else {
 				free(ext);
 #endif
-				save_ppm(screenshot_file, texture_buf, shot_width, shot_height, LINEBUF_SIZE*sizeof(uint32_t));
+				save_ppm(screenshot_file, buffer, shot_width, shot_height, LINEBUF_SIZE*sizeof(uint32_t));
 #ifndef DISABLE_ZLIB
 			}
 #endif
 		}
 	} else {
 #endif
+		//TODO: Support SYNC_AUDIO_THREAD/SYNC_EXTERNAL for render API framebuffers
 		if (which <= FRAMEBUFFER_EVEN && last != which) {
 			uint8_t *cur_dst = (uint8_t *)locked_pixels;
 			uint8_t *cur_saved = (uint8_t *)texture_buf;
@@ -1591,6 +1584,16 @@ void render_framebuffer_updated(uint8_t which, int width)
 	last_height = height;
 	if (which <= FRAMEBUFFER_EVEN) {
 		render_update_display();
+	} else if (which == FRAMEBUFFER_UI) {
+		SDL_RenderCopy(main_renderer, sdl_textures[which], NULL, NULL);
+		if (need_ui_fb_resize) {
+			SDL_DestroyTexture(sdl_textures[which]);
+			sdl_textures[which] = NULL;
+			if (on_ui_fb_resized) {
+				on_ui_fb_resized();
+			}
+			need_ui_fb_resize = 0;
+		}
 	} else {
 		SDL_RenderCopy(extra_renderers[which - FRAMEBUFFER_USER_START], sdl_textures[which], NULL, NULL);
 		SDL_RenderPresent(extra_renderers[which - FRAMEBUFFER_USER_START]);
@@ -1606,7 +1609,7 @@ void render_framebuffer_updated(uint8_t which, int width)
 		if ((last_frame - start) > FPS_INTERVAL) {
 			if (start && (last_frame-start)) {
 	#ifdef __ANDROID__
-				info_message("%s - %.1f fps", caption, ((float)frame_counter) / (((float)(last_frame-start)) / 1000.0));
+				debug_message("%s - %.1f fps", caption, ((float)frame_counter) / (((float)(last_frame-start)) / 1000.0));
 	#else
 				if (!fps_caption) {
 					fps_caption = malloc(strlen(caption) + strlen(" - 100000000.1 fps") + 1);
@@ -1619,7 +1622,7 @@ void render_framebuffer_updated(uint8_t which, int width)
 			frame_counter = 0;
 		}
 	}
-	if (!sync_to_audio) {
+	if (!render_is_audio_sync()) {
 		int32_t local_cur_min, local_min_remaining;
 		SDL_LockAudio();
 			if (last_buffered > NO_LAST_BUFFERED) {
@@ -1661,10 +1664,8 @@ void render_framebuffer_updated(uint8_t which, int width)
 		}
 		if (adjust_ratio != 0.0f) {
 			average_change = 0;
-			for (uint8_t i = 0; i < num_audio_sources; i++)
-			{
-				audio_sources[i]->buffer_inc = ((double)audio_sources[i]->buffer_inc) + ((double)audio_sources[i]->buffer_inc) * adjust_ratio + 0.5;
-			}
+			render_audio_adjust_speed(adjust_ratio);
+			
 		}
 		while (source_frame_count > 0)
 		{
@@ -1677,6 +1678,83 @@ void render_framebuffer_updated(uint8_t which, int width)
 		}
 		source_frame_count = frame_repeat[source_frame];
 	}
+}
+
+typedef struct {
+	uint32_t *buffer;
+	int      width;
+	uint8_t  which;
+} frame;
+frame frame_queue[4];
+int frame_queue_len, frame_queue_read, frame_queue_write;
+
+void render_framebuffer_updated(uint8_t which, int width)
+{
+	if (sync_src == SYNC_AUDIO_THREAD || sync_src == SYNC_EXTERNAL) {
+		SDL_LockMutex(frame_mutex);
+			while (frame_queue_len == 4) {
+				SDL_CondSignal(frame_ready);
+				SDL_UnlockMutex(frame_mutex);
+				SDL_Delay(1);
+				SDL_LockMutex(frame_mutex);
+			}
+			for (int cur = frame_queue_read, i = 0; i < frame_queue_len; i++) {
+				if (frame_queue[cur].which == which) {
+					int last = (frame_queue_write - 1) & 3;
+					frame_queue_len--;
+					release_buffer(frame_queue[cur].buffer);
+					if (last != cur) {
+						frame_queue[cur] = frame_queue[last];
+					}
+					frame_queue_write = last;
+					break;
+				}
+				cur = (cur + 1) & 3;
+			}
+			frame_queue[frame_queue_write++] = (frame){
+				.buffer = locked_pixels,
+				.width = width,
+				.which = which
+			};
+			frame_queue_write &= 0x3;
+			frame_queue_len++;
+			SDL_CondSignal(frame_ready);
+		SDL_UnlockMutex(frame_mutex);
+		return;
+	}
+	//TODO: Maybe fixme for render API
+	process_framebuffer(texture_buf, which, width);
+}
+
+void render_video_loop(void)
+{
+	if (sync_src != SYNC_AUDIO_THREAD && sync_src != SYNC_EXTERNAL) {
+		return;
+	}
+	SDL_PauseAudio(0);
+	SDL_LockMutex(frame_mutex);
+		for(;;)
+		{
+			while (!frame_queue_len && SDL_GetAudioStatus() == SDL_AUDIO_PLAYING)
+			{
+				SDL_CondWait(frame_ready, frame_mutex);
+			}
+			while (frame_queue_len)
+			{
+				frame f = frame_queue[frame_queue_read++];
+				frame_queue_read &= 0x3;
+				frame_queue_len--;
+				SDL_UnlockMutex(frame_mutex);
+				process_framebuffer(f.buffer, f.which, f.width);
+				release_buffer(f.buffer);
+				SDL_LockMutex(frame_mutex);
+			}
+			if (SDL_GetAudioStatus() != SDL_AUDIO_PLAYING) {
+				break;
+			}
+		}
+	
+	SDL_UnlockMutex(frame_mutex);
 }
 
 static ui_render_fun render_ui;
@@ -1703,6 +1781,7 @@ void render_update_display()
 
 		glUniform1f(un_width, render_emulated_width());
 		glUniform1f(un_height, last_height);
+		glUniform2f(un_texsize, tex_width, tex_height);
 
 		glBindBuffer(GL_ARRAY_BUFFER, buffers[0]);
 		glVertexAttribPointer(at_pos, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat[2]), (void *)0);
@@ -1762,7 +1841,12 @@ uint32_t render_overscan_top()
 	return overscan_top[video_standard];
 }
 
-void render_wait_quit(vdp_context * context)
+uint32_t render_overscan_bot()
+{
+	return overscan_bot[video_standard];
+}
+
+void render_wait_quit(void)
 {
 	SDL_Event event;
 	while(SDL_WaitEvent(&event)) {
@@ -1829,6 +1913,7 @@ int32_t render_translate_input_name(int32_t controller, char *name, uint8_t is_a
 	}
 	
 	SDL_GameControllerButtonBind cbind;
+	int32_t is_positive = RENDER_AXIS_POS;
 	if (is_axis) {
 		
 		int sdl_axis = render_lookup_axis(name);
@@ -1843,6 +1928,10 @@ int32_t render_translate_input_name(int32_t controller, char *name, uint8_t is_a
 			SDL_GameControllerClose(control);
 			return RENDER_INVALID_NAME;
 		}
+		if (sdl_button == SDL_CONTROLLER_BUTTON_DPAD_UP || sdl_button == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
+			//assume these will be negative if they are an axis
+			is_positive = 0;
+		}
 		cbind = SDL_GameControllerGetBindForButton(control, sdl_button);
 	}
 	SDL_GameControllerClose(control);
@@ -1851,7 +1940,7 @@ int32_t render_translate_input_name(int32_t controller, char *name, uint8_t is_a
 	case SDL_CONTROLLER_BINDTYPE_BUTTON:
 		return cbind.value.button;
 	case SDL_CONTROLLER_BINDTYPE_AXIS:
-		return RENDER_AXIS_BIT | cbind.value.axis;
+		return RENDER_AXIS_BIT | cbind.value.axis | is_positive;
 	case SDL_CONTROLLER_BINDTYPE_HAT:
 		return RENDER_DPAD_BIT | (cbind.value.hat.hat << 4) | cbind.value.hat.hat_mask;
 	}
@@ -1922,16 +2011,7 @@ void render_toggle_fullscreen()
 	SDL_SetWindowSize(main_window, windowed_width, windowed_height);
 	drain_events();
 	in_toggle = 0;
-}
-
-uint32_t render_audio_buffer()
-{
-	return buffer_samples;
-}
-
-uint32_t render_sample_rate()
-{
-	return sample_rate;
+	need_ui_fb_resize = 1;
 }
 
 void render_errorbox(char *title, char *message)
@@ -1976,4 +2056,10 @@ uint8_t render_get_active_framebuffer(void)
 		}
 	}
 	return 0xFF;
+}
+
+uint8_t render_create_thread(render_thread *thread, const char *name, render_thread_fun fun, void *data)
+{
+	*thread = SDL_CreateThread(fun, name, data);
+	return *thread != 0;
 }

@@ -1845,7 +1845,8 @@ enum nk_widget_states {
     NK_WIDGET_STATE_HOVERED     = NK_WIDGET_STATE_HOVER|NK_WIDGET_STATE_MODIFIED, /* widget is being hovered */
     NK_WIDGET_STATE_ACTIVE      = NK_WIDGET_STATE_ACTIVED|NK_WIDGET_STATE_MODIFIED /* widget is currently activated */
 };
-NK_API enum nk_widget_layout_states nk_widget(struct nk_rect*, const struct nk_context*);
+NK_API enum nk_widget_layout_states nk_widget(struct nk_rect*, struct nk_context*);
+NK_API enum nk_widget_layout_states nk_keynav_widget(struct nk_rect *, struct nk_context *);
 NK_API enum nk_widget_layout_states nk_widget_fitting(struct nk_rect*, struct nk_context*, struct nk_vec2);
 NK_API struct nk_rect nk_widget_bounds(struct nk_context*);
 NK_API struct nk_vec2 nk_widget_position(struct nk_context*);
@@ -3192,6 +3193,8 @@ struct nk_keyboard {
 struct nk_input {
     struct nk_keyboard keyboard;
     struct nk_mouse mouse;
+	int widget_counter;
+	int selected_widget;
 };
 
 NK_API int nk_input_has_mouse_click(const struct nk_input*, enum nk_buttons);
@@ -11365,10 +11368,13 @@ nk_font_bake_pack(struct nk_font_baker *baker,
     NK_ASSERT(alloc);
 
     if (!image_memory || !width || !height || !config_list || !count) return nk_false;
+	int pixel_area_estimate = 0;
     for (config_iter = config_list; config_iter; config_iter = config_iter->next) {
         range_count = nk_range_count(config_iter->range);
         total_range_count += range_count;
-        total_glyph_count += nk_range_glyph_count(config_iter->range, range_count);
+		int glyphs = nk_range_glyph_count(config_iter->range, range_count);
+        total_glyph_count += glyphs;
+		pixel_area_estimate += glyphs * config_iter->size * config_iter->size;
     }
 
     /* setup font baker from temporary memory */
@@ -11379,7 +11385,13 @@ nk_font_bake_pack(struct nk_font_baker *baker,
     }
 
     *height = 0;
-    *width = (total_glyph_count > 1000) ? 1024 : 512;
+	int width_estimate = sqrt(pixel_area_estimate) + 0.5;
+	*width = 128;
+	while (*width < width_estimate)
+	{
+		*width *= 2;
+	}
+    //*width = (total_glyph_count > 1000) ? 1024 : 512;
     nk_tt_PackBegin(&baker->spc, 0, (int)*width, (int)max_height, 0, 1, alloc);
     {
         int input_i = 0;
@@ -12556,6 +12568,7 @@ nk_input_begin(struct nk_context *ctx)
     in->mouse.delta.y = 0;
     for (i = 0; i < NK_KEY_MAX; i++)
         in->keyboard.keys[i].clicked = 0;
+	in->widget_counter = -1;
 }
 
 NK_API void
@@ -12680,9 +12693,11 @@ nk_input_has_mouse_click_in_rect(const struct nk_input *i, enum nk_buttons id,
     const struct nk_mouse_button *btn;
     if (!i) return nk_false;
     btn = &i->mouse.buttons[id];
-    if (!NK_INBOX(btn->clicked_pos.x,btn->clicked_pos.y,b.x,b.y,b.w,b.h))
-        return nk_false;
-    return nk_true;
+    if (NK_INBOX(btn->clicked_pos.x,btn->clicked_pos.y,b.x,b.y,b.w,b.h))
+        return nk_true;
+	if (i->selected_widget == i->widget_counter && i->keyboard.keys[NK_KEY_ENTER].clicked)
+		return nk_true;
+    return nk_false;
 }
 
 NK_API int
@@ -12730,7 +12745,7 @@ NK_API int
 nk_input_is_mouse_hovering_rect(const struct nk_input *i, struct nk_rect rect)
 {
     if (!i) return nk_false;
-    return NK_INBOX(i->mouse.pos.x, i->mouse.pos.y, rect.x, rect.y, rect.w, rect.h);
+    return i->selected_widget == i->widget_counter || NK_INBOX(i->mouse.pos.x, i->mouse.pos.y, rect.x, rect.y, rect.w, rect.h);
 }
 
 NK_API int
@@ -12752,7 +12767,9 @@ NK_API int
 nk_input_is_mouse_down(const struct nk_input *i, enum nk_buttons id)
 {
     if (!i) return nk_false;
-    return i->mouse.buttons[id].down;
+    return i->mouse.buttons[id].down || (
+		id == NK_BUTTON_LEFT && i->widget_counter == i->selected_widget && i->keyboard.keys[NK_KEY_ENTER].down
+	);
 }
 
 NK_API int
@@ -12763,6 +12780,11 @@ nk_input_is_mouse_pressed(const struct nk_input *i, enum nk_buttons id)
     b = &i->mouse.buttons[id];
     if (b->down && b->clicked)
         return nk_true;
+	if (
+		id == NK_BUTTON_LEFT && i->widget_counter == i->selected_widget 
+		&& i->keyboard.keys[NK_KEY_ENTER].down && i->keyboard.keys[NK_KEY_ENTER].clicked
+	) 
+		return nk_true;
     return nk_false;
 }
 
@@ -12770,7 +12792,14 @@ NK_API int
 nk_input_is_mouse_released(const struct nk_input *i, enum nk_buttons id)
 {
     if (!i) return nk_false;
-    return (!i->mouse.buttons[id].down && i->mouse.buttons[id].clicked);
+    if (!i->mouse.buttons[id].down && i->mouse.buttons[id].clicked)
+		return nk_true;
+	if (
+		id == NK_BUTTON_LEFT && i->widget_counter == i->selected_widget 
+		&& !i->keyboard.keys[NK_KEY_ENTER].down && i->keyboard.keys[NK_KEY_ENTER].clicked
+	) 
+		return nk_true;
+	return nk_false;
 }
 
 NK_API int
@@ -14598,7 +14627,7 @@ nk_draw_selectable(struct nk_command_buffer *out,
 NK_INTERN int
 nk_do_selectable(nk_flags *state, struct nk_command_buffer *out,
     struct nk_rect bounds, const char *str, int len, nk_flags align, int *value,
-    const struct nk_style_selectable *style, const struct nk_input *in,
+    const struct nk_style_selectable *style, struct nk_input *in,
     const struct nk_user_font *font)
 {
     int old_value;
@@ -14624,6 +14653,12 @@ nk_do_selectable(nk_flags *state, struct nk_command_buffer *out,
     /* update button */
     if (nk_button_behavior(state, touch, in, NK_BUTTON_DEFAULT))
         *value = !(*value);
+		
+	if (!old_value && !(*value) && in && in->selected_widget == in->widget_counter) {
+		*value = 1;
+	} else if (!old_value && *value && in) {
+		in->selected_widget = in->widget_counter;
+	}
 
     /* draw selectable */
     if (style->draw_begin) style->draw_begin(out, style->userdata);
@@ -16149,8 +16184,18 @@ nk_do_property(nk_flags *ws,
     nk_draw_property(out, style, &property, &label, *ws, name, name_len, font);
     if (style->draw_end) style->draw_end(out, style->userdata);
 
-    /* execute right button  */
-    if (nk_do_button_symbol(ws, out, left, style->sym_left, behavior, &style->dec_button, in, font)) {
+	int selected = in && in->selected_widget == in->widget_counter;
+	int enter_clicked;
+	if (selected) {
+		//prevent left/right buttons from activating when enter is pressed
+		enter_clicked = in->keyboard.keys[NK_KEY_ENTER].clicked;
+		in->keyboard.keys[NK_KEY_ENTER].clicked = 0;
+	}
+    /* execute left button  */
+    if (
+		nk_do_button_symbol(ws, out, left, style->sym_left, behavior, &style->dec_button, in, font)
+		|| (selected && in->keyboard.keys[NK_KEY_LEFT].clicked && in->keyboard.keys[NK_KEY_LEFT].down)
+	) {
         switch (variant->kind) {
         default: break;
         case NK_PROPERTY_INT:
@@ -16161,8 +16206,11 @@ nk_do_property(nk_flags *ws,
             variant->value.d = NK_CLAMP(variant->min_value.d, variant->value.d - variant->step.d, variant->max_value.d); break;
         }
     }
-    /* execute left button  */
-    if (nk_do_button_symbol(ws, out, right, style->sym_right, behavior, &style->inc_button, in, font)) {
+    /* execute right button  */
+    if (
+		nk_do_button_symbol(ws, out, right, style->sym_right, behavior, &style->inc_button, in, font)
+		|| (selected && in->keyboard.keys[NK_KEY_RIGHT].clicked && in->keyboard.keys[NK_KEY_RIGHT].down)
+	) {
         switch (variant->kind) {
         default: break;
         case NK_PROPERTY_INT:
@@ -16173,6 +16221,9 @@ nk_do_property(nk_flags *ws,
             variant->value.d = NK_CLAMP(variant->min_value.d, variant->value.d + variant->step.d, variant->max_value.d); break;
         }
     }
+	if (selected) {
+		in->keyboard.keys[NK_KEY_ENTER].clicked = enter_clicked;
+	}
     if (old != NK_PROPERTY_EDIT && (*state == NK_PROPERTY_EDIT)) {
         /* property has been activated so setup buffer */
         NK_MEMCPY(buffer, dst, (nk_size)*length);
@@ -17247,6 +17298,7 @@ nk_setup(struct nk_context *ctx, const struct nk_user_font *font)
 #ifdef NK_INCLUDE_VERTEX_BUFFER_OUTPUT
     nk_draw_list_init(&ctx->draw_list);
 #endif
+	ctx->input.widget_counter = -1;
 }
 
 #ifdef NK_INCLUDE_DEFAULT_ALLOCATOR
@@ -20226,7 +20278,7 @@ nk_widget_has_mouse_click_down(struct nk_context *ctx, enum nk_buttons btn, int 
 }
 
 NK_API enum nk_widget_layout_states
-nk_widget(struct nk_rect *bounds, const struct nk_context *ctx)
+nk_widget_gen(struct nk_rect *bounds, struct nk_context *ctx, nk_byte is_keynav)
 {
     struct nk_rect c, v;
     struct nk_window *win;
@@ -20265,13 +20317,51 @@ nk_widget(struct nk_rect *bounds, const struct nk_context *ctx)
     c.y = (float)((int)c.y);
     c.w = (float)((int)c.w);
     c.h = (float)((int)c.h);
+	int newly_selected = nk_false;
+	if (is_keynav) {
+		ctx->input.widget_counter++;
+		if (
+			ctx->input.selected_widget == (ctx->input.widget_counter + 1) && 
+			ctx->input.keyboard.keys[NK_KEY_UP].clicked && ctx->input.keyboard.keys[NK_KEY_UP].down
+		) {
+			ctx->input.selected_widget--;
+			newly_selected = nk_true;
+		} else if (
+			ctx->input.selected_widget == (ctx->input.widget_counter - 1) &&
+			ctx->input.keyboard.keys[NK_KEY_DOWN].clicked && ctx->input.keyboard.keys[NK_KEY_DOWN].down
+		) {
+			ctx->input.keyboard.keys[NK_KEY_DOWN].clicked = 0;
+			ctx->input.selected_widget++;
+			newly_selected = nk_true;
+		}
+	}
 
     nk_unify(&v, &c, bounds->x, bounds->y, bounds->x + bounds->w, bounds->y + bounds->h);
+	if (is_keynav && newly_selected) {
+		//ensure widget is fully on-screen if it was newly selected via a keyboard action
+		if ((bounds->y + bounds->h) > (c.y + c.h)) {
+			*layout->offset_y += bounds->y + bounds->h - (c.y + c.h);
+		} else if(c.y > bounds->y){
+			*layout->offset_y -= c.y - bounds->y;
+		}
+	}
     if (!NK_INTERSECT(c.x, c.y, c.w, c.h, bounds->x, bounds->y, bounds->w, bounds->h))
         return NK_WIDGET_INVALID;
-    if (!NK_INBOX(in->mouse.pos.x, in->mouse.pos.y, v.x, v.y, v.w, v.h))
-        return NK_WIDGET_ROM;
-    return NK_WIDGET_VALID;
+    if ((is_keynav && ctx->input.selected_widget == ctx->input.widget_counter ) || NK_INBOX(in->mouse.pos.x, in->mouse.pos.y, v.x, v.y, v.w, v.h))
+        return NK_WIDGET_VALID;
+    return NK_WIDGET_ROM;
+}
+
+NK_API enum nk_widget_layout_states
+nk_widget(struct nk_rect *bounds, struct nk_context *ctx)
+{
+	return nk_widget_gen(bounds, ctx, 0);
+}
+
+NK_API enum nk_widget_layout_states
+nk_keynav_widget(struct nk_rect *bounds, struct nk_context *ctx)
+{
+	return nk_widget_gen(bounds, ctx, 1);
 }
 
 NK_API enum nk_widget_layout_states
@@ -20294,7 +20384,7 @@ nk_widget_fitting(struct nk_rect *bounds, struct nk_context *ctx,
     win = ctx->current;
     style = &ctx->style;
     layout = win->layout;
-    state = nk_widget(bounds, ctx);
+    state = nk_keynav_widget(bounds, ctx);
 
     panel_padding = nk_panel_get_padding(style, layout->type);
     if (layout->row.index == 1) {
@@ -20615,13 +20705,17 @@ nk_button_text_styled(struct nk_context *ctx,
 
     win = ctx->current;
     layout = win->layout;
-    state = nk_widget(&bounds, ctx);
+    state = nk_keynav_widget(&bounds, ctx);
 
     if (!state) return 0;
     in = (state == NK_WIDGET_ROM || layout->flags & NK_WINDOW_ROM) ? 0 : &ctx->input;
-    return nk_do_button_text(&ctx->last_widget_state, &win->buffer, bounds,
+    int ret = nk_do_button_text(&ctx->last_widget_state, &win->buffer, bounds,
                     title, len, style->text_alignment, ctx->button_behavior,
                     style, in, ctx->style.font);
+	if (ctx->last_widget_state & NK_WIDGET_STATE_ENTERED) {
+		ctx->input.selected_widget = ctx->input.widget_counter;
+	}
+	return ret;
 }
 
 NK_API int
@@ -20661,7 +20755,7 @@ nk_button_color(struct nk_context *ctx, struct nk_color color)
     win = ctx->current;
     layout = win->layout;
 
-    state = nk_widget(&bounds, ctx);
+    state = nk_keynav_widget(&bounds, ctx);
     if (!state) return 0;
     in = (state == NK_WIDGET_ROM || layout->flags & NK_WINDOW_ROM) ? 0 : &ctx->input;
 
@@ -20672,6 +20766,9 @@ nk_button_color(struct nk_context *ctx, struct nk_color color)
     ret = nk_do_button(&ctx->last_widget_state, &win->buffer, bounds,
                 &button, in, ctx->button_behavior, &content);
     nk_draw_button(&win->buffer, &bounds, ctx->last_widget_state, &button);
+	if (ctx->last_widget_state & NK_WIDGET_STATE_ENTERED) {
+		ctx->input.selected_widget = ctx->input.widget_counter;
+	}
     return ret;
 }
 
@@ -20694,11 +20791,15 @@ nk_button_symbol_styled(struct nk_context *ctx,
 
     win = ctx->current;
     layout = win->layout;
-    state = nk_widget(&bounds, ctx);
+    state = nk_keynav_widget(&bounds, ctx);
     if (!state) return 0;
     in = (state == NK_WIDGET_ROM || layout->flags & NK_WINDOW_ROM) ? 0 : &ctx->input;
-    return nk_do_button_symbol(&ctx->last_widget_state, &win->buffer, bounds,
+    int ret = nk_do_button_symbol(&ctx->last_widget_state, &win->buffer, bounds,
             symbol, ctx->button_behavior, style, in, ctx->style.font);
+	if (ctx->last_widget_state & NK_WIDGET_STATE_ENTERED) {
+		ctx->input.selected_widget = ctx->input.widget_counter;
+	}
+	return ret;
 }
 
 NK_API int
@@ -20729,7 +20830,7 @@ nk_button_image_styled(struct nk_context *ctx, const struct nk_style_button *sty
     win = ctx->current;
     layout = win->layout;
 
-    state = nk_widget(&bounds, ctx);
+    state = nk_keynav_widget(&bounds, ctx);
     if (!state) return 0;
     in = (state == NK_WIDGET_ROM || layout->flags & NK_WINDOW_ROM) ? 0 : &ctx->input;
     return nk_do_button_image(&ctx->last_widget_state, &win->buffer, bounds,
@@ -20765,7 +20866,7 @@ nk_button_symbol_text_styled(struct nk_context *ctx,
     win = ctx->current;
     layout = win->layout;
 
-    state = nk_widget(&bounds, ctx);
+    state = nk_keynav_widget(&bounds, ctx);
     if (!state) return 0;
     in = (state == NK_WIDGET_ROM || layout->flags & NK_WINDOW_ROM) ? 0 : &ctx->input;
     return nk_do_button_text_symbol(&ctx->last_widget_state, &win->buffer, bounds,
@@ -20812,7 +20913,7 @@ nk_button_image_text_styled(struct nk_context *ctx,
     win = ctx->current;
     layout = win->layout;
 
-    state = nk_widget(&bounds, ctx);
+    state = nk_keynav_widget(&bounds, ctx);
     if (!state) return 0;
     in = (state == NK_WIDGET_ROM || layout->flags & NK_WINDOW_ROM) ? 0 : &ctx->input;
     return nk_do_button_text_image(&ctx->last_widget_state, &win->buffer,
@@ -20846,7 +20947,7 @@ nk_selectable_text(struct nk_context *ctx, const char *str, int len,
 {
     struct nk_window *win;
     struct nk_panel *layout;
-    const struct nk_input *in;
+    struct nk_input *in;
     const struct nk_style *style;
 
     enum nk_widget_layout_states state;
@@ -20863,7 +20964,7 @@ nk_selectable_text(struct nk_context *ctx, const char *str, int len,
     layout = win->layout;
     style = &ctx->style;
 
-    state = nk_widget(&bounds, ctx);
+    state = nk_keynav_widget(&bounds, ctx);
     if (!state) return 0;
     in = (state == NK_WIDGET_ROM || layout->flags & NK_WINDOW_ROM) ? 0 : &ctx->input;
     return nk_do_selectable(&ctx->last_widget_state, &win->buffer, bounds,
@@ -20948,7 +21049,7 @@ nk_check_text(struct nk_context *ctx, const char *text, int len, int active)
     style = &ctx->style;
     layout = win->layout;
 
-    state = nk_widget(&bounds, ctx);
+    state = nk_keynav_widget(&bounds, ctx);
     if (!state) return active;
     in = (state == NK_WIDGET_ROM || layout->flags & NK_WINDOW_ROM) ? 0 : &ctx->input;
     nk_do_toggle(&ctx->last_widget_state, &win->buffer, bounds, &active,
@@ -21423,7 +21524,7 @@ nk_property(struct nk_context *ctx, const char *name, struct nk_property_variant
     win = ctx->current;
     layout = win->layout;
     style = &ctx->style;
-    s = nk_widget(&bounds, ctx);
+    s = nk_keynav_widget(&bounds, ctx);
     if (!s) return;
 
     /* calculate hash from name */
@@ -21473,6 +21574,7 @@ nk_property(struct nk_context *ctx, const char *name, struct nk_property_variant
             ctx->input.mouse.grab = nk_true;
             ctx->input.mouse.grabbed = nk_true;
         }
+		ctx->input.selected_widget = ctx->input.widget_counter;
     }
     /* check if previously active property is now inactive */
     if (*state == NK_PROPERTY_DEFAULT && old_state != NK_PROPERTY_DEFAULT) {
@@ -22683,8 +22785,11 @@ nk_contextual_end(struct nk_context *ctx)
             body.y = (panel->at_y + panel->footer_height + panel->border + padding.y + panel->row.height);
             body.h = (panel->bounds.y + panel->bounds.h) - body.y;
         }
+		int selected = ctx->input.selected_widget;
+		ctx->input.selected_widget = -1;
         {int pressed = nk_input_is_mouse_pressed(&ctx->input, NK_BUTTON_LEFT);
         int in_body = nk_input_is_mouse_hovering_rect(&ctx->input, body);
+		ctx->input.selected_widget = selected;
         if (pressed && in_body)
             popup->flags |= NK_WINDOW_HIDDEN;
         }
@@ -22757,7 +22862,7 @@ nk_combo_begin_text(struct nk_context *ctx, const char *selected, int len,
 
     win = ctx->current;
     style = &ctx->style;
-    s = nk_widget(&header, ctx);
+    s = nk_keynav_widget(&header, ctx);
     if (s == NK_WIDGET_INVALID)
         return 0;
 
@@ -23318,11 +23423,21 @@ nk_combo(struct nk_context *ctx, const char **items, int count,
     size.y = NK_MIN(size.y, (float)max_height);
     if (nk_combo_begin_label(ctx, items[selected], size)) {
         nk_layout_row_dynamic(ctx, (float)item_height, 1);
+		int main_item_widget = ctx->input.widget_counter;
         for (i = 0; i < count; ++i) {
-            if (nk_combo_item_label(ctx, items[i], NK_TEXT_LEFT))
+            if (nk_combo_item_label(ctx, items[i], NK_TEXT_LEFT)) {
                 selected = i;
+				ctx->input.selected_widget = main_item_widget;
+				//prevent below code from advancing selected widget
+				main_item_widget--;
+			}
         }
         nk_combo_end(ctx);
+		if (ctx->input.selected_widget <= main_item_widget) {
+			ctx->input.selected_widget = main_item_widget + 1;
+		} else if (ctx->input.selected_widget > main_item_widget + count) {
+			ctx->input.selected_widget = main_item_widget + count;
+		}
     }
     return selected;
 }

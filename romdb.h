@@ -11,6 +11,7 @@
 #define RAM_FLAG_MASK RAM_FLAG_ODD
 #define SAVE_I2C      0x01
 #define SAVE_NOR      0x02
+#define SAVE_HBPT     0x03
 #define SAVE_NONE     0xFF
 
 #include "tern.h"
@@ -43,10 +44,12 @@ typedef struct {
 enum {
 	MAPPER_NONE,
 	MAPPER_SEGA,
+	MAPPER_SEGA_SRAM,
 	MAPPER_REALTEC,
 	MAPPER_XBAND,
 	MAPPER_MULTI_GAME,
-	MAPPER_JCART
+	MAPPER_JCART,
+	MAPPER_SEGA_MED_V2
 };
 
 

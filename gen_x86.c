@@ -130,7 +130,7 @@ enum {
 	X86_R13,
 	X86_R14,
 	X86_R15
-} x86_regs_enc;
+};
 
 char * x86_reg_names[] = {
 #ifdef X86_64
@@ -171,7 +171,7 @@ char * x86_sizes[] = {
 };
 
 #ifdef X86_64
-#define CHECK_DISP(disp) (disp <= 0x7FFFFFFF && disp >= -2147483648)
+#define CHECK_DISP(disp) (disp <= ((ptrdiff_t)INT32_MAX) && disp >= ((ptrdiff_t)INT32_MIN))
 #else
 #define CHECK_DISP(disp) 1
 #endif
@@ -1261,7 +1261,7 @@ void mov_ir(code_info *code, int64_t val, uint8_t dst, uint8_t size)
 	check_alloc_code(code, 14);
 	code_ptr out = code->cur;
 	uint8_t sign_extend = 0;
-	if (size == SZ_Q && val <= 0x7FFFFFFF && val >= -2147483648) {
+	if (size == SZ_Q && val <= ((int64_t)INT32_MAX) && val >= ((int64_t)INT32_MIN)) {
 		sign_extend = 1;
 	}
 	if (size == SZ_W) {
@@ -2111,7 +2111,12 @@ uint32_t prep_args(code_info *code, uint32_t num_args, va_list args)
 	}
 #ifdef X86_64
 	uint32_t stack_args = 0;
+#ifdef _WIN32
+	//Microsoft is too good for the ABI that everyone else uses on x86-64 apparently
+	uint8_t abi_regs[] = {RCX, RDX, R8, R9};
+#else
 	uint8_t abi_regs[] = {RDI, RSI, RDX, RCX, R8, R9};
+#endif
 	int8_t reg_swap[R15+1];
 	uint32_t usage = 0;
 	memset(reg_swap, -1, sizeof(reg_swap));
@@ -2153,6 +2158,11 @@ uint32_t prep_args(code_info *code, uint32_t num_args, va_list args)
 		push_r(code, arg_arr[i]);
 	}
 	free(arg_arr);
+#if defined(X86_64) && defined(_WIN32)
+	sub_ir(code, 32, RSP, SZ_PTR);
+	code->stack_off += 32;
+	adjust += 32;
+#endif
 	
 	return stack_args * sizeof(void *) + adjust;
 }
@@ -2218,7 +2228,8 @@ void save_callee_save_regs(code_info *code)
 	push_r(code, R13);
 	push_r(code, R14);
 	push_r(code, R15);
-#else
+#endif
+#if !defined(X86_64) || defined(_WIN32)
 	push_r(code, RDI);
 	push_r(code, RSI);
 #endif
@@ -2226,14 +2237,15 @@ void save_callee_save_regs(code_info *code)
 
 void restore_callee_save_regs(code_info *code)
 {
+#if !defined(X86_64) || defined(_WIN32)
+	pop_r(code, RSI);
+	pop_r(code, RDI);
+#endif
 #ifdef X86_64
 	pop_r(code, R15);
 	pop_r(code, R14);
 	pop_r(code, R13);
 	pop_r(code, R12);
-#else
-	pop_r(code, RSI);
-	pop_r(code, RDI);
 #endif
 	pop_r(code, RBP);
 	pop_r(code, RBX);
