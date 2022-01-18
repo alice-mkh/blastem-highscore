@@ -79,6 +79,7 @@ struct rom_info {
 	uint8_t       mapper_type;
 	uint8_t       regions;
 	uint8_t       is_save_lock_on; //Does the save buffer actually belong to a lock-on cart?
+	uint8_t       wants_cd;
 };
 
 #define GAME_ID_OFF 0x183

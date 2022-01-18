@@ -94,7 +94,7 @@ void m68k_write_size(m68k_options *opts, uint8_t size, uint8_t lowfirst)
 void m68k_save_result(m68kinst * inst, m68k_options * opts)
 {
 	if (inst->dst.addr_mode != MODE_REG && inst->dst.addr_mode != MODE_AREG && inst->dst.addr_mode != MODE_UNUSED) {
-		if (inst->dst.addr_mode == MODE_AREG_PREDEC && 
+		if (inst->dst.addr_mode == MODE_AREG_PREDEC &&
 			((inst->src.addr_mode == MODE_AREG_PREDEC && inst->op != M68K_MOVE) || (inst->op == M68K_NBCD))
 		) {
 			areg_to_native(opts, inst->dst.params.regs.pri, opts->gen.scratch2);
@@ -489,7 +489,7 @@ static code_ptr get_movem_impl(m68k_options *opts, m68kinst *inst)
 	}
 	opts->extra_code = opts->gen.code;
 	opts->gen.code = tmp;
-	
+
 	rts(&opts->extra_code);
 	return impl;
 }
@@ -499,7 +499,7 @@ static void translate_m68k_movem(m68k_options * opts, m68kinst * inst)
 	code_info *code = &opts->gen.code;
 	uint8_t early_cycles;
 	uint16_t num_regs = inst->src.addr_mode == MODE_REG ? inst->src.params.immed : inst->dst.params.immed;
-	{	
+	{
 		//TODO: Move this popcount alg to a utility function
 		uint16_t a = (num_regs & 0b1010101010101010) >> 1;
 		uint16_t b = num_regs & 0b0101010101010101;
@@ -549,7 +549,7 @@ static void translate_m68k_movem(m68k_options * opts, m68kinst * inst)
 			m68k_disasm(inst, disasm_buf);
 			fatal_error("%X: %s\naddress mode %d not implemented (movem dst)\n", inst->address, disasm_buf, inst->dst.addr_mode);
 		}
-		
+
 		cycles(&opts->gen, early_cycles);
 		if (num_regs <= 9) {
 			translate_movem_regtomem_reglist(opts, inst);
@@ -596,7 +596,7 @@ static void translate_m68k_movem(m68k_options * opts, m68kinst * inst)
 			fatal_error("%X: %s\naddress mode %d not implemented (movem src)\n", inst->address, disasm_buf, inst->src.addr_mode);
 		}
 		cycles(&opts->gen, early_cycles);
-		
+
 		if (num_regs <= 9) {
 			translate_movem_memtoreg_reglist(opts, inst);
 		} else {
@@ -625,7 +625,7 @@ void swap_ssp_usp(m68k_options * opts)
 static void translate_m68k_rte(m68k_options *opts, m68kinst *inst)
 {
 	m68k_trap_if_not_supervisor(opts, inst);
-	
+
 	code_info *code = &opts->gen.code;
 	//Read saved SR
 	areg_to_native(opts, 7, opts->gen.scratch1);
@@ -646,7 +646,7 @@ static void translate_m68k_rte(m68k_options *opts, m68kinst *inst)
 code_ptr get_native_address(m68k_options *opts, uint32_t address)
 {
 	native_map_slot * native_code_map = opts->gen.native_code_map;
-	
+
 	memmap_chunk const *mem_chunk = find_map_chunk(address, &opts->gen, 0, NULL);
 	if (mem_chunk) {
 		//calculate the lowest alias for this address
@@ -680,7 +680,7 @@ uint32_t get_instruction_start(m68k_options *opts, uint32_t address)
 	} else {
 		address &= opts->gen.address_mask;
 	}
-	
+
 	uint32_t chunk = address / NATIVE_CHUNK_SIZE;
 	if (!native_code_map[chunk].base) {
 		return 0;
@@ -728,7 +728,7 @@ static void map_native_address(m68k_context * context, uint32_t address, code_pt
 	} else {
 		address &= opts->gen.address_mask;
 	}
-	
+
 	uint32_t chunk = address / NATIVE_CHUNK_SIZE;
 	if (!native_code_map[chunk].base) {
 		native_code_map[chunk].base = native_addr;
@@ -830,7 +830,7 @@ m68k_context *m68k_bp_dispatcher(m68k_context *context, uint32_t address)
 		warning("Spurious breakpoing at %X\n", address);
 		remove_breakpoint(context, address);
 	}
-	
+
 	return context;
 }
 
@@ -958,15 +958,15 @@ static void translate_m68k(m68k_context *context, m68kinst * inst)
 	}
 	code_ptr start = opts->gen.code.cur;
 	check_cycles_int(&opts->gen, inst->address);
-	
+
 	m68k_debug_handler bp;
 	if ((bp = find_breakpoint(context, inst->address))) {
 		m68k_breakpoint_patch(context, inst->address, bp, start);
 	}
-	
+
 	//log_address(&opts->gen, inst->address, "M68K: %X @ %d\n");
 	if (
-		(inst->src.addr_mode > MODE_AREG && inst->src.addr_mode < MODE_IMMEDIATE) 
+		(inst->src.addr_mode > MODE_AREG && inst->src.addr_mode < MODE_IMMEDIATE)
 		|| (inst->dst.addr_mode > MODE_AREG && inst->dst.addr_mode < MODE_IMMEDIATE)
 		|| (inst->op == M68K_BCC && (inst->src.params.immed & 1))
 	) {
@@ -1196,7 +1196,7 @@ void m68k_reset(m68k_context * context)
 	context->aregs[7] = reset_vec[0] << 16 | reset_vec[1];
 	uint32_t address = reset_vec[2] << 16 | reset_vec[3];
 	//interrupt mask may have changed so force a sync
-	sync_components(context, address);
+	context->options->sync_components(context, address);
 	start_68k_context(context, address);
 }
 

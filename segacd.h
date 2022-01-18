@@ -1,25 +1,36 @@
 #ifndef SEGACD_H_
 #define SEGACD_H_
 #include <stdint.h>
-#include "system.h"
-#include "m68k_core.h"
+#include "genesis.h"
 
 typedef struct {
-	m68k_context *m68k;
-	system_media *media;
-	uint16_t     gate_array[0x100];
-	uint8_t      busreq;
-	uint8_t      busack;
-	uint8_t      reset;
-	uint16_t     *rom;     //unaltered ROM, needed for mirrored locations
-	uint16_t     *rom_mut; //ROM with low 16-bit of HINT vector modified by register write
-	uint16_t     *prog_ram;
-	uint16_t     *work_ram;
-	uint8_t      *pcm_ram;
-	uint8_t      *bram;
+	m68k_context    *m68k;
+	system_media    *media;
+	genesis_context *genesis;
+	uint16_t        gate_array[0x100];
+	uint16_t        *rom;     //unaltered ROM, needed for mirrored locations
+	uint16_t        *rom_mut; //ROM with low 16-bit of HINT vector modified by register write
+	uint16_t        *prog_ram;
+	uint16_t        *word_ram;
+	uint8_t         *pcm_ram;
+	uint8_t         *bram;
+	uint32_t        stopwatch_cycle;
+	uint32_t        int2_cycle;
+	uint32_t        periph_reset_cycle;
+	uint32_t        base;
+	uint8_t         timer_pending;
+	uint8_t         timer_value;
+	uint8_t         busreq;
+	uint8_t         busack;
+	uint8_t         reset;
+	uint8_t         need_reset;
+	uint8_t         memptr_start_index;
 } segacd_context;
 
 segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8_t force_region, rom_info *info);
-memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint32_t *num_chunks);
+memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_t *num_chunks);
+uint32_t gen_cycle_to_scd(uint32_t cycle, genesis_context *gen);
+void scd_run(segacd_context *cd, uint32_t cycle);
+void scd_adjust_cycle(segacd_context *cd, uint32_t deduction);
 
 #endif //SEGACD_H_

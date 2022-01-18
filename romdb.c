@@ -475,6 +475,19 @@ rom_info configure_rom_heuristics(uint8_t *rom, uint32_t rom_size, memmap_chunk 
 	info.rom_size = rom_size;
 	add_memmap_header(&info, rom, rom_size, base_map, base_chunks);
 	info.port1_override = info.port2_override = info.ext_override = info.mouse_mode = NULL;
+	info.wants_cd = 0;
+	for (uint32_t offset = 0x190; offset < rom_size && offset < 0x1A0; offset++)
+	{
+		if (rom[offset] == 'F') {
+			// probably a codemasters game with a garbage header
+			break;
+		}
+		if (rom[offset] == 'C') {
+			info.wants_cd = 1;
+			break;
+		}
+	}
+
 	return info;
 }
 
@@ -1055,6 +1068,7 @@ rom_info configure_rom(tern_node *rom_db, void *vrom, uint32_t rom_size, void *l
 		info.port1_override = info.port2_override = info.ext_override = NULL;
 	}
 	info.mouse_mode = tern_find_ptr(entry, "mouse_mode");
+	info.wants_cd = !strcmp(tern_find_ptr_default(entry, "wants_cd", "no"), "yes");
 
 	return info;
 }
