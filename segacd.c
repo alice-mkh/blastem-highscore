@@ -300,7 +300,6 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 				//switch to 2M mode
 				if (value & BIT_RET) {
 					//Main CPU will have word ram
-					genesis_context *gen = cd->genesis;
 					gen->m68k->mem_pointers[cd->memptr_start_index + 1] = cd->word_ram;
 					gen->m68k->mem_pointers[cd->memptr_start_index + 2] = cd->word_ram + 0x10000;
 					m68k->mem_pointers[0] = NULL;
@@ -425,7 +424,7 @@ void scd_run(segacd_context *cd, uint32_t cycle)
 
 uint32_t gen_cycle_to_scd(uint32_t cycle, genesis_context *gen)
 {
-	return ((uint64_t)cycle) * ((uint64_t)gen->normal_clock) / ((uint64_t)SCD_MCLKS);
+	return ((uint64_t)cycle) * ((uint64_t)SCD_MCLKS) / ((uint64_t)gen->normal_clock);
 }
 
 void scd_adjust_cycle(segacd_context *cd, uint32_t deduction)
@@ -552,7 +551,7 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		}
 		if (changed & MASK_PROG_BANK) {
 			uint32_t bank = cd->gate_array[GA_MEM_MODE] >> 6 & 0x3;
-			m68k->mem_pointers[cd->memptr_start_index] = cd->word_ram + bank * 0x10000;
+			m68k->mem_pointers[cd->memptr_start_index] = cd->prog_ram + bank * 0x10000;
 			m68k_invalidate_code_range(m68k, cd->base + 0x220000, cd->base + 0x240000);
 		}
 		break;
