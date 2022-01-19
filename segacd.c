@@ -377,10 +377,22 @@ static void *sub_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	segacd_context *cd = m68k->system;
 	uint32_t reg = (address & 0x1FF) >> 1;
 	uint16_t value16;
-	if (address & 1) {
-		value16 = cd->gate_array[reg] & 0xFF00 | value;
-	} else {
-		value16 = cd->gate_array[reg] & 0xFF | (value << 8);
+	switch (address >> 1)
+	{
+	case GA_CDC_HOST_DATA:
+	case GA_CDC_DMA_ADDR:
+	case GA_STOP_WATCH:
+	case GA_COMM_FLAG:
+	case GA_CDD_FADER:
+		//these registers treat all writes as word-wide
+		value16 = value | (value << 8);
+		break;
+	default:
+		if (address & 1) {
+			value16 = cd->gate_array[reg] & 0xFF00 | value;
+		} else {
+			value16 = cd->gate_array[reg] & 0xFF | (value << 8);
+		}
 	}
 	return sub_gate_write16(address, vcontext, value16);
 }
@@ -588,10 +600,19 @@ static void *main_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	segacd_context *cd = gen->expansion;
 	uint32_t reg = (address & 0x1FF) >> 1;
 	uint16_t value16;
-	if (address & 1) {
-		value16 = cd->gate_array[reg] & 0xFF00 | value;
-	} else {
-		value16 = cd->gate_array[reg] & 0xFF | (value << 8);
+	switch (reg >> 1)
+	{
+	case GA_HINT_VECTOR:
+	case GA_COMM_FLAG:
+		//writes to these regs are always treated as word wide
+		value16 = value | (value << 8);
+		break;
+	default:
+		if (address & 1) {
+			value16 = cd->gate_array[reg] & 0xFF00 | value;
+		} else {
+			value16 = cd->gate_array[reg] & 0xFF | (value << 8);
+		}
 	}
 	return main_gate_write16(address, vcontext, value16);
 }
