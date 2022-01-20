@@ -37,23 +37,42 @@ enum {
 	GA_INT_MASK,
 	GA_CDD_FADER,
 	GA_CDD_CTRL,
+	GA_CDD_STATUS0,
+	GA_CDD_STATUS1,
+	GA_CDD_STATUS2,
+	GA_CDD_STATUS3,
+	GA_CDD_STATUS4,
+	GA_CDD_CMD0,
+	GA_CDD_CMD1,
+	GA_CDD_CMD2,
+	GA_CDD_CMD3,
+	GA_CDD_CMD4,
+	GA_FONT_COLOR,
+	GA_FONT_BITS,
+	GA_FONT_DATA0,
+	GA_FONT_DATA1,
+	GA_FONT_DATA2,
+	GA_FONT_DATA3,
 
 	GA_HINT_VECTOR = GA_CDC_REG_DATA
 };
 //GA_SUB_CPU_CTRL
 #define BIT_IEN2       0x8000
 #define BIT_IFL2       0x0100
-#define BIT_LEDG       0x0100
-#define BIT_LEDR       0x0080
+#define BIT_LEDG       0x0200
+#define BIT_LEDR       0x0100
 #define BIT_SBRQ       0x0002
 #define BIT_SRES       0x0001
 #define BIT_PRES       0x0001
 //GA_MEM_MODE
 #define MASK_PROG_BANK 0x00C0
-#define MASK_PRIORITY  0x0018
+#define BIT_OVERWRITE  0x0010
+#define BIT_UNDERWRITE 0x0008
+#define MASK_PRIORITY  (BIT_OVERWRITE|BIT_UNDERWRITE)
 #define BIT_MEM_MODE   0x0004
 #define BIT_DMNA       0x0002
 #define BIT_RET        0x0001
+
 //GA_INT_MASK
 #define BIT_MASK_IEN1  0x0002
 #define BIT_MASK_IEN2  0x0004
@@ -66,7 +85,8 @@ static void *prog_ram_wp_write16(uint32_t address, void *vcontext, uint16_t valu
 {
 	m68k_context *m68k = vcontext;
 	segacd_context *cd = m68k->system;
-	if (!(cd->gate_array[GA_MEM_MODE] & (1 << ((address >> 17) + 8)))) {
+	//if (!(cd->gate_array[GA_MEM_MODE] & (1 << ((address >> 9) + 8)))) {
+	if (address >= ((cd->gate_array[GA_MEM_MODE] & 0xFF00) << 1)) {
 		cd->prog_ram[address >> 1] = value;
 		m68k_invalidate_code_range(m68k, address, address + 2);
 	}
@@ -77,7 +97,7 @@ static void *prog_ram_wp_write8(uint32_t address, void *vcontext, uint8_t value)
 {
 	m68k_context *m68k = vcontext;
 	segacd_context *cd = m68k->system;
-	if (!(cd->gate_array[GA_MEM_MODE] & (1 << ((address >> 17) + 8)))) {
+	if (address >= ((cd->gate_array[GA_MEM_MODE] & 0xFF00) << 1)) {
 		((uint8_t *)cd->prog_ram)[address ^ 1] = value;
 		m68k_invalidate_code_range(m68k, address, address + 1);
 	}
@@ -86,22 +106,59 @@ static void *prog_ram_wp_write8(uint32_t address, void *vcontext, uint8_t value)
 
 static uint16_t word_ram_2M_read16(uint32_t address, void *vcontext)
 {
-	return 0;
+	m68k_context *m68k = vcontext;
+	//TODO: fixme for interleaving
+	uint16_t* bank = m68k->mem_pointers[1];
+	uint16_t raw = bank[address >> 2];
+	if (address & 2) {
+		return (raw & 0xF) | (raw << 4 & 0xF00);
+	} else {
+		return (raw >> 4 & 0xF00) | (raw >> 8 & 0xF);
+	}
 }
 
 static uint8_t word_ram_2M_read8(uint32_t address, void *vcontext)
 {
-	return 0;
-}
-
-static void *word_ram_2M_write16(uint32_t address, void *vcontext, uint16_t value)
-{
-	return vcontext;
+	uint16_t word = word_ram_2M_read16(address, vcontext);
+	if (address & 1) {
+		return word;
+	}
+	return word >> 8;
 }
 
 static void *word_ram_2M_write8(uint32_t address, void *vcontext, uint8_t value)
 {
+	m68k_context *m68k = vcontext;
+	segacd_context *cd = m68k->system;
+	value &= 0xF;
+	uint16_t priority = cd->gate_array[GA_MEM_MODE] & MASK_PRIORITY;
+
+	if (priority == BIT_OVERWRITE && !value) {
+		return vcontext;
+	}
+	if (priority == BIT_UNDERWRITE) {
+		if (!value) {
+			return vcontext;
+		}
+		uint8_t old = word_ram_2M_read8(address, vcontext);
+		if (old) {
+			return vcontext;
+		}
+	}
+	uint16_t* bank = m68k->mem_pointers[1];
+	uint16_t raw = bank[address >> 2];
+	uint16_t shift = ((address & 3) * 4);
+	raw &= ~(0xF000 >> shift);
+	raw |= value << (12 - shift);
+	bank[address >> 2] = raw;
 	return vcontext;
+}
+
+
+static void *word_ram_2M_write16(uint32_t address, void *vcontext, uint16_t value)
+{
+	word_ram_2M_write8(address, vcontext, value >> 8);
+	return word_ram_2M_write8(address + 1, vcontext, value);
 }
 
 static uint16_t word_ram_1M_read16(uint32_t address, void *vcontext)
@@ -145,6 +202,46 @@ static void *unmapped_prog_write8(uint32_t address, void *vcontext, uint8_t valu
 	return vcontext;
 }
 
+static uint16_t unmapped_word_read16(uint32_t address, void *vcontext)
+{
+	return 0xFFFF;
+}
+
+static uint8_t unmapped_word_read8(uint32_t address, void *vcontext)
+{
+	return 0xFF;
+}
+
+static void *unmapped_word_write16(uint32_t address, void *vcontext, uint16_t value)
+{
+	return vcontext;
+}
+
+static void *unmapped_word_write8(uint32_t address, void *vcontext, uint8_t value)
+{
+	return vcontext;
+}
+
+static uint16_t cell_image_read16(uint32_t address, void *vcontext)
+{
+	return 0xFFFF;
+}
+
+static uint8_t cell_image_read8(uint32_t address, void *vcontext)
+{
+	return 0xFF;
+}
+
+static void *cell_image_write16(uint32_t address, void *vcontext, uint16_t value)
+{
+	return vcontext;
+}
+
+static void *cell_image_write8(uint32_t address, void *vcontext, uint8_t value)
+{
+	return vcontext;
+}
+
 static uint8_t pcm_read8(uint32_t address, void *vcontext)
 {
 	return 0;
@@ -168,15 +265,18 @@ static void *pcm_write16(uint32_t address, void *vcontext, uint16_t value)
 
 static void timers_run(segacd_context *cd, uint32_t cycle)
 {
+	if (cycle <= cd->stopwatch_cycle) {
+		return;
+	}
 	uint32_t ticks = (cycle - cd->stopwatch_cycle) / TIMER_TICK_CLKS;
 	cd->stopwatch_cycle += ticks * TIMER_TICK_CLKS;
 	cd->gate_array[GA_STOP_WATCH] += ticks;
 	cd->gate_array[GA_STOP_WATCH] &= 0xFFF;
-	if (!cd->timer_value) {
+	if (ticks && !cd->timer_value) {
 		--ticks;
 		cd->timer_value = cd->gate_array[GA_TIMER];
 	}
-	if (cd->timer_value) {
+	if (ticks && cd->timer_value) {
 		while (ticks >= (cd->timer_value + 1)) {
 			ticks -= cd->timer_value + 1;
 			cd->timer_value = cd->gate_array[GA_TIMER];
@@ -259,6 +359,25 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 	case GA_TIMER:
 		timers_run(cd, m68k->current_cycle);
 		return cd->gate_array[reg];
+	case GA_FONT_DATA0:
+	case GA_FONT_DATA1:
+	case GA_FONT_DATA2:
+	case GA_FONT_DATA3: {
+		uint16_t shift = 4 * (3 - (reg - GA_FONT_DATA0));
+		uint16_t value = 0;
+		uint16_t fg = cd->gate_array[GA_FONT_COLOR] >> 4;
+		uint16_t bg = cd->gate_array[GA_FONT_COLOR] & 0xF;
+		for (int i = 0; i < 4; i++) {
+			uint16_t pixel = 0;
+			if (cd->gate_array[GA_FONT_BITS] & 1 << (shift + i)) {
+				pixel = fg;
+			} else {
+				pixel = bg;
+			}
+			value |= pixel << (i * 4);
+		}
+		return value;
+	}
 	default:
 		return cd->gate_array[reg];
 	}
@@ -315,20 +434,23 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 			m68k_invalidate_code_range(gen->m68k, cd->base + 0x200000, cd->base + 0x240000);
 			m68k_invalidate_code_range(m68k, 0x080000, 0x0E0000);
 		} else if (changed & BIT_RET) {
-			cd->gate_array[reg] &= ~BIT_DMNA;
 			if (value & BIT_MEM_MODE) {
+				cd->gate_array[reg] &= ~BIT_DMNA;
 				//swapping banks in 1M mode
 				gen->m68k->mem_pointers[cd->memptr_start_index + 1] = (value & BIT_RET) ? cd->word_ram + 0x10000 : cd->word_ram;
 				m68k->mem_pointers[1] = (value & BIT_RET) ? cd->word_ram : cd->word_ram + 0x10000;
 				m68k_invalidate_code_range(gen->m68k, cd->base + 0x200000, cd->base + 0x240000);
 				m68k_invalidate_code_range(m68k, 0x080000, 0x0E0000);
 			} else if (value & BIT_RET) {
+				cd->gate_array[reg] &= ~BIT_DMNA;
 				//giving word ram to main CPU in 2M mode
 				gen->m68k->mem_pointers[cd->memptr_start_index + 1] = cd->word_ram;
 				gen->m68k->mem_pointers[cd->memptr_start_index + 2] = cd->word_ram + 0x10000;
 				m68k->mem_pointers[0] = NULL;
 				m68k_invalidate_code_range(gen->m68k, cd->base + 0x200000, cd->base + 0x240000);
 				m68k_invalidate_code_range(m68k, 0x080000, 0x0E0000);
+			} else {
+				value |= BIT_RET;
 			}
 		}
 		cd->gate_array[reg] &= 0xFFC2;
@@ -337,9 +459,9 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	}
 	case GA_STOP_WATCH:
 		//docs say you should only write zero to reset
-		//unclear what happens when other values are written
+		//mcd-verificator comments suggest any value will reset
 		timers_run(cd, m68k->current_cycle);
-		cd->gate_array[reg] = value & 0xFFF;
+		cd->gate_array[reg] = 0;
 		break;
 	case GA_COMM_FLAG:
 		cd->gate_array[reg] &= 0xFF00;
@@ -365,6 +487,12 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cd->gate_array[reg] = value & (BIT_MASK_IEN6|BIT_MASK_IEN5|BIT_MASK_IEN4|BIT_MASK_IEN3|BIT_MASK_IEN2|BIT_MASK_IEN1);
 		calculate_target_cycle(m68k);
 		break;
+	case GA_FONT_COLOR:
+		cd->gate_array[reg] = value & 0xFF;
+		break;
+	case GA_FONT_BITS:
+		cd->gate_array[reg] = value;
+		break;
 	default:
 		printf("Unhandled gate array write %X:%X\n", address, value);
 	}
@@ -383,7 +511,9 @@ static void *sub_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	case GA_CDC_DMA_ADDR:
 	case GA_STOP_WATCH:
 	case GA_COMM_FLAG:
+	case GA_TIMER:
 	case GA_CDD_FADER:
+	case GA_FONT_COLOR:
 		//these registers treat all writes as word-wide
 		value16 = value | (value << 8);
 		break;
@@ -412,6 +542,16 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 {
 	segacd_context *cd = context->system;
 	scd_peripherals_run(cd, context->current_cycle);
+	switch (context->int_ack)
+	{
+	case 2:
+		cd->int2_cycle = CYCLE_NEVER;
+		break;
+	case 3:
+		cd->timer_pending = 0;
+		break;
+	}
+	context->int_ack = 0;
 	calculate_target_cycle(context);
 	return context;
 }
@@ -523,8 +663,11 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		if (cd->reset && !old_reset) {
 			cd->need_reset = 1;
 		}
-		cd->gate_array[reg] &= 0x7FFF;
-		cd->gate_array[reg] |= value & 0x8000;
+		if (value & BIT_IFL2) {
+			cd->int2_cycle = scd_cycle;
+		}
+		/*cd->gate_array[reg] &= 0x7FFF;
+		cd->gate_array[reg] |= value & 0x8000;*/
 		uint8_t new_access = can_main_access_prog(cd);
 		uint32_t bank = cd->gate_array[GA_MEM_MODE] >> 6 & 0x3;
 		if (new_access) {
@@ -542,7 +685,7 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_MEM_MODE: {
 		uint16_t changed = cd->gate_array[reg] ^ value;
 		//Main CPU can't write priority mode bits, MODE or RET
-		cd->gate_array[reg] &= 0x001D;
+		cd->gate_array[reg] &= 0x001F;
 		cd->gate_array[reg] |= value & 0xFFC0;
 		if ((cd->gate_array[reg] & BIT_MEM_MODE)) {
 			//1M mode
@@ -550,18 +693,19 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 				cd->gate_array[reg] |= BIT_DMNA;
 			}
 		} else {
-			cd->gate_array[reg] |= value & BIT_DMNA;
 			//2M mode
 			if (changed & value & BIT_DMNA) {
+				cd->gate_array[reg] |= BIT_DMNA;
 				m68k->mem_pointers[cd->memptr_start_index + 1] = NULL;
 				m68k->mem_pointers[cd->memptr_start_index + 2] = NULL;
 				cd->m68k->mem_pointers[0] = cd->word_ram;
+				cd->gate_array[reg] &= ~BIT_RET;
 
 				m68k_invalidate_code_range(m68k, cd->base + 0x200000, cd->base + 0x240000);
 				m68k_invalidate_code_range(cd->m68k, 0x080000, 0x0C0000);
 			}
 		}
-		if (changed & MASK_PROG_BANK) {
+		if (changed & MASK_PROG_BANK && can_main_access_prog(cd)) {
 			uint32_t bank = cd->gate_array[GA_MEM_MODE] >> 6 & 0x3;
 			m68k->mem_pointers[cd->memptr_start_index] = cd->prog_ram + bank * 0x10000;
 			m68k_invalidate_code_range(m68k, cd->base + 0x220000, cd->base + 0x240000);
@@ -602,6 +746,19 @@ static void *main_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	uint16_t value16;
 	switch (reg >> 1)
 	{
+	case GA_SUB_CPU_CTRL:
+		if (address & 1) {
+			value16 = value;
+		} else {
+			value16 = value << 8;
+			if (cd->reset) {
+				value16 |= BIT_SRES;
+			}
+			if (cd->busreq) {
+				value16 |= BIT_SBRQ;
+			}
+		}
+		break;
 	case GA_HINT_VECTOR:
 	case GA_COMM_FLAG:
 		//writes to these regs are always treated as word wide
@@ -620,8 +777,8 @@ static void *main_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8_t force_region, rom_info *info)
 {
 	static memmap_chunk sub_cpu_map[] = {
-		{0x000000, 0x00FEFF, 0xFFFFFF, .flags=MMAP_READ | MMAP_CODE, .write_16 = prog_ram_wp_write16, .write_8 = prog_ram_wp_write8},
-		{0x00FF00, 0x07FFFF, 0xFFFFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE},
+		{0x000000, 0x01FEFF, 0xFFFFFF, .flags=MMAP_READ | MMAP_CODE, .write_16 = prog_ram_wp_write16, .write_8 = prog_ram_wp_write8},
+		{0x01FF00, 0x07FFFF, 0xFFFFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE},
 		{0x080000, 0x0BFFFF, 0x03FFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE | MMAP_PTR_IDX | MMAP_FUNC_NULL, .ptr_index = 0,
 			.read_16 = word_ram_2M_read16, .write_16 = word_ram_2M_write16, .read_8 = word_ram_2M_read8, .write_8 = word_ram_2M_write8},
 		{0x0C0000, 0x0DFFFF, 0x01FFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE | MMAP_PTR_IDX | MMAP_FUNC_NULL, .ptr_index = 1,
@@ -684,8 +841,10 @@ memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_
 			.read_16 = unmapped_prog_read16, .write_16 = unmapped_prog_write16, .read_8 = unmapped_prog_read8, .write_8 = unmapped_prog_write8},
 		{0x040000, 0x05FFFF, 0x01FFFF, .flags=MMAP_READ}, //first ROM alias
 		//TODO: additional ROM/prog RAM aliases
-		{0x200000, 0x21FFFF, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 1},
-		{0x220000, 0x23FFFF, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 2},
+		{0x200000, 0x21FFFF, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 1,
+			.read_16 = unmapped_word_read16, .write_16 = unmapped_word_write16, .read_8 = unmapped_word_read8, .write_8 = unmapped_word_write8},
+		{0x220000, 0x23FFFF, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 2,
+			.read_16 = cell_image_read16, .write_16 = cell_image_write16, .read_8 = cell_image_read8, .write_8 = cell_image_write8},
 		{0xA12000, 0xA12FFF, 0xFFFFFF, .read_16 = main_gate_read16, .write_16 = main_gate_write16, .read_8 = main_gate_read8, .write_8 = main_gate_write8}
 	};
 	for (int i = 0; i < sizeof(main_cpu_map) / sizeof(*main_cpu_map); i++)
