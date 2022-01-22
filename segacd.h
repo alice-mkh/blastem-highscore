@@ -2,6 +2,7 @@
 #define SEGACD_H_
 #include <stdint.h>
 #include "genesis.h"
+#include "lc8951.h"
 
 typedef struct {
 	m68k_context    *m68k;
@@ -25,6 +26,7 @@ typedef struct {
 	uint8_t         reset;
 	uint8_t         need_reset;
 	uint8_t         memptr_start_index;
+	lc8951          cdc;
 } segacd_context;
 
 segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8_t force_region, rom_info *info);

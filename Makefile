@@ -181,7 +181,7 @@ TRANSOBJS=gen.o backend.o $(MEM) arena.o tern.o
 M68KOBJS=68kinst.o
 
 ifdef NEW_CORE
-Z80OBJS=z80.o z80inst.o 
+Z80OBJS=z80.o z80inst.o
 M68KOBJS+= m68k.o
 CFLAGS+= -DNEW_CORE
 else
@@ -197,7 +197,7 @@ endif
 endif
 endif
 AUDIOOBJS=ym2612.o psg.o wave.o vgm.o event_log.o render_audio.o
-CONFIGOBJS=config.o tern.o util.o paths.o 
+CONFIGOBJS=config.o tern.o util.o paths.o
 NUKLEAROBJS=$(FONT) nuklear_ui/blastem_nuklear.o nuklear_ui/sfnt.o
 RENDEROBJS=ppm.o controller_info.o
 ifdef USE_FBDEV
@@ -205,7 +205,7 @@ RENDEROBJS+= render_fbdev.o
 else
 RENDEROBJS+= render_sdl.o
 endif
-	
+
 ifdef NOZLIB
 CFLAGS+= -DDISABLE_ZLIB
 else
@@ -214,12 +214,12 @@ endif
 
 MAINOBJS=blastem.o system.o genesis.o debug.o gdb_remote.o vdp.o $(RENDEROBJS) io.o romdb.o hash.o menu.o xband.o \
 	realtec.o i2c.o nor.o sega_mapper.o multi_game.o megawifi.o $(NET) serialize.o $(TERMINAL) $(CONFIGOBJS) gst.o \
-	$(M68KOBJS) $(TRANSOBJS) $(AUDIOOBJS) saves.o zip.o bindings.o jcart.o gen_player.o segacd.o
+	$(M68KOBJS) $(TRANSOBJS) $(AUDIOOBJS) saves.o zip.o bindings.o jcart.o gen_player.o segacd.o lc8951.o
 
 LIBOBJS=libblastem.o system.o genesis.o debug.o gdb_remote.o vdp.o io.o romdb.o hash.o xband.o realtec.o \
 	i2c.o nor.o sega_mapper.o multi_game.o megawifi.o $(NET) serialize.o $(TERMINAL) $(CONFIGOBJS) gst.o \
-	$(M68KOBJS) $(TRANSOBJS) $(AUDIOOBJS) saves.o jcart.o rom.db.o gen_player.o segacd.o $(LIBZOBJS)
-	
+	$(M68KOBJS) $(TRANSOBJS) $(AUDIOOBJS) saves.o jcart.o rom.db.o gen_player.o segacd.o lc8951.o $(LIBZOBJS)
+
 ifdef NONUKLEAR
 CFLAGS+= -DDISABLE_NUKLEAR
 else
@@ -278,7 +278,7 @@ libblastem.$(SO) : $(LIBOBJS)
 blastem$(EXE) : $(MAINOBJS)
 	$(CC) -o $@ $^ $(LDFLAGS) $(PROFFLAGS)
 	$(FIXUP) ./$@
-	
+
 blastjag$(EXE) : jaguar.o jag_video.o $(RENDEROBJS) serialize.o $(M68KOBJS) $(TRANSOBJS) $(CONFIGOBJS)
 	$(CC) -o $@ $^ $(LDFLAGS)
 
@@ -287,7 +287,7 @@ termhelper : termhelper.o
 
 dis$(EXE) : dis.o 68kinst.o tern.o vos_program_module.o
 	$(CC) -o $@ $^ $(OPT)
-	
+
 jagdis : jagdis.o jagcpu.o tern.o
 	$(CC) -o $@ $^
 
@@ -327,7 +327,7 @@ test_x86 : test_x86.o gen_x86.o gen.o
 
 test_arm : test_arm.o gen_arm.o mem.o gen.o
 	$(CC) -o test_arm test_arm.o gen_arm.o mem.o gen.o
-	
+
 test_int_timing : test_int_timing.o vdp.o
 	$(CC) -o $@ $^
 
@@ -354,7 +354,7 @@ m68k.c : m68k.cpu cpu_dsl.py
 
 %.o : %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
-  
+
 %.o : %.m
 	$(CC) $(CFLAGS) -c -o $@ $<
 

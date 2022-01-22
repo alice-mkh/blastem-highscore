@@ -355,6 +355,10 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 	}
 	case GA_MEM_MODE:
 		return cd->gate_array[reg] & 0xFF1F;
+	case GA_CDC_CTRL:
+		return cd->gate_array[reg] | cd->cdc.ar;
+	case GA_CDC_REG_DATA:
+		return lc8951_reg_read(&cd->cdc);
 	case GA_STOP_WATCH:
 	case GA_TIMER:
 		timers_run(cd, m68k->current_cycle);
@@ -457,6 +461,14 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cd->gate_array[reg] |= value & (BIT_RET|BIT_MEM_MODE|MASK_PRIORITY);
 		break;
 	}
+	case GA_CDC_CTRL:
+		lc8951_ar_write(&cd->cdc, value);
+		cd->gate_array[reg] &= 0xC000;
+		cd->gate_array[reg] = value & 0x0700;
+		break;
+	case GA_CDC_REG_DATA:
+		lc8951_reg_write(&cd->cdc, value);
+		break;
 	case GA_STOP_WATCH:
 		//docs say you should only write zero to reset
 		//mcd-verificator comments suggest any value will reset
@@ -517,6 +529,13 @@ static void *sub_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 		//these registers treat all writes as word-wide
 		value16 = value | (value << 8);
 		break;
+	case GA_CDC_CTRL:
+		if (address & 1) {
+			lc8951_ar_write(&cd->cdc, value);
+		} else {
+			cd->gate_array[reg] = value << 8;
+		}
+		return vcontext;
 	default:
 		if (address & 1) {
 			value16 = cd->gate_array[reg] & 0xFF00 | value;
@@ -829,6 +848,7 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	cd->memptr_start_index = 0;
 	cd->gate_array[1] = 1;
 	cd->gate_array[0x1B] = 0x100;
+	lc8951_init(&cd->cdc);
 
 	return cd;
 }
