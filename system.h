@@ -2,6 +2,7 @@
 #define SYSTEM_H_
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 typedef struct system_header system_header;
 typedef struct system_media system_media;
@@ -84,12 +85,28 @@ typedef enum {
 	MEDIA_CDROM
 } media_type;
 
+typedef enum {
+	TRACK_AUDIO,
+	TRACK_DATA
+} track_type;
+
+typedef struct {
+	uint32_t   fake_pregap;
+	uint32_t   pregap_lba;
+	uint32_t   start_lba;
+	uint32_t   end_lba;
+	track_type type;
+} track_info;
+
 struct system_media {
 	void         *buffer;
 	char         *dir;
 	char         *name;
 	char         *extension;
 	system_media *chain;
+	track_info   *tracks;
+	FILE         *f;
+	uint32_t     num_tracks;
 	uint32_t     size;
 	media_type   type;
 };
