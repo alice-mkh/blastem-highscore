@@ -239,7 +239,9 @@ uint32_t load_media(const char * filename, system_media *dst, system_type *stype
 	romclose(f);
 	if (!strcasecmp(dst->extension, "cue")) {
 		if (parse_cue(dst)) {
-			*stype = SYSTEM_SEGACD;
+			if (stype) {
+				*stype = SYSTEM_SEGACD;
+			}
 		}
 	}
 

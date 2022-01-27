@@ -144,5 +144,7 @@ uint8_t parse_cue(system_media *media)
 		fseek(media->f, 16, SEEK_SET);
 		media->size = fread(media->buffer, 1, 2048, media->f);
 	}
-	return tracks > 0 && media->f != NULL;
+	uint8_t valid = tracks > 0 && media->f != NULL;
+	media->type = valid ? MEDIA_CDROM : MEDIA_CART;
+	return valid;
 }

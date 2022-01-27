@@ -81,6 +81,9 @@ enum {
 #define BIT_MASK_IEN5  0x0020
 #define BIT_MASK_IEN6  0x0040
 
+//GA_CDD_CTRL
+#define BIT_HOCK       0x0004
+
 static void *prog_ram_wp_write16(uint32_t address, void *vcontext, uint16_t value)
 {
 	m68k_context *m68k = vcontext;
@@ -308,19 +311,28 @@ static void calculate_target_cycle(m68k_context * context)
 	segacd_context *cd = context->system;
 	context->int_cycle = CYCLE_NEVER;
 	uint8_t mask = context->status & 0x7;
-	if (mask < 3) {
-		uint32_t next_timer;
-		if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN3) {
-			uint32_t next_timer_cycle = next_timer_int(cd);
-			if (next_timer_cycle < context->int_cycle) {
-				context->int_cycle = next_timer_cycle;
-				context->int_num = 3;
+	if (mask < 4) {
+		if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN4) {
+			uint32_t cdd_cycle = cd->cdd.int_pending ? context->current_cycle : cd->cdd.next_int_cycle;
+			if (cdd_cycle < context->int_cycle) {
+				context->int_cycle = cdd_cycle;
+				context->int_num = 4;
 			}
 		}
-		if (mask < 2) {
-			if (cd->int2_cycle < context->int_cycle && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN2)) {
-				context->int_cycle = cd->int2_cycle;
-				context->int_num = 2;
+		if (mask < 3) {
+			uint32_t next_timer;
+			if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN3) {
+				uint32_t next_timer_cycle = next_timer_int(cd);
+				if (next_timer_cycle < context->int_cycle) {
+					context->int_cycle = next_timer_cycle;
+					context->int_num = 3;
+				}
+			}
+			if (mask < 2) {
+				if (cd->int2_cycle < context->int_cycle && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN2)) {
+					context->int_cycle = cd->int2_cycle;
+					context->int_num = 2;
+				}
 			}
 		}
 	}
@@ -363,6 +375,14 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 	case GA_TIMER:
 		timers_run(cd, m68k->current_cycle);
 		return cd->gate_array[reg];
+	case GA_CDD_STATUS0:
+	case GA_CDD_STATUS1:
+	case GA_CDD_STATUS2:
+	case GA_CDD_STATUS3:
+	case GA_CDD_STATUS4:
+		cdd_mcu_run(&cd->cdd, m68k->current_cycle, cd->gate_array + GA_CDD_CTRL);
+		return cd->gate_array[reg];
+		break;
 	case GA_FONT_DATA0:
 	case GA_FONT_DATA1:
 	case GA_FONT_DATA2:
@@ -499,6 +519,33 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cd->gate_array[reg] = value & (BIT_MASK_IEN6|BIT_MASK_IEN5|BIT_MASK_IEN4|BIT_MASK_IEN3|BIT_MASK_IEN2|BIT_MASK_IEN1);
 		calculate_target_cycle(m68k);
 		break;
+	case GA_CDD_CTRL: {
+		cdd_mcu_run(&cd->cdd, m68k->current_cycle, cd->gate_array + GA_CDD_CTRL);
+		uint16_t changed = cd->gate_array[reg] ^ value;
+		cd->gate_array[reg] &= ~BIT_HOCK;
+		cd->gate_array[reg] |= value & BIT_HOCK;
+		if (changed & BIT_HOCK) {
+			if (value & BIT_HOCK) {
+				cdd_hock_enabled(&cd->cdd);
+			} else {
+				cdd_hock_disabled(&cd->cdd);
+			}
+			calculate_target_cycle(m68k);
+		}
+		break;
+	}
+	case GA_CDD_CMD0:
+	case GA_CDD_CMD1:
+	case GA_CDD_CMD2:
+	case GA_CDD_CMD3:
+		cdd_mcu_run(&cd->cdd, m68k->current_cycle, cd->gate_array + GA_CDD_CTRL);
+		cd->gate_array[reg] = value & 0x0F0F;
+		break;
+	case GA_CDD_CMD4:
+		cdd_mcu_run(&cd->cdd, m68k->current_cycle, cd->gate_array + GA_CDD_CTRL);
+		cd->gate_array[reg] = value & 0x0F0F;
+		cdd_mcu_start_cmd_recv(&cd->cdd, cd->gate_array + GA_CDD_CTRL);
+		break;
 	case GA_FONT_COLOR:
 		cd->gate_array[reg] = value & 0xFF;
 		break;
@@ -536,6 +583,15 @@ static void *sub_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 			cd->gate_array[reg] = value << 8;
 		}
 		return vcontext;
+	case GA_CDD_CMD4:
+		if (!address) {
+			//byte write to $FF804A should not trigger transfer
+			cdd_mcu_run(&cd->cdd, m68k->current_cycle, cd->gate_array + GA_CDD_CTRL);
+			cd->gate_array[reg] &= 0x0F;
+			cd->gate_array[reg] |= (value << 8 & 0x0F00);
+			return vcontext;
+		}
+		//intentional fallthrough for $FF804B
 	default:
 		if (address & 1) {
 			value16 = cd->gate_array[reg] & 0xFF00 | value;
@@ -555,6 +611,7 @@ static uint8_t can_main_access_prog(segacd_context *cd)
 static void scd_peripherals_run(segacd_context *cd, uint32_t cycle)
 {
 	timers_run(cd, cycle);
+	cdd_mcu_run(&cd->cdd, cycle, cd->gate_array + GA_CDD_CTRL);
 }
 
 static m68k_context *sync_components(m68k_context * context, uint32_t address)
@@ -569,6 +626,8 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 	case 3:
 		cd->timer_pending = 0;
 		break;
+	case 4:
+		cd->cdd.int_pending = 0;
 	}
 	context->int_ack = 0;
 	calculate_target_cycle(context);
@@ -613,6 +672,7 @@ void scd_adjust_cycle(segacd_context *cd, uint32_t deduction)
 	} else if (cd->periph_reset_cycle != CYCLE_NEVER) {
 		cd->periph_reset_cycle -= deduction;
 	}
+	cdd_mcu_adjust_cycle(&cd->cdd, deduction);
 }
 
 static uint16_t main_gate_read16(uint32_t address, void *vcontext)
@@ -849,6 +909,10 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	cd->gate_array[1] = 1;
 	cd->gate_array[0x1B] = 0x100;
 	lc8951_init(&cd->cdc);
+	if (media->chain && media->type != MEDIA_CDROM) {
+		media = media->chain;
+	}
+	cdd_mcu_init(&cd->cdd, media);
 
 	return cd;
 }
