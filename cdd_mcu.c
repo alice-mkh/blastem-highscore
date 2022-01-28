@@ -6,6 +6,7 @@
 #define CDD_MCU_DIVIDER 8
 #define SECTOR_CLOCKS (CD_BLOCK_CLKS/75)
 #define NIBBLE_CLOCKS (CDD_MCU_DIVIDER * 77)
+#define BYTE_CLOCKS (SECTOR_CLOCKS/2352) // 96
 
 //lead in start max diameter 46 mm
 //program area start max diameter 50 mm
@@ -102,6 +103,24 @@ static void update_status(cdd_mcu *context)
 		handle_seek(context);
 		if (!context->seeking) {
 			context->head_pba++;
+			uint32_t lba = context->head_pba - LEADIN_SECTORS;
+			for (uint32_t i = 0; i < context->media->num_tracks; i++)
+			{
+				if (lba < context->media->tracks[i].fake_pregap) {
+					context->in_fake_pregap = 1;
+					break;
+				}
+				lba -= context->media->tracks[i].fake_pregap;
+				if (lba < context->media->tracks[i].start_lba) {
+					context->in_fake_pregap = 1;
+					break;
+				}
+				if (lba < context->media->tracks[i].end_lba) {
+					fseek(context->media->f, lba * 2352, SEEK_SET);
+					context->in_fake_pregap = 0;
+					break;
+				}
+			}
 		}
 		break;
 	case DS_PAUSE:
@@ -115,7 +134,7 @@ static void update_status(cdd_mcu *context)
 				if (context->head_pba > 3*context->media->num_tracks + 1) {
 					context->toc_valid = 1;
 					context->seeking = 1;
-					context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].start_lba + context->media->tracks[0].fake_pregap;
+					context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].start_lba;
 					context->status = DS_PAUSE;
 				}
 
@@ -170,7 +189,7 @@ static void update_status(cdd_mcu *context)
 		break;
 	case SF_TOCO:
 		if (context->toc_valid) {
-			lba_to_status(context, context->media->tracks[context->media->num_tracks - 1].end_lba + context->media->tracks[0].fake_pregap);
+			lba_to_status(context, context->media->tracks[context->media->num_tracks - 1].end_lba + (context->media->num_tracks > 1 ? context->media->tracks[1].fake_pregap : 0));
 			context->status_buffer.format = SF_TOCO;
 		} else {
 			context->status_buffer.format = SF_NOTREADY;
@@ -190,7 +209,11 @@ static void update_status(cdd_mcu *context)
 		break;
 	case SF_TOCN:
 		if (context->toc_valid) {
-			lba_to_status(context, context->media->tracks[context->requested_track].start_lba + context->media->tracks[0].fake_pregap);
+			uint32_t lba = context->media->tracks[context->requested_track - 1].start_lba;
+			if (context->requested_track > 1) {
+				lba += context->media->tracks[1].fake_pregap;
+			}
+			lba_to_status(context, lba);
 			context->status_buffer.b.tocn.track_low = context->requested_track % 10;
 			context->status_buffer.format = SF_TOCN;
 		} else {
@@ -213,7 +236,7 @@ static void update_status(cdd_mcu *context)
 	}
 	context->status_buffer.checksum = checksum((uint8_t *)&context->status_buffer);
 	if (context->status_buffer.format != SF_NOTREADY) {
-		printf("CDD Status %d%d.%d%d%d%d%d%d.%d%d\n",
+		printf("CDD Status %X%X.%X%X%X%X%X%X.%X%X\n",
 			context->status_buffer.status, context->status_buffer.format,
 			context->status_buffer.b.time.min_high, context->status_buffer.b.time.min_low,
 			context->status_buffer.b.time.sec_high, context->status_buffer.b.time.sec_low,
@@ -242,6 +265,34 @@ static void run_command(cdd_mcu *context)
 		puts("CDD CMD: STOP");
 		context->status = DS_STOP;
 		break;
+	case CMD_READ:
+	case CMD_SEEK: {
+		if (context->status == DS_DOOR_OPEN || context->status == DS_TRAY_MOVING || context->status == DS_DISC_LEADOUT || context->status == DS_DISC_LEADIN) {
+			context->error_status = DS_CMD_ERROR;
+			break;
+		}
+		if (context->requested_format == SF_TOCT || context->requested_format == SF_TOCN) {
+			context->requested_format = SF_ABSOLUTE;
+		}
+		if (!context->toc_valid) {
+			context->error_status = DS_CMD_ERROR;
+			break;
+		}
+		uint32_t lba = context->cmd_buffer.b.time.min_high * 10 + context->cmd_buffer.b.time.min_low;
+		lba *= 60;
+		lba += context->cmd_buffer.b.time.sec_high * 10 + context->cmd_buffer.b.time.sec_low;
+		lba *= 75;
+		lba += context->cmd_buffer.b.time.frame_high * 10 + context->cmd_buffer.b.time.frame_low;
+		printf("READ/SEEK cmd for lba %d\n", lba);
+		if (lba >= context->media->tracks[0].fake_pregap + context->media->tracks[context->media->num_tracks - 1].end_lba) {
+			context->error_status = DS_CMD_ERROR;
+			break;
+		}
+		context->seek_pba = lba + LEADIN_SECTORS - 4;
+		context->seeking = 1;
+		context->status = context->cmd_buffer.cmd_type == CMD_READ ? DS_PLAY : DS_PAUSE;
+		break;
+	}
 	case CMD_REPORT_REQUEST:
 		switch (context->cmd_buffer.b.format.status_type)
 		{
@@ -275,6 +326,10 @@ static void run_command(cdd_mcu *context)
 		case SF_TOCN:
 			context->requested_track = context->cmd_buffer.b.format.track_high * 10;
 			context->requested_track += context->cmd_buffer.b.format.track_low;
+			if (!context->media || context->requested_track > context->media->num_tracks) {
+				context->requested_format = SF_ABSOLUTE;
+				context->error_status = DS_CMD_ERROR;
+			}
 			context->status = DS_TOC_READ;
 			context->seeking = 1;
 			context->seek_pba = 0;
@@ -292,7 +347,7 @@ static void run_command(cdd_mcu *context)
 #define BIT_DRS  0x2
 #define BIT_DTS  0x1
 
-void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array)
+void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951* cdc)
 {
 	uint32_t cd_cycle = mclks_to_cd_block(cycle);
 	if (!(gate_array[GAO_CDD_CTRL] & BIT_HOCK)) {
@@ -304,6 +359,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array)
 	uint32_t next_subcode = context->last_subcode_cycle + SECTOR_CLOCKS;
 	uint32_t next_nibble = context->current_status_nibble >= 0 ? context->last_nibble_cycle + NIBBLE_CLOCKS : CYCLE_NEVER;
 	uint32_t next_cmd_nibble = context->current_cmd_nibble >= 0 ? context->last_nibble_cycle + NIBBLE_CLOCKS : CYCLE_NEVER;
+	uint32_t next_byte = context->current_sector_byte >= 0 ? context->last_byte_cycle + BYTE_CLOCKS : CYCLE_NEVER;
 	for (; context->cycle < cd_cycle; context->cycle += CDD_MCU_DIVIDER)
 	{
 		if (context->cycle >= next_subcode) {
@@ -313,6 +369,10 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array)
 			next_nibble = context->cycle;
 			context->current_status_nibble = 0;
 			gate_array[GAO_CDD_STATUS] |= BIT_DRS;
+			if (context->status == DS_PLAY && !context->seeking) {
+				next_byte = context->cycle;
+				context->current_sector_byte = 0;
+			}
 		}
 		if (context->cycle >= next_nibble) {
 			if (context->current_status_nibble == sizeof(cdd_status)) {
@@ -358,6 +418,37 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array)
 				next_cmd_nibble = context->cycle + NIBBLE_CLOCKS;
 			}
 		}
+		if (context->cycle >= next_byte) {
+			uint8_t byte;
+			if (context->in_fake_pregap) {
+				if (!context->current_sector_byte || (context->current_sector_byte >= 16)) {
+					byte = 0;
+					//TODO: error detection and correction bytes
+				} else if (context->current_sector_byte < 12) {
+					byte = 0xFF;
+				} else if (context->current_sector_byte == 12) {
+					uint32_t minute = ((context->head_pba - LEADIN_SECTORS) / 75) / 60;
+					byte = (minute % 10) | ((minute / 10 ) << 4);
+				} else if (context->current_sector_byte == 13) {
+					uint32_t seconds = ((context->head_pba - LEADIN_SECTORS) / 75) % 60;
+					byte = (seconds % 10) | ((seconds / 10 ) << 4);
+				} else if (context->current_sector_byte == 14) {
+					uint32_t frames = (context->head_pba - LEADIN_SECTORS) % 75;
+					byte = (frames % 10) | ((frames / 10 ) << 4);
+				} else {
+					byte = 1;
+				}
+			} else {
+				byte = fgetc(context->media->f);
+			}
+			lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), context->current_sector_byte++, byte);
+			context->last_byte_cycle = context->cycle;
+			next_byte = context->cycle + BYTE_CLOCKS;
+			if (context->current_sector_byte == 2352) {
+				context->current_sector_byte = -1;
+
+			}
+		}
 	}
 }
 
@@ -399,5 +490,8 @@ void cdd_mcu_adjust_cycle(cdd_mcu *context, uint32_t deduction)
 	}
 	if (context->last_nibble_cycle != CYCLE_NEVER) {
 		context->last_nibble_cycle -= cd_deduction;
+	}
+	if (context->last_byte_cycle != CYCLE_NEVER) {
+		context->last_byte_cycle -= cd_deduction;
 	}
 }

@@ -292,6 +292,12 @@ static void timers_run(segacd_context *cd, uint32_t cycle)
 	}
 }
 
+static void cdd_run(segacd_context *cd, uint32_t cycle)
+{
+	cdd_mcu_run(&cd->cdd, cycle, cd->gate_array + GA_CDD_CTRL, &cd->cdc);
+	lc8951_run(&cd->cdc, cycle);
+}
+
 static uint32_t next_timer_int(segacd_context *cd)
 {
 	if (cd->timer_pending) {
@@ -311,27 +317,36 @@ static void calculate_target_cycle(m68k_context * context)
 	segacd_context *cd = context->system;
 	context->int_cycle = CYCLE_NEVER;
 	uint8_t mask = context->status & 0x7;
-	if (mask < 4) {
-		if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN4) {
-			uint32_t cdd_cycle = cd->cdd.int_pending ? context->current_cycle : cd->cdd.next_int_cycle;
-			if (cdd_cycle < context->int_cycle) {
-				context->int_cycle = cdd_cycle;
-				context->int_num = 4;
+	if (mask < 5) {
+		if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN5) {
+			uint32_t cdc_cycle = lc8951_next_interrupt(&cd->cdc);
+			if (cdc_cycle < context->int_cycle) {
+				context->int_cycle = cdc_cycle;
+				context->int_num = 5;
 			}
 		}
-		if (mask < 3) {
-			uint32_t next_timer;
-			if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN3) {
-				uint32_t next_timer_cycle = next_timer_int(cd);
-				if (next_timer_cycle < context->int_cycle) {
-					context->int_cycle = next_timer_cycle;
-					context->int_num = 3;
+		if (mask < 4) {
+			if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN4) {
+				uint32_t cdd_cycle = cd->cdd.int_pending ? context->current_cycle : cd->cdd.next_int_cycle;
+				if (cdd_cycle < context->int_cycle) {
+					context->int_cycle = cdd_cycle;
+					context->int_num = 4;
 				}
 			}
-			if (mask < 2) {
-				if (cd->int2_cycle < context->int_cycle && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN2)) {
-					context->int_cycle = cd->int2_cycle;
-					context->int_num = 2;
+			if (mask < 3) {
+				uint32_t next_timer;
+				if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN3) {
+					uint32_t next_timer_cycle = next_timer_int(cd);
+					if (next_timer_cycle < context->int_cycle) {
+						context->int_cycle = next_timer_cycle;
+						context->int_num = 3;
+					}
+				}
+				if (mask < 2) {
+					if (cd->int2_cycle < context->int_cycle && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN2)) {
+						context->int_cycle = cd->int2_cycle;
+						context->int_num = 2;
+					}
 				}
 			}
 		}
@@ -370,6 +385,7 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 	case GA_CDC_CTRL:
 		return cd->gate_array[reg] | cd->cdc.ar;
 	case GA_CDC_REG_DATA:
+		cdd_run(cd, m68k->current_cycle);
 		return lc8951_reg_read(&cd->cdc);
 	case GA_STOP_WATCH:
 	case GA_TIMER:
@@ -380,7 +396,7 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 	case GA_CDD_STATUS2:
 	case GA_CDD_STATUS3:
 	case GA_CDD_STATUS4:
-		cdd_mcu_run(&cd->cdd, m68k->current_cycle, cd->gate_array + GA_CDD_CTRL);
+		cdd_run(cd, m68k->current_cycle);
 		return cd->gate_array[reg];
 		break;
 	case GA_FONT_DATA0:
@@ -482,12 +498,15 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		break;
 	}
 	case GA_CDC_CTRL:
+		cdd_run(cd, m68k->current_cycle);
 		lc8951_ar_write(&cd->cdc, value);
 		cd->gate_array[reg] &= 0xC000;
 		cd->gate_array[reg] = value & 0x0700;
 		break;
 	case GA_CDC_REG_DATA:
+		cdd_run(cd, m68k->current_cycle);
 		lc8951_reg_write(&cd->cdc, value);
+		calculate_target_cycle(m68k);
 		break;
 	case GA_STOP_WATCH:
 		//docs say you should only write zero to reset
@@ -520,7 +539,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		calculate_target_cycle(m68k);
 		break;
 	case GA_CDD_CTRL: {
-		cdd_mcu_run(&cd->cdd, m68k->current_cycle, cd->gate_array + GA_CDD_CTRL);
+		cdd_run(cd, m68k->current_cycle);
 		uint16_t changed = cd->gate_array[reg] ^ value;
 		cd->gate_array[reg] &= ~BIT_HOCK;
 		cd->gate_array[reg] |= value & BIT_HOCK;
@@ -538,11 +557,11 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_CDD_CMD1:
 	case GA_CDD_CMD2:
 	case GA_CDD_CMD3:
-		cdd_mcu_run(&cd->cdd, m68k->current_cycle, cd->gate_array + GA_CDD_CTRL);
+		cdd_run(cd, m68k->current_cycle);
 		cd->gate_array[reg] = value & 0x0F0F;
 		break;
 	case GA_CDD_CMD4:
-		cdd_mcu_run(&cd->cdd, m68k->current_cycle, cd->gate_array + GA_CDD_CTRL);
+		cdd_run(cd, m68k->current_cycle);
 		cd->gate_array[reg] = value & 0x0F0F;
 		cdd_mcu_start_cmd_recv(&cd->cdd, cd->gate_array + GA_CDD_CTRL);
 		break;
@@ -586,7 +605,7 @@ static void *sub_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	case GA_CDD_CMD4:
 		if (!address) {
 			//byte write to $FF804A should not trigger transfer
-			cdd_mcu_run(&cd->cdd, m68k->current_cycle, cd->gate_array + GA_CDD_CTRL);
+			cdd_run(cd, m68k->current_cycle);
 			cd->gate_array[reg] &= 0x0F;
 			cd->gate_array[reg] |= (value << 8 & 0x0F00);
 			return vcontext;
@@ -611,7 +630,7 @@ static uint8_t can_main_access_prog(segacd_context *cd)
 static void scd_peripherals_run(segacd_context *cd, uint32_t cycle)
 {
 	timers_run(cd, cycle);
-	cdd_mcu_run(&cd->cdd, cycle, cd->gate_array + GA_CDD_CTRL);
+	cdd_run(cd, cycle);
 }
 
 static m68k_context *sync_components(m68k_context * context, uint32_t address)

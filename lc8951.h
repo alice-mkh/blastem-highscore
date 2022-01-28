@@ -4,7 +4,10 @@
 #include <stdint.h>
 
 typedef struct {
-	uint32_t cycles;
+	uint32_t cycle;
+	uint32_t clock_step;
+	uint32_t decode_end;
+	uint32_t transfer_end;
 
 	uint8_t buffer[0x4000];
 
@@ -19,12 +22,16 @@ typedef struct {
 	uint8_t ctrl1;
 	uint8_t ar;
 	uint8_t ar_mask;
+	uint8_t decoding;
+	uint16_t ptl_internal;
 } lc8951;
 
 void lc8951_init(lc8951 *context);
-//void lc8951_run(lc8951 *context, uint32_t cycle);
+void lc8951_run(lc8951 *context, uint32_t cycle);
 void lc8951_reg_write(lc8951 *context, uint8_t value);
 uint8_t lc8951_reg_read(lc8951 *context);
 void lc8951_ar_write(lc8951 *context, uint8_t value);
+void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8_t byte);
+uint32_t lc8951_next_interrupt(lc8951 *context);
 
 #endif //LC8951_H_

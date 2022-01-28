@@ -1,4 +1,5 @@
 #include "lc8951.h"
+#include "backend.h"
 
 enum {
 	COMIN,
@@ -36,7 +37,7 @@ enum {
 //IFCTRL
 #define BIT_CMDIEN 0x80
 #define BIT_DTEIEN 0x40
-#define BIT_CECIEN 0x20
+#define BIT_DECIEN 0x20
 #define BIT_CMDBK  0x10
 #define BIT_DTWAI  0x08
 #define BIT_STWAI  0x04
@@ -52,6 +53,13 @@ enum {
 #define BIT_DTEN   0x02
 #define BIT_STEN   0x01
 
+//CTRL0
+#define BIT_DECEN 0x80
+#define BIT_WRRQ  0x04
+
+//STAT3
+#define BIT_VALST 0x80
+
 //datasheet timing info
 //3 cycles for memory operation
 //6 cycles min for DMA-mode host transfer
@@ -62,10 +70,12 @@ void lc8951_init(lc8951 *context)
 	//unclear if the difference is in the lc8951 or gate array
 	context->regs[IFSTAT] = 0xFF;
 	context->ar_mask = 0x1F;
+	context->clock_step = (2 + 2) * 6; // external divider, internal divider + DMA period
 }
 
 void lc8951_reg_write(lc8951 *context, uint8_t value)
 {
+	printf("CDC write %X: %X\n", context->ar, value);
 	switch (context->ar)
 	{
 	case SBOUT:
@@ -100,6 +110,8 @@ void lc8951_reg_write(lc8951 *context, uint8_t value)
 	case DTTRG:
 		if (value & BIT_DOUTEN) {
 			context->regs[IFSTAT] &= ~BIT_DTBSY;
+			uint16_t transfer_size = context->regs[DBCL] | (context->regs[DBCH] << 8);
+			context->transfer_end = context->cycle + transfer_size * context->clock_step;
 		}
 		break;
 	case DTACK:
@@ -111,11 +123,20 @@ void lc8951_reg_write(lc8951 *context, uint8_t value)
 	case WAH_WRITE:
 		context->regs[WAH] = value;
 		break;
+	case CTRL0:
+		context->ctrl0 = value;
+		break;
+	case CTRL1:
+		context->ctrl1 = value;
+		break;
 	case PTL_WRITE:
 		context->regs[PTL] = value;
 		break;
 	case PTH_WRITE:
 		context->regs[PTH] = value;
+		context->ptl_internal = (context->regs[PTL] | (context->regs[PTH] << 8)) & (sizeof(context->buffer) - 1);
+		context->decoding = 1;
+		context->decode_end = context->cycle + 2352 * context->clock_step * 4;
 		break;
 	case RESET:
 		context->comin_count = 0;
@@ -152,6 +173,7 @@ uint8_t lc8951_reg_read(lc8951 *context)
 	} else {
 		value = context->regs[context->ar];
 	}
+	printf("CDC read %X: %X\n", context->ar, value);
 	context->ar++;
 	context->ar &= context->ar_mask;
 	return value;
@@ -160,4 +182,97 @@ uint8_t lc8951_reg_read(lc8951 *context)
 void lc8951_ar_write(lc8951 *context, uint8_t value)
 {
 	context->ar = value & context->ar_mask;
+}
+
+//25 MHz clock input (1/2 SCD MCLK)
+//internal /2 divider
+//3 cycles for each SRAM access (though might be crystal frequency rather than internal frequency)
+//6 cycle period for DMA transfer out
+//
+
+void lc8951_run(lc8951 *context, uint32_t cycle)
+{
+	for(; context->cycle < cycle; context->cycle += context->clock_step)
+	{
+		if (context->cycle >= context->decode_end) {
+			context->decode_end = CYCLE_NEVER;
+			context->regs[IFSTAT] &= ~BIT_DECI;
+			context->regs[STAT3] &= ~BIT_VALST;
+			uint16_t block_start = (context->regs[PTL] | (context->regs[PTH] << 8)) & (sizeof(context->buffer)-1);
+			for (int reg = HEAD0; reg < PTL; reg++)
+			{
+				printf("Setting HEAD%d to buffer[%X]\n", reg - HEAD0, block_start);
+				context->regs[reg] =context->buffer[block_start++];
+				block_start &= (sizeof(context->buffer)-1);
+			}
+			printf("Decode done %X:%X:%X mode %X\n", context->regs[HEAD0], context->regs[HEAD1], context->regs[HEAD2], context->regs[HEAD3]);
+		}
+		if (context->transfer_end != CYCLE_NEVER) {
+			//TODO: transfer byte to gate array destination
+			context->dac++;
+			context->regs[DBCL]--;
+			if (!context->regs[DBCL]) {
+				context->regs[DBCH]--;
+				if (!context->regs[DBCH]) {
+					context->regs[IFSTAT] &= ~BIT_DTEI;
+					if (context->cycle != context->transfer_end) {
+						printf("Expected transfer end at %u but ended at %u\n", context->transfer_end, context->cycle);
+					}
+					context->transfer_end = CYCLE_NEVER;
+				}
+			}
+		}
+	}
+}
+
+void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8_t byte)
+{
+	lc8951_run(context, cycle);
+	uint16_t current_write_addr = context->regs[WAL] | (context->regs[WAH] << 8);
+	if (sector_offset == 12) {
+		//we've recevied the sync pattern for the next block
+
+		//header/status regs no longer considered "valid"
+		context->regs[STAT3] |= BIT_VALST;
+		if ((context->ctrl0 & (BIT_DECEN|BIT_WRRQ)) == (BIT_DECEN|BIT_WRRQ)) {
+			uint16_t block_start = current_write_addr - 2352;
+			context->regs[PTL] = block_start;
+			context->regs[PTH] = block_start >> 8;
+			printf("Decoding block starting at %X\n", block_start);
+			context->ptl_internal = block_start & (sizeof(context->buffer)-1);
+			context->decode_end = context->cycle + 2352 * context->clock_step * 4;
+		}
+	}
+	if (sector_offset >= 12 && sector_offset < 16) {
+		//TODO: Handle SHDREN = 1
+		if ((context->ctrl0 & (BIT_DECEN|BIT_WRRQ)) == (BIT_DECEN)) {
+			//monitor only mode
+			context->regs[HEAD0 + sector_offset - 12] = byte;
+		}
+	}
+	if ((context->ctrl0 & (BIT_DECEN|BIT_WRRQ)) == (BIT_DECEN|BIT_WRRQ)) {
+		printf("lc8951_write_byte: %X - [%X] = %X\n", sector_offset, current_write_addr, byte);
+		context->buffer[current_write_addr & (sizeof(context->buffer)-1)] = byte;
+		context->regs[WAL]++;
+		if (!context->regs[WAL]) {
+			context->regs[WAH]++;
+		}
+	}
+}
+
+uint32_t lc8951_next_interrupt(lc8951 *context)
+{
+	if ((!context->regs[IFSTAT]) & context->ifctrl & (BIT_CMDI|BIT_DTEI|BIT_DECI)) {
+		//interrupt already pending
+		return context->cycle;
+	}
+	uint32_t deci_cycle = CYCLE_NEVER;
+	if (context->ifctrl & BIT_DECI) {
+		deci_cycle = context->decode_end;
+	}
+	uint32_t dtei_cycle = CYCLE_NEVER;
+	if (context->ifctrl & BIT_DTEI) {
+		dtei_cycle = context->transfer_end;
+	}
+	return deci_cycle < dtei_cycle ? deci_cycle : dtei_cycle;
 }

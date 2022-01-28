@@ -1,7 +1,7 @@
 #ifndef CDD_MCU_H_
 #define CDD_MCU_H_
 #include "system.h"
-
+#include "lc8951.h"
 
 typedef enum {
 	SF_ABSOLUTE,
@@ -137,8 +137,10 @@ typedef struct {
 	uint32_t      next_int_cycle; //this is in SCD MCLKS
 	uint32_t      last_subcode_cycle;
 	uint32_t      last_nibble_cycle;
+	uint32_t      last_byte_cycle;
 	int           current_status_nibble;
 	int           current_cmd_nibble;
+	int           current_sector_byte;
 	uint32_t      head_pba;
 	uint32_t      seek_pba;
 	cdd_status    status_buffer;
@@ -152,10 +154,11 @@ typedef struct {
 	uint8_t       int_pending;
 	uint8_t       toc_valid;
 	uint8_t       seeking;
+	uint8_t       in_fake_pregap;
 } cdd_mcu;
 
 void cdd_mcu_init(cdd_mcu *context, system_media *media);
-void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array);
+void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951* cdc);
 void cdd_hock_enabled(cdd_mcu *context);
 void cdd_hock_disabled(cdd_mcu *context);
 void cdd_mcu_start_cmd_recv(cdd_mcu *context, uint16_t *gate_array);

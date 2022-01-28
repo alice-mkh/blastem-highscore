@@ -141,6 +141,15 @@ uint8_t parse_cue(system_media *media)
 		//replace cue sheet with first sector
 		free(media->buffer);
 		media->buffer = calloc(2048, 1);
+		if (tracks[0].type = TRACK_DATA) {
+			// if the first track is a data track, don't trust the CUE sheet and look at the MM:SS:FF from first sector
+			uint8_t msf[3];
+			fseek(media->f, 12, SEEK_SET);
+			if (sizeof(msf) == fread(msf, 1, sizeof(msf), media->f)) {
+				tracks[0].fake_pregap = msf[2] + (msf[0] * 60 + msf[1]) * 75;
+			}
+		}
+
 		fseek(media->f, 16, SEEK_SET);
 		media->size = fread(media->buffer, 1, 2048, media->f);
 	}
