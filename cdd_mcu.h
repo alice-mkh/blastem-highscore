@@ -153,6 +153,7 @@ typedef struct {
 	uint8_t       cmd_recv_pending;
 	uint8_t       int_pending;
 	uint8_t       toc_valid;
+	uint8_t       first_cmd_received;
 	uint8_t       seeking;
 	uint8_t       in_fake_pregap;
 } cdd_mcu;

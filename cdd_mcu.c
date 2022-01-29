@@ -73,7 +73,11 @@ static void handle_seek(cdd_mcu *context)
 				context->head_pba = context->seek_pba;
 			}
 		} else {
-			context->head_pba -= SEEK_SPEED;
+			if (context->head_pba >= SEEK_SPEED) {
+				context->head_pba -= SEEK_SPEED;
+			} else {
+				context->head_pba = 0;
+			}
 			if (context->head_pba < context->seek_pba) {
 				context->head_pba = context->seek_pba;
 			}
@@ -145,94 +149,109 @@ static void update_status(cdd_mcu *context)
 		break;
 
 	}
-	switch (context->requested_format)
-	{
-	case SF_ABSOLUTE:
-		if (context->toc_valid) {
-			lba_to_status(context, context->head_pba - LEADIN_SECTORS);
-			context->status_buffer.format = SF_ABSOLUTE;
-		} else {
-			context->status_buffer.format = SF_NOTREADY;
-		}
-		break;
-	case SF_RELATIVE:
-		if (context->toc_valid) {
-			uint32_t lba =context->head_pba - LEADIN_SECTORS;
-			for (uint32_t i = 0; i < context->media->num_tracks; i++)
-			{
-				if (lba < context->media->tracks[i].end_lba) {
-					if (context->media->tracks[i].fake_pregap) {
-						if (lba > context->media->tracks[i].fake_pregap) {
-							lba -= context->media->tracks[i].fake_pregap;
-						} else {
-							//relative time counts down to 0 in pregap
-							lba = context->media->tracks[i].fake_pregap - lba;
-							break;
+	if (context->first_cmd_received) {
+		switch (context->requested_format)
+		{
+		case SF_ABSOLUTE:
+			if (context->toc_valid) {
+				lba_to_status(context, context->head_pba - LEADIN_SECTORS);
+				context->status_buffer.format = SF_ABSOLUTE;
+			} else {
+				context->status_buffer.format = SF_NOTREADY;
+			}
+			break;
+		case SF_RELATIVE:
+			if (context->toc_valid) {
+				uint32_t lba =context->head_pba - LEADIN_SECTORS;
+				for (uint32_t i = 0; i < context->media->num_tracks; i++)
+				{
+					if (lba < context->media->tracks[i].end_lba) {
+						if (context->media->tracks[i].fake_pregap) {
+							if (lba > context->media->tracks[i].fake_pregap) {
+								lba -= context->media->tracks[i].fake_pregap;
+							} else {
+								//relative time counts down to 0 in pregap
+								lba = context->media->tracks[i].fake_pregap - lba;
+								break;
+							}
 						}
+						if (lba < context->media->tracks[i].start_lba) {
+							//relative time counts down to 0 in pregap
+							lba = context->media->tracks[i].start_lba - lba;
+						} else {
+							lba -= context->media->tracks[i].start_lba;
+						}
+						break;
+					} else if (context->media->tracks[i].fake_pregap) {
+						lba -= context->media->tracks[i].fake_pregap;
 					}
-					if (lba < context->media->tracks[i].start_lba) {
-						//relative time counts down to 0 in pregap
-						lba = context->media->tracks[i].start_lba - lba;
-					} else {
-						lba -= context->media->tracks[i].start_lba;
-					}
-					break;
-				} else if (context->media->tracks[i].fake_pregap) {
-					lba -= context->media->tracks[i].fake_pregap;
 				}
+				lba_to_status(context, lba);
+				context->status_buffer.format = SF_ABSOLUTE;
+			} else {
+				context->status_buffer.format = SF_NOTREADY;
 			}
-			lba_to_status(context, lba);
-			context->status_buffer.format = SF_ABSOLUTE;
-		} else {
-			context->status_buffer.format = SF_NOTREADY;
-		}
-		break;
-	case SF_TOCO:
-		if (context->toc_valid) {
-			lba_to_status(context, context->media->tracks[context->media->num_tracks - 1].end_lba + (context->media->num_tracks > 1 ? context->media->tracks[1].fake_pregap : 0));
-			context->status_buffer.format = SF_TOCO;
-		} else {
-			context->status_buffer.format = SF_NOTREADY;
-		}
-		break;
-	case SF_TOCT:
-		if (context->toc_valid) {
-			context->status_buffer.b.toct.first_track_high = 0;
-			context->status_buffer.b.toct.first_track_low = 1;
-			context->status_buffer.b.toct.last_track_high = (context->media->num_tracks + 1) / 10;
-			context->status_buffer.b.toct.last_track_low = (context->media->num_tracks + 1) % 10;
-			context->status_buffer.b.toct.version = 0;
-			context->status_buffer.format = SF_TOCT;
-		} else {
-			context->status_buffer.format = SF_NOTREADY;
-		}
-		break;
-	case SF_TOCN:
-		if (context->toc_valid) {
-			uint32_t lba = context->media->tracks[context->requested_track - 1].start_lba;
-			if (context->requested_track > 1) {
-				lba += context->media->tracks[1].fake_pregap;
+			break;
+		case SF_TOCO:
+			if (context->toc_valid) {
+				uint32_t total_fake_pregap = 0;
+				for (uint32_t i = 0; i < context->media->num_tracks; i++)
+				{
+					total_fake_pregap += context->media->tracks[i].fake_pregap;
+				}
+				lba_to_status(context, context->media->tracks[context->media->num_tracks - 1].end_lba + total_fake_pregap);
+				context->status_buffer.format = SF_TOCO;
+			} else {
+				context->status_buffer.format = SF_NOTREADY;
 			}
-			lba_to_status(context, lba);
-			context->status_buffer.b.tocn.track_low = context->requested_track % 10;
-			context->status_buffer.format = SF_TOCN;
-		} else {
+			break;
+		case SF_TOCT:
+			if (context->toc_valid) {
+				context->status_buffer.b.toct.first_track_high = 0;
+				context->status_buffer.b.toct.first_track_low = 1;
+				context->status_buffer.b.toct.last_track_high = (context->media->num_tracks + 1) / 10;
+				context->status_buffer.b.toct.last_track_low = (context->media->num_tracks + 1) % 10;
+				context->status_buffer.b.toct.version = 0;
+				context->status_buffer.format = SF_TOCT;
+			} else {
+				context->status_buffer.format = SF_NOTREADY;
+			}
+			break;
+		case SF_TOCN:
+			if (context->toc_valid) {
+				uint32_t lba = context->media->tracks[context->requested_track - 1].start_lba;
+				if (context->requested_track > 1) {
+					lba += context->media->tracks[1].fake_pregap;
+				}
+				lba_to_status(context, lba);
+				context->status_buffer.b.tocn.track_low = context->requested_track % 10;
+				context->status_buffer.format = SF_TOCN;
+			} else {
+				context->status_buffer.format = SF_NOTREADY;
+			}
+			break;
+		case SF_NOTREADY:
+			memset(&context->status_buffer, 0, sizeof(context->status_buffer) - 1);
 			context->status_buffer.format = SF_NOTREADY;
+			break;
 		}
-		break;
-	case SF_NOTREADY:
-		memset(&context->status_buffer, 0, sizeof(context->status_buffer) - 1);
-		context->status_buffer.format = SF_NOTREADY;
-		break;
-	}
-	if (context->error_status == DS_STOP) {
-		context->status_buffer.status = context->status;
+		if (context->error_status == DS_STOP) {
+			if (context->requested_format >= SF_TOCO && context->requested_format <= SF_TOCN) {
+				context->status_buffer.status = DS_TOC_READ;
+			} else {
+				context->status_buffer.status = context->status;
+			}
+		} else {
+			context->status_buffer.status = context->error_status;
+			context->status_buffer.format = SF_NOTREADY;
+			context->error_status = DS_STOP;
+		}
+		if (context->requested_format != SF_TOCN) {
+			context->status_buffer.b.time.flags = 1; //TODO: populate these
+		}
 	} else {
-		context->status_buffer.status = context->error_status;
-		context->error_status = DS_STOP;
-	}
-	if (context->requested_format != SF_TOCN) {
-		context->status_buffer.b.time.flags = 0; //TODO: populate these
+		// Did not receive our first command so just send zeroes
+		memset(&context->status_buffer, 0, sizeof(context->status_buffer) - 1);
 	}
 	context->status_buffer.checksum = checksum((uint8_t *)&context->status_buffer);
 	if (context->status_buffer.format != SF_NOTREADY) {
@@ -249,6 +268,7 @@ static void update_status(cdd_mcu *context)
 static void run_command(cdd_mcu *context)
 {
 	uint8_t check = checksum((uint8_t*)&context->cmd_buffer);
+	printf("cmd %X, checksum: %X, calc: %X\n", context->cmd_buffer.cmd_type, context->cmd_buffer.checksum, check);
 	if (check != context->cmd_buffer.checksum) {
 		context->error_status = DS_SUM_ERROR;
 		return;
@@ -257,6 +277,7 @@ static void run_command(cdd_mcu *context)
 		context->error_status = DS_CMD_ERROR;
 		return;
 	}
+	context->first_cmd_received = 1;
 	switch (context->cmd_buffer.cmd_type)
 	{
 	case CMD_NOP:
@@ -264,6 +285,7 @@ static void run_command(cdd_mcu *context)
 	case CMD_STOP:
 		puts("CDD CMD: STOP");
 		context->status = DS_STOP;
+		context->requested_format = SF_ABSOLUTE;
 		break;
 	case CMD_READ:
 	case CMD_SEEK: {
@@ -353,7 +375,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 	if (!(gate_array[GAO_CDD_CTRL] & BIT_HOCK)) {
 		//it's a little unclear if this gates the actual cd block clock or just handshaking
 		//assum it's actually the clock for now
-		context->cycle = cycle;
+		context->cycle = cd_cycle;
 		return;
 	}
 	uint32_t next_subcode = context->last_subcode_cycle + SECTOR_CLOCKS;
