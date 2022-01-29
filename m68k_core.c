@@ -964,7 +964,7 @@ static void translate_m68k(m68k_context *context, m68kinst * inst)
 		m68k_breakpoint_patch(context, inst->address, bp, start);
 	}
 
-	//log_address(&opts->gen, inst->address, "M68K: %X @ %d\n");
+	//log_address(&opts->gen, inst->address, opts->gen.clock_divider == 4 ? "Sub M68k: %X @ %d\n" : "Main M68K: %X @ %d\n");
 	if (
 		(inst->src.addr_mode > MODE_AREG && inst->src.addr_mode < MODE_IMMEDIATE)
 		|| (inst->dst.addr_mode > MODE_AREG && inst->dst.addr_mode < MODE_IMMEDIATE)
