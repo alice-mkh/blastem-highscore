@@ -417,7 +417,7 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 				lc8951_resume_transfer(&cd->cdc, cd->cdc.cycle);
 			}
 			calculate_target_cycle(cd->m68k);
-			
+
 		}
 		return cd->gate_array[reg];
 	}
@@ -688,7 +688,7 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		cd->gate_array[GA_CDC_HOST_DATA] &= 0xFF00;
 		cd->gate_array[GA_CDC_HOST_DATA] |= value;
 	}
-	
+
 	uint32_t dma_addr = cd->gate_array[GA_CDC_DMA_ADDR] << 3;
 	dma_addr |= cd->cdc_dst_low;
 	switch (dest)
@@ -886,6 +886,32 @@ static uint8_t main_gate_read8(uint32_t address, void *vcontext)
 	return address & 1 ? val : val >> 8;
 }
 
+static void dump_prog_ram(segacd_context *cd)
+{
+	static int dump_count;
+	char fname[256];
+	sprintf(fname, "prog_ram_%d.bin", dump_count++);
+	FILE *f = fopen(fname, "wb");
+	if (f) {
+		uint32_t last = 256*1024-1;
+		for(; last > 0; --last)
+		{
+			if (cd->prog_ram[last]) {
+				break;
+			}
+		}
+		for (uint32_t i = 0; i <= last; i++)
+		{
+			uint8_t pair[2];
+			pair[0] = cd->prog_ram[i] >> 8;
+			pair[1] = cd->prog_ram[i];
+			fwrite(pair, 1, sizeof(pair), f);
+		}
+
+		fclose(f);
+	}
+}
+
 static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 {
 	m68k_context *m68k = vcontext;
@@ -920,6 +946,9 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 			m68k->mem_pointers[cd->memptr_start_index] = NULL;
 			m68k_invalidate_code_range(m68k, cd->base + 0x220000, cd->base + 0x240000);
 			m68k_invalidate_code_range(cd->m68k, bank * 0x20000, (bank + 1) * 0x20000);
+			if (!new_access) {
+				dump_prog_ram(cd);
+			}
 		}
 		break;
 	}
