@@ -153,7 +153,7 @@ static void update_status(cdd_mcu *context)
 		switch (context->requested_format)
 		{
 		case SF_ABSOLUTE:
-			if (context->toc_valid) {
+			if (context->toc_valid && context->head_pba >= LEADIN_SECTORS) {
 				lba_to_status(context, context->head_pba - LEADIN_SECTORS);
 				context->status_buffer.format = SF_ABSOLUTE;
 			} else {
@@ -161,7 +161,7 @@ static void update_status(cdd_mcu *context)
 			}
 			break;
 		case SF_RELATIVE:
-			if (context->toc_valid) {
+			if (context->toc_valid && context->head_pba >= LEADIN_SECTORS) {
 				uint32_t lba =context->head_pba - LEADIN_SECTORS;
 				for (uint32_t i = 0; i < context->media->num_tracks; i++)
 				{
@@ -187,7 +187,49 @@ static void update_status(cdd_mcu *context)
 					}
 				}
 				lba_to_status(context, lba);
-				context->status_buffer.format = SF_ABSOLUTE;
+				context->status_buffer.format = SF_RELATIVE;
+			} else {
+				context->status_buffer.format = SF_NOTREADY;
+			}
+			break;
+		case SF_TRACK:
+			if (context->toc_valid && context->head_pba >= LEADIN_SECTORS) {
+				uint32_t lba =context->head_pba - LEADIN_SECTORS;
+				uint32_t i;
+				for (i = 0; i < context->media->num_tracks; i++)
+				{
+					if (lba < context->media->tracks[i].end_lba) {
+						if (context->media->tracks[i].fake_pregap) {
+							if (lba > context->media->tracks[i].fake_pregap) {
+								lba -= context->media->tracks[i].fake_pregap;
+							} else {
+								//relative time counts down to 0 in pregap
+								lba = context->media->tracks[i].fake_pregap - lba;
+								break;
+							}
+						}
+						if (lba < context->media->tracks[i].start_lba) {
+							//relative time counts down to 0 in pregap
+							lba = context->media->tracks[i].start_lba - lba;
+						} else {
+							lba -= context->media->tracks[i].start_lba;
+						}
+						break;
+					} else if (context->media->tracks[i].fake_pregap) {
+						lba -= context->media->tracks[i].fake_pregap;
+					}
+				}
+				context->status_buffer.b.track.track_high = (i + 1) / 10;
+				context->status_buffer.b.track.track_low = (i + 1) % 10;
+				if (context->media->tracks[i].type == TRACK_DATA) {
+					context->status_buffer.b.track.control = 4;
+				} else {
+					//TODO: pre-emphasis flag
+					//TODO: copy permitted flag
+					context->status_buffer.b.track.control = 0;
+				}
+				context->status_buffer.b.track.adr = 1;
+				context->status_buffer.format = SF_TRACK;
 			} else {
 				context->status_buffer.format = SF_NOTREADY;
 			}
@@ -220,10 +262,13 @@ static void update_status(cdd_mcu *context)
 		case SF_TOCN:
 			if (context->toc_valid) {
 				uint32_t lba = context->media->tracks[context->requested_track - 1].start_lba;
-				if (context->requested_track > 1) {
-					lba += context->media->tracks[1].fake_pregap;
+				for (uint32_t i = 0; i < context->requested_track; i++) {
+					lba += context->media->tracks[i].fake_pregap;
 				}
 				lba_to_status(context, lba);
+				if (context->media->tracks[context->requested_track - 1].type == TRACK_DATA) {
+					context->status_buffer.b.tocn.frame_low |= 0x80;
+				}
 				context->status_buffer.b.tocn.track_low = context->requested_track % 10;
 				context->status_buffer.format = SF_TOCN;
 			} else {
@@ -238,6 +283,8 @@ static void update_status(cdd_mcu *context)
 		if (context->error_status == DS_STOP) {
 			if (context->requested_format >= SF_TOCO && context->requested_format <= SF_TOCN) {
 				context->status_buffer.status = DS_TOC_READ;
+			} else if (context->seeking) {
+				context->status_buffer.status = DS_SEEK;
 			} else {
 				context->status_buffer.status = context->status;
 			}
@@ -305,7 +352,11 @@ static void run_command(cdd_mcu *context)
 		lba += context->cmd_buffer.b.time.sec_high * 10 + context->cmd_buffer.b.time.sec_low;
 		lba *= 75;
 		lba += context->cmd_buffer.b.time.frame_high * 10 + context->cmd_buffer.b.time.frame_low;
-		printf("READ/SEEK cmd for lba %d\n", lba);
+		printf("READ/SEEK cmd for lba %d, MM:SS:FF %u%u:%u%u:%u%u\n", lba,
+			context->cmd_buffer.b.time.min_high, context->cmd_buffer.b.time.min_low,
+			context->cmd_buffer.b.time.sec_high, context->cmd_buffer.b.time.sec_low,
+			context->cmd_buffer.b.time.frame_high, context->cmd_buffer.b.time.frame_low
+		);
 		if (lba >= context->media->tracks[0].fake_pregap + context->media->tracks[context->media->num_tracks - 1].end_lba) {
 			context->error_status = DS_CMD_ERROR;
 			break;

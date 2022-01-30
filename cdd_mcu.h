@@ -69,7 +69,7 @@ typedef struct {
 			uint8_t padding0;
 			uint8_t padding1;
 			uint8_t control;
-			uint8_t padding2;
+			uint8_t adr;
 			uint8_t flags;
 		} track;
 		struct {

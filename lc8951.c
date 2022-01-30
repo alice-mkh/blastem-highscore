@@ -64,13 +64,17 @@ enum {
 //3 cycles for memory operation
 //6 cycles min for DMA-mode host transfer
 
-void lc8951_init(lc8951 *context)
+void lc8951_init(lc8951 *context, lcd8951_byte_recv_fun byte_handler, void *handler_data)
 {
 	//This seems to vary somewhat between Sega CD models
 	//unclear if the difference is in the lc8951 or gate array
 	context->regs[IFSTAT] = 0xFF;
 	context->ar_mask = 0x1F;
 	context->clock_step = (2 + 2) * 6; // external divider, internal divider + DMA period
+	context->byte_handler = byte_handler;
+	context->handler_data = handler_data;
+	context->decode_end = CYCLE_NEVER;
+	context->transfer_end = CYCLE_NEVER;
 }
 
 void lc8951_reg_write(lc8951 *context, uint8_t value)
@@ -91,6 +95,7 @@ void lc8951_reg_write(lc8951 *context, uint8_t value)
 		}
 		if (!(value & BIT_DOUTEN)) {
 			context->regs[IFSTAT] |= BIT_DTBSY;
+			context->transfer_end = CYCLE_NEVER;
 		}
 		break;
 	case DBCL:
@@ -108,10 +113,11 @@ void lc8951_reg_write(lc8951 *context, uint8_t value)
 		context->dac |= value << 8;
 		break;
 	case DTTRG:
-		if (value & BIT_DOUTEN) {
+		if (context->ifctrl & BIT_DOUTEN) {
 			context->regs[IFSTAT] &= ~BIT_DTBSY;
 			uint16_t transfer_size = context->regs[DBCL] | (context->regs[DBCH] << 8);
 			context->transfer_end = context->cycle + transfer_size * context->clock_step;
+			printf("DTTRG: size %u, cycle %u, end %u\n", transfer_size, context->cycle, context->transfer_end);
 		}
 		break;
 	case DTACK:
@@ -208,19 +214,35 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 			printf("Decode done %X:%X:%X mode %X\n", context->regs[HEAD0], context->regs[HEAD1], context->regs[HEAD2], context->regs[HEAD3]);
 		}
 		if (context->transfer_end != CYCLE_NEVER) {
-			//TODO: transfer byte to gate array destination
-			context->dac++;
-			context->regs[DBCL]--;
-			if (!context->regs[DBCL]) {
-				context->regs[DBCH]--;
-				if (!context->regs[DBCH]) {
-					context->regs[IFSTAT] &= ~BIT_DTEI;
-					if (context->cycle != context->transfer_end) {
-						printf("Expected transfer end at %u but ended at %u\n", context->transfer_end, context->cycle);
+			if (context->byte_handler(context->handler_data, context->buffer[context->dac & (sizeof(context->buffer)-1)])) {
+				context->dac++;
+				context->regs[DBCL]--;
+				if (context->regs[DBCL] == 0xFF) {
+					context->regs[DBCH]--;
+					if (context->regs[DBCH] == 0xFF) {
+						context->regs[IFSTAT] &= ~BIT_DTEI;
+						context->regs[IFSTAT] |= BIT_DTBSY;
+						if (context->cycle != context->transfer_end) {
+							printf("Expected transfer end at %u but ended at %u\n", context->transfer_end, context->cycle);
+						}
+						context->transfer_end = CYCLE_NEVER;
 					}
-					context->transfer_end = CYCLE_NEVER;
 				}
+			} else {
+				// pause transfer
+				context->transfer_end = CYCLE_NEVER;
 			}
+		}
+	}
+}
+
+void lc8951_resume_transfer(lc8951 *context)
+{
+	if (context->transfer_end == CYCLE_NEVER && (context->ifctrl & BIT_DOUTEN)) {
+		uint16_t transfer_size = context->regs[DBCL] | (context->regs[DBCH] << 8);
+		if (transfer_size) {
+			context->transfer_end = context->cycle + transfer_size * context->clock_step;
+			printf("RESUME: size %u, cycle %u, end %u\n", transfer_size, context->cycle, context->transfer_end);
 		}
 	}
 }
@@ -251,7 +273,6 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 		}
 	}
 	if ((context->ctrl0 & (BIT_DECEN|BIT_WRRQ)) == (BIT_DECEN|BIT_WRRQ)) {
-		printf("lc8951_write_byte: %X - [%X] = %X\n", sector_offset, current_write_addr, byte);
 		context->buffer[current_write_addr & (sizeof(context->buffer)-1)] = byte;
 		context->regs[WAL]++;
 		if (!context->regs[WAL]) {
@@ -262,7 +283,7 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 
 uint32_t lc8951_next_interrupt(lc8951 *context)
 {
-	if ((!context->regs[IFSTAT]) & context->ifctrl & (BIT_CMDI|BIT_DTEI|BIT_DECI)) {
+	if ((~context->regs[IFSTAT]) & context->ifctrl & (BIT_CMDI|BIT_DTEI|BIT_DECI)) {
 		//interrupt already pending
 		return context->cycle;
 	}
