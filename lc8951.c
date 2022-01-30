@@ -57,10 +57,11 @@ enum {
 #define BIT_DECEN 0x80
 #define BIT_WRRQ  0x04
 
+//STAT0
+#define BIT_CRCOK 0x80
+
 //STAT3
 #define BIT_VALST 0x80
-
-#define DECI_AUTO_CLEAR 575
 
 //datasheet timing info
 //3 cycles for memory operation
@@ -77,7 +78,6 @@ void lc8951_init(lc8951 *context, lcd8951_byte_recv_fun byte_handler, void *hand
 	context->handler_data = handler_data;
 	context->decode_end = CYCLE_NEVER;
 	context->transfer_end = CYCLE_NEVER;
-	context->deci_clear = CYCLE_NEVER;
 }
 
 void lc8951_reg_write(lc8951 *context, uint8_t value)
@@ -142,9 +142,9 @@ void lc8951_reg_write(lc8951 *context, uint8_t value)
 		break;
 	case PTH_WRITE:
 		context->regs[PTH] = value;
-		context->ptl_internal = (context->regs[PTL] | (context->regs[PTH] << 8)) & (sizeof(context->buffer) - 1);
-		context->decoding = 1;
-		context->decode_end = context->cycle + 2352 * context->clock_step * 4;
+		//TODO: Datasheet says any write to PT triggers a decode, but initial tests suggest that's not the case
+		//Need to do more tests with other CTRL0/CTRL1 settings
+		//context->decode_end = context->cycle + 2352 * context->clock_step * 4;
 		break;
 	case RESET:
 		context->comin_count = 0;
@@ -175,7 +175,6 @@ uint8_t lc8951_reg_read(lc8951 *context)
 	}
 	if (context->ar == STAT3) {
 		context->regs[IFSTAT] |= BIT_DECI;
-		context->deci_clear = CYCLE_NEVER;
 	}
 	if (context->ar >= sizeof(context->regs)) {
 		value = 0xFF;
@@ -206,16 +205,18 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 		if (context->cycle >= context->decode_end) {
 			context->decode_end = CYCLE_NEVER;
 			context->regs[IFSTAT] &= ~BIT_DECI;
-			context->deci_clear = context->cycle + DECI_AUTO_CLEAR;
 			context->regs[STAT3] &= ~BIT_VALST;
-			uint16_t block_start = (context->regs[PTL] | (context->regs[PTH] << 8)) & (sizeof(context->buffer)-1);
-			for (int reg = HEAD0; reg < PTL; reg++)
-			{
-				printf("Setting HEAD%d to buffer[%X]\n", reg - HEAD0, block_start);
-				context->regs[reg] =context->buffer[block_start++];
-				block_start &= (sizeof(context->buffer)-1);
+			if (context->ctrl0 & BIT_WRRQ) {
+				uint16_t block_start = (context->regs[PTL] | (context->regs[PTH] << 8)) & (sizeof(context->buffer)-1);
+				for (int reg = HEAD0; reg < PTL; reg++)
+				{
+					printf("Setting HEAD%d to buffer[%X]\n", reg - HEAD0, block_start);
+					context->regs[reg] =context->buffer[block_start++];
+					block_start &= (sizeof(context->buffer)-1);
+				}
 			}
 			printf("Decode done %X:%X:%X mode %X\n", context->regs[HEAD0], context->regs[HEAD1], context->regs[HEAD2], context->regs[HEAD3]);
+			context->regs[STAT0] |= BIT_CRCOK;
 		}
 		if (context->transfer_end != CYCLE_NEVER) {
 			if (context->byte_handler(context->handler_data, context->buffer[context->dac & (sizeof(context->buffer)-1)])) {
@@ -236,10 +237,6 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 				// pause transfer
 				context->transfer_end = CYCLE_NEVER;
 			}
-		}
-		if (context->cycle >= context->deci_clear) {
-			context->regs[IFSTAT] |= BIT_DECI;
-			context->deci_clear = CYCLE_NEVER;
 		}
 	}
 }
@@ -272,12 +269,16 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 
 		//header/status regs no longer considered "valid"
 		context->regs[STAT3] |= BIT_VALST;
-		if ((context->ctrl0 & (BIT_DECEN|BIT_WRRQ)) == (BIT_DECEN|BIT_WRRQ)) {
-			uint16_t block_start = current_write_addr - 2352;
-			context->regs[PTL] = block_start;
-			context->regs[PTH] = block_start >> 8;
-			printf("Decoding block starting at %X\n", block_start);
-			context->ptl_internal = block_start & (sizeof(context->buffer)-1);
+		//!DECI is set inactive at the same time as !VALST
+		context->regs[IFSTAT] |= BIT_DECI;
+		if (context->ctrl0 & BIT_DECEN) {
+			if (context->ctrl0 & BIT_WRRQ) {
+				uint16_t block_start = current_write_addr - 2352;
+				context->regs[PTL] = block_start;
+				context->regs[PTH] = block_start >> 8;
+			}
+			printf("Decoding block starting at %X\n", context->regs[PTL] | (context->regs[PTH] << 8));
+			//TODO: Datasheet has some hints about how long decoding takes in the form of how long DECI is asserted
 			context->decode_end = context->cycle + 2352 * context->clock_step * 4;
 		}
 	}
@@ -320,9 +321,6 @@ void lc8951_adjust_cycles(lc8951 *context, uint32_t deduction)
 		context->decode_end -= deduction;
 	}
 	if (context->transfer_end != CYCLE_NEVER) {
-		context->transfer_end -= deduction;
-	}
-	if (context->deci_clear != CYCLE_NEVER) {
 		context->transfer_end -= deduction;
 	}
 }

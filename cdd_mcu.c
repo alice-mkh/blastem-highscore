@@ -61,25 +61,29 @@ static uint8_t checksum(uint8_t *vbuffer)
 	}
 	return (~sum) & 0xF;
 }
-#define SEEK_SPEED 2200 //made up number
+#define COARSE_SEEK 2200 //made up numbers
+#define FINE_SEEK 10
 static void handle_seek(cdd_mcu *context)
 {
+	//TODO: more realistic seeking behavior
 	if (context->seeking) {
 		if (context->seek_pba == context->head_pba) {
 			context->seeking = 0;
 		} else if (context->seek_pba > context->head_pba) {
-			context->head_pba += SEEK_SPEED;
-			if (context->head_pba > context->seek_pba) {
-				context->head_pba = context->seek_pba;
+			if (context->seek_pba - context->head_pba >= COARSE_SEEK) {
+				context->head_pba += COARSE_SEEK;
+			} else if (context->seek_pba - context->head_pba >= FINE_SEEK) {
+				context->head_pba += FINE_SEEK;
+			} else {
+				context->head_pba++;
 			}
 		} else {
-			if (context->head_pba >= SEEK_SPEED) {
-				context->head_pba -= SEEK_SPEED;
+			if (context->head_pba - context->seek_pba >= COARSE_SEEK) {
+				context->head_pba -= COARSE_SEEK;
+			} else if (context->head_pba >= FINE_SEEK) {
+				context->head_pba -= FINE_SEEK;
 			} else {
 				context->head_pba = 0;
-			}
-			if (context->head_pba < context->seek_pba) {
-				context->head_pba = context->seek_pba;
 			}
 		}
 	}
@@ -352,7 +356,8 @@ static void run_command(cdd_mcu *context)
 		lba += context->cmd_buffer.b.time.sec_high * 10 + context->cmd_buffer.b.time.sec_low;
 		lba *= 75;
 		lba += context->cmd_buffer.b.time.frame_high * 10 + context->cmd_buffer.b.time.frame_low;
-		printf("READ/SEEK cmd for lba %d, MM:SS:FF %u%u:%u%u:%u%u\n", lba,
+		printf("CDD CMD: %s cmd for lba %d, MM:SS:FF %u%u:%u%u:%u%u\n",
+			context->cmd_buffer.cmd_type == CMD_READ ? "READ" : "SEEK", lba,
 			context->cmd_buffer.b.time.min_high, context->cmd_buffer.b.time.min_low,
 			context->cmd_buffer.b.time.sec_high, context->cmd_buffer.b.time.sec_low,
 			context->cmd_buffer.b.time.frame_high, context->cmd_buffer.b.time.frame_low
@@ -410,6 +415,27 @@ static void run_command(cdd_mcu *context)
 			break;
 		}
 		printf("CDD CMD: REPORT REQUEST(%d), format set to %d\n", context->cmd_buffer.b.format.status_type, context->requested_format);
+		break;
+	case CMD_PAUSE:
+		if (context->status == DS_DOOR_OPEN || context->status == DS_TRAY_MOVING || context->status == DS_DISC_LEADOUT || context->status == DS_DISC_LEADIN) {
+			context->error_status = DS_CMD_ERROR;
+			break;
+		}
+		if (context->requested_format == SF_TOCT || context->requested_format == SF_TOCN) {
+			context->requested_format = SF_ABSOLUTE;
+		}
+		if (!context->toc_valid) {
+			context->error_status = DS_CMD_ERROR;
+			break;
+		}
+		if (context->status == DS_STOP) {
+			context->seeking = 1;
+			context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].fake_pregap + context->media->tracks[0].start_lba;
+			printf("CDD CMD: PAUSE, seeking to %u\n", context->seek_pba);
+		} else {
+			puts("CDD CMD: PAUSE");
+		}
+		context->status = DS_PAUSE;
 		break;
 	default:
 		printf("CDD CMD: Unimplemented(%d)\n", context->cmd_buffer.cmd_type);

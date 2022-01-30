@@ -12,7 +12,6 @@ typedef struct {
 	uint32_t clock_step;
 	uint32_t decode_end;
 	uint32_t transfer_end;
-	uint32_t deci_clear;
 
 	uint8_t  buffer[0x4000];
 
@@ -27,8 +26,6 @@ typedef struct {
 	uint8_t  ctrl1;
 	uint8_t  ar;
 	uint8_t  ar_mask;
-	uint8_t  decoding;
-	uint16_t ptl_internal;
 } lc8951;
 
 void lc8951_init(lc8951 *context, lcd8951_byte_recv_fun byte_handler, void *handler_data);
