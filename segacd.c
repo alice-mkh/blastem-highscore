@@ -332,6 +332,14 @@ static void calculate_target_cycle(m68k_context * context)
 	if (mask < 5) {
 		if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN5) {
 			uint32_t cdc_cycle = lc8951_next_interrupt(&cd->cdc);
+			//CDC interrupts only generated on falling edge of !INT signal
+			if (cd->cdc_int_ack) {
+				if (cdc_cycle > cd->cdc.cycle) {
+					cd->cdc_int_ack = 0;
+				} else {
+					cdc_cycle = CYCLE_NEVER;
+				}
+			}
 			if (cdc_cycle < context->int_cycle) {
 				context->int_cycle = cdc_cycle;
 				context->int_num = 5;
@@ -401,18 +409,17 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 		cdd_run(cd, m68k->current_cycle);
 		return lc8951_reg_read(&cd->cdc);
 	case GA_CDC_HOST_DATA: {
+		cdd_run(cd, m68k->current_cycle);
 		uint16_t dst = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
 		if (dst == DST_SUB_CPU) {
-			cdd_run(cd, m68k->current_cycle);
 			if (cd->gate_array[GA_CDC_CTRL] & BIT_DSR) {
 				cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
-				lc8951_resume_transfer(&cd->cdc);
+				lc8951_resume_transfer(&cd->cdc, cd->cdc.cycle);
 			}
 			calculate_target_cycle(cd->m68k);
-			return cd->gate_array[reg];
-		} else {
-			return 0xFFFF;
+			
 		}
+		return cd->gate_array[reg];
 	}
 	case GA_STOP_WATCH:
 	case GA_TIMER:
@@ -527,11 +534,14 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_CDC_CTRL:
 		cdd_run(cd, m68k->current_cycle);
 		lc8951_ar_write(&cd->cdc, value);
-		cd->gate_array[reg] &= 0xC000;
+		//cd->gate_array[reg] &= 0xC000;
+		//apparently this clears EDT, should it also clear DSR?
 		cd->gate_array[reg] = value & 0x0700;
+		cd->cdc_dst_low = 0;
 		break;
 	case GA_CDC_REG_DATA:
 		cdd_run(cd, m68k->current_cycle);
+		printf("CDC write %X: %X @ %u\n", cd->cdc.ar, value, m68k->current_cycle);
 		lc8951_reg_write(&cd->cdc, value);
 		calculate_target_cycle(m68k);
 		break;
@@ -630,10 +640,11 @@ static void *sub_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	case GA_CDC_CTRL:
 		if (address & 1) {
 			lc8951_ar_write(&cd->cdc, value);
+			return vcontext;
 		} else {
-			cd->gate_array[reg] = value << 8;
+			value16 = cd->cdc.ar | (value << 8);
 		}
-		return vcontext;
+		break;
 	case GA_CDD_CMD4:
 		if (!address) {
 			//byte write to $FF804A should not trigger transfer
@@ -656,39 +667,48 @@ static void *sub_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 {
 	segacd_context *cd = vsys;
+	if (cd->gate_array[GA_CDC_CTRL] & BIT_DSR) {
+		//host reg is already full, pause transfer
+		return 0;
+	}
+	if (cd->cdc.cycle == cd->cdc.transfer_end) {
+		cd->gate_array[GA_CDC_CTRL] |= BIT_EDT;
+		printf("EDT set at %u\n", cd->cdc.cycle);
+	}
 	uint16_t dest = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
+	if (!(cd->cdc_dst_low & 1)) {
+		cd->gate_array[GA_CDC_HOST_DATA] &= 0xFF;
+		cd->gate_array[GA_CDC_HOST_DATA] |= value << 8;
+		cd->cdc_dst_low++;
+		if (dest != DST_PCM_RAM) {
+			//PCM RAM writes a byte at a time
+			return 1;
+		}
+	} else {
+		cd->gate_array[GA_CDC_HOST_DATA] &= 0xFF00;
+		cd->gate_array[GA_CDC_HOST_DATA] |= value;
+	}
+	
 	uint32_t dma_addr = cd->gate_array[GA_CDC_DMA_ADDR] << 3;
 	dma_addr |= cd->cdc_dst_low;
 	switch (dest)
 	{
 	case DST_MAIN_CPU:
 	case DST_SUB_CPU:
-		if (cd->gate_array[GA_CDC_CTRL] & BIT_DSR) {
-			//host reg is already full, pause transfer
-			return 0;
-		}
-		if (cd->cdc_dst_low) {
-			cd->gate_array[GA_CDC_HOST_DATA] &= 0xFF00;
-			cd->gate_array[GA_CDC_HOST_DATA] |= value;
-			cd->cdc_dst_low = 0;
-			cd->gate_array[GA_CDC_CTRL] |= BIT_DSR;
-		} else {
-			cd->gate_array[GA_CDC_HOST_DATA] &= 0xFF;
-			cd->gate_array[GA_CDC_HOST_DATA] |= value << 8;
-			cd->cdc_dst_low = 1;
-			return 1;
-		}
+		cd->cdc_dst_low = 0;
+		cd->gate_array[GA_CDC_CTRL] |= BIT_DSR;
+		printf("DSR set at %u, (transfer_end %u, dbcl %X, dbch %X)\n", cd->cdc.cycle, cd->cdc.transfer_end, cd->cdc.regs[2], cd->cdc.regs[3]);
 		break;
 	case DST_PCM_RAM:
 		dma_addr &= (1 << 13) - 1;
 		//TODO: write to currently visible 8K bank of PCM RAM I guess?
-		dma_addr++;
+		dma_addr += 2;
 		cd->cdc_dst_low = dma_addr & 7;
 		cd->gate_array[GA_CDC_DMA_ADDR] = dma_addr >> 3;
 		break;
 	case DST_PROG_RAM:
-		((uint8_t*)cd->prog_ram)[dma_addr ^ 1] = value;
-		m68k_invalidate_code_range(cd->m68k, dma_addr, dma_addr + 1);
+		cd->prog_ram[dma_addr >> 1] = cd->gate_array[GA_CDC_HOST_DATA];
+		m68k_invalidate_code_range(cd->m68k, dma_addr - 1, dma_addr + 1);
 		dma_addr++;
 		cd->cdc_dst_low = dma_addr & 7;
 		cd->gate_array[GA_CDC_DMA_ADDR] = dma_addr >> 3;
@@ -697,13 +717,13 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
 			//1M mode, write to bank assigned to Sub CPU
 			dma_addr &= (1 << 17) - 1;
-			((uint8_t*)cd->m68k->mem_pointers[1])[dma_addr ^ 1] = value;
-			m68k_invalidate_code_range(cd->m68k, 0x0C0000 + dma_addr, 0x0C0000 + dma_addr + 1);
+			cd->m68k->mem_pointers[1][dma_addr >> 1] = cd->gate_array[GA_CDC_HOST_DATA];
+			m68k_invalidate_code_range(cd->m68k, 0x0C0000 + dma_addr - 1, 0x0C0000 + dma_addr + 1);
 		} else {
 			//2M mode, check if Sub CPU has access
 			if (!(cd->gate_array[GA_MEM_MODE] & BIT_RET)) {
 				dma_addr &= (1 << 18) - 1;
-				((uint8_t*)cd->word_ram)[dma_addr ^ 1] = value;
+				cd->word_ram[dma_addr >> 1] = cd->gate_array[GA_CDC_HOST_DATA];
 				m68k_invalidate_code_range(cd->m68k, 0x080000 + dma_addr, 0x080000 + dma_addr + 1);
 			}
 		}
@@ -713,9 +733,6 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		break;
 	default:
 		printf("Invalid CDC transfer destination %d\n", dest);
-	}
-	if (cd->cdc.cycle == cd->cdc.transfer_end) {
-		cd->gate_array[GA_CDC_CTRL] |= BIT_EDT;
 	}
 	return 1;
 }
@@ -746,6 +763,10 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 		break;
 	case 4:
 		cd->cdd.int_pending = 0;
+		break;
+	case 5:
+		cd->cdc_int_ack = 1;
+		break;
 	}
 	context->int_ack = 0;
 	calculate_target_cycle(context);
@@ -755,17 +776,20 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 void scd_run(segacd_context *cd, uint32_t cycle)
 {
 	uint8_t m68k_run = !can_main_access_prog(cd);
-	if (m68k_run) {
-		cd->m68k->sync_cycle = cycle;
-		if (cd->need_reset) {
-			cd->need_reset = 0;
-			m68k_reset(cd->m68k);
+	if (cycle > cd->m68k->current_cycle) {
+		if (m68k_run) {
+			uint32_t start = cd->m68k->current_cycle;
+			cd->m68k->sync_cycle = cycle;
+			if (cd->need_reset) {
+				cd->need_reset = 0;
+				m68k_reset(cd->m68k);
+			} else {
+				calculate_target_cycle(cd->m68k);
+				resume_68k(cd->m68k);
+			}
 		} else {
-			calculate_target_cycle(cd->m68k);
-			resume_68k(cd->m68k);
+			cd->m68k->current_cycle = cycle;
 		}
-	} else {
-		cd->m68k->current_cycle = cycle;
 	}
 	scd_peripherals_run(cd, cycle);
 }
@@ -791,6 +815,7 @@ void scd_adjust_cycle(segacd_context *cd, uint32_t deduction)
 		cd->periph_reset_cycle -= deduction;
 	}
 	cdd_mcu_adjust_cycle(&cd->cdd, deduction);
+	lc8951_adjust_cycles(&cd->cdc, deduction);
 }
 
 static uint16_t main_gate_read16(uint32_t address, void *vcontext)
@@ -828,20 +853,26 @@ static uint16_t main_gate_read16(uint32_t address, void *vcontext)
 		uint16_t dst = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
 		if (dst == DST_MAIN_CPU) {
 			if (cd->gate_array[GA_CDC_CTRL] & BIT_DSR) {
+				printf("DSR cleared at %u (%u)\n", scd_cycle, cd->cdc.cycle);
 				cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
-				lc8951_resume_transfer(&cd->cdc);
+				lc8951_resume_transfer(&cd->cdc, scd_cycle);
+			} else {
+				printf("Read of CDC host data with DSR clear at %u\n", scd_cycle);
 			}
 			calculate_target_cycle(cd->m68k);
-			return cd->gate_array[offset];
-		} else {
-			return 0xFFFF;
 		}
+		return cd->gate_array[offset];
 	}
 	case GA_CDC_DMA_ADDR:
 		//TODO: open bus maybe?
 		return 0xFFFF;
 	default:
 		if (offset < GA_TIMER) {
+			if (offset == GA_CDC_CTRL) {
+				printf("CDC read(main): %X - %X @ %u (%u)\n", address, cd->gate_array[offset], m68k->current_cycle, scd_cycle);
+			} else if (offset >= GA_COMM_FLAG && offset <= GA_COMM_STATUS7) {
+				printf("COMM read(main): %X - %X @ %u (%u)\n", address, cd->gate_array[offset], m68k->current_cycle, scd_cycle);
+			}
 			return cd->gate_array[offset];
 		}
 		//TODO: open bus maybe?
@@ -929,6 +960,7 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		//Main CPU can only write the upper byte;
 		cd->gate_array[reg] &= 0xFF;
 		cd->gate_array[reg] |= value & 0xFF00;
+		printf("COMM write(main): %X - %X @ %u (%u)\n", address, value, m68k->current_cycle, scd_cycle);
 		break;
 	case GA_COMM_CMD0:
 	case GA_COMM_CMD1:
@@ -939,6 +971,7 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_COMM_CMD6:
 	case GA_COMM_CMD7:
 		//no effects for these other than saving the value
+		printf("COMM write(main): %X - %X @ %u (%u)\n", address, value, m68k->current_cycle, scd_cycle);
 		cd->gate_array[reg] = value;
 		break;
 	default:

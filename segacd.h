@@ -30,6 +30,7 @@ typedef struct {
 	lc8951          cdc;
 	cdd_mcu         cdd;
 	uint8_t         cdc_dst_low;
+	uint8_t         cdc_int_ack;
 } segacd_context;
 
 segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8_t force_region, rom_info *info);

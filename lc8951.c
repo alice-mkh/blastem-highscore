@@ -60,6 +60,8 @@ enum {
 //STAT3
 #define BIT_VALST 0x80
 
+#define DECI_AUTO_CLEAR 575
+
 //datasheet timing info
 //3 cycles for memory operation
 //6 cycles min for DMA-mode host transfer
@@ -75,11 +77,11 @@ void lc8951_init(lc8951 *context, lcd8951_byte_recv_fun byte_handler, void *hand
 	context->handler_data = handler_data;
 	context->decode_end = CYCLE_NEVER;
 	context->transfer_end = CYCLE_NEVER;
+	context->deci_clear = CYCLE_NEVER;
 }
 
 void lc8951_reg_write(lc8951 *context, uint8_t value)
 {
-	printf("CDC write %X: %X\n", context->ar, value);
 	switch (context->ar)
 	{
 	case SBOUT:
@@ -94,7 +96,7 @@ void lc8951_reg_write(lc8951 *context, uint8_t value)
 			context->regs[IFSTAT] |= BIT_STBSY;
 		}
 		if (!(value & BIT_DOUTEN)) {
-			context->regs[IFSTAT] |= BIT_DTBSY;
+			context->regs[IFSTAT] |= BIT_DTBSY|BIT_DTEI;
 			context->transfer_end = CYCLE_NEVER;
 		}
 		break;
@@ -173,6 +175,7 @@ uint8_t lc8951_reg_read(lc8951 *context)
 	}
 	if (context->ar == STAT3) {
 		context->regs[IFSTAT] |= BIT_DECI;
+		context->deci_clear = CYCLE_NEVER;
 	}
 	if (context->ar >= sizeof(context->regs)) {
 		value = 0xFF;
@@ -203,6 +206,7 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 		if (context->cycle >= context->decode_end) {
 			context->decode_end = CYCLE_NEVER;
 			context->regs[IFSTAT] &= ~BIT_DECI;
+			context->deci_clear = context->cycle + DECI_AUTO_CLEAR;
 			context->regs[STAT3] &= ~BIT_VALST;
 			uint16_t block_start = (context->regs[PTL] | (context->regs[PTH] << 8)) & (sizeof(context->buffer)-1);
 			for (int reg = HEAD0; reg < PTL; reg++)
@@ -233,16 +237,28 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 				context->transfer_end = CYCLE_NEVER;
 			}
 		}
+		if (context->cycle >= context->deci_clear) {
+			context->regs[IFSTAT] |= BIT_DECI;
+			context->deci_clear = CYCLE_NEVER;
+		}
 	}
 }
 
-void lc8951_resume_transfer(lc8951 *context)
+void lc8951_resume_transfer(lc8951 *context, uint32_t cycle)
 {
 	if (context->transfer_end == CYCLE_NEVER && (context->ifctrl & BIT_DOUTEN)) {
 		uint16_t transfer_size = context->regs[DBCL] | (context->regs[DBCH] << 8);
-		if (transfer_size) {
+		if (transfer_size != 0xFFFF) {
+			//HACK!!! Work around Sub CPU running longer than we would like and dragging other components with it
+			uint32_t step_diff = (context->cycle - cycle) / context->clock_step;
+			if (step_diff) {
+				context->cycle -= step_diff * context->clock_step;
+			}
 			context->transfer_end = context->cycle + transfer_size * context->clock_step;
 			printf("RESUME: size %u, cycle %u, end %u\n", transfer_size, context->cycle, context->transfer_end);
+			if (step_diff) {
+				lc8951_run(context, cycle);
+			}
 		}
 	}
 }
@@ -296,4 +312,17 @@ uint32_t lc8951_next_interrupt(lc8951 *context)
 		dtei_cycle = context->transfer_end;
 	}
 	return deci_cycle < dtei_cycle ? deci_cycle : dtei_cycle;
+}
+
+void lc8951_adjust_cycles(lc8951 *context, uint32_t deduction)
+{
+	if (context->decode_end != CYCLE_NEVER) {
+		context->decode_end -= deduction;
+	}
+	if (context->transfer_end != CYCLE_NEVER) {
+		context->transfer_end -= deduction;
+	}
+	if (context->deci_clear != CYCLE_NEVER) {
+		context->transfer_end -= deduction;
+	}
 }
