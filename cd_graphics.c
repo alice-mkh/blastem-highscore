@@ -56,6 +56,10 @@ static uint8_t get_src_pixel(segacd_context *cd)
 	address += (stamp_y << row_shift) + stamp_x;
 	uint16_t stamp_def = cd->word_ram[address];
 	uint16_t stamp_num = stamp_def & stamp_num_mask;
+	if (!stamp_num) {
+		//manual says stamp 0 can't be used, I assume that means it's treated as transparent
+		return 0;
+	}
 	uint16_t pixel_x = x & pixel_mask;
 	uint16_t pixel_y = y & pixel_mask;
 	if (stamp_def & BIT_HFLIP) {
@@ -82,9 +86,9 @@ static uint8_t get_src_pixel(segacd_context *cd)
 		pixel_x = tmp;
 		break;
 	}
-	uint16_t cell_x = pixel_x >> 4;
+	uint16_t cell_x = pixel_x >> 3;
 	uint32_t pixel_address = stamp_num << 6;
-	pixel_address += (pixel_y << 1) + (cell_x << (stamp_shift + 2)) + (pixel_x >> 2 & 1);
+	pixel_address += (pixel_y << 1) + (cell_x << (stamp_shift + 1)) + (pixel_x >> 2 & 1);
 	uint16_t word = cd->word_ram[pixel_address];
 	switch (pixel_x & 3)
 	{
@@ -123,13 +127,14 @@ void draw_pixels(segacd_context *cd)
 	for(uint16_t i = 0; i < to_draw; i++)
 	{
 		uint32_t dst_address = cd->gate_array[GA_IMAGE_BUFFER_START] << 1;
-		dst_address += cd->graphics_dst_y << 4;
+		dst_address += cd->graphics_dst_y << 1;
 		dst_address += cd->graphics_dst_x >> 2 & 1;
 		dst_address += ((cd->graphics_dst_x >> 3) * cd->gate_array[GA_IMAGE_BUFFER_VCELLS]) << 4;
 		uint16_t pixel_shift = 12 - 4 * (cd->graphics_dst_x & 3);
 		uint16_t pixel = cd->graphics_pixels[i] << pixel_shift;
-		uint16_t src_mask_check = 0xFF << pixel_shift;
+		uint16_t src_mask_check = 0xF << pixel_shift;
 		uint16_t src_mask_keep = ~src_mask_check;
+		pixel &= src_mask_check;
 		switch (cd->gate_array[1] >> 3 & 3)
 		{
 		case 0:
@@ -152,11 +157,12 @@ void draw_pixels(segacd_context *cd)
 			}
 			break;
 		}
+		cd->graphics_dst_x++;
 	}
-	cd->graphics_dst_x += to_draw;
 	if (cd->graphics_dst_x == x_end) {
 		cd->graphics_dst_y++;
 		--cd->gate_array[GA_IMAGE_BUFFER_LINES];
+		cd->gate_array[GA_TRACE_VECTOR_BASE] += 2;
 		cd->graphics_step = FETCH_X;
 	} else {
 		cd->graphics_step = PIXEL0;
@@ -181,18 +187,18 @@ static void do_graphics(segacd_context *cd, uint32_t cycle)
 			cd->graphics_dst_x = cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3;
 			CHECK_CYCLES;
 		case FETCH_Y:
-			cd->graphics_y = cd->word_ram[cd->gate_array[GA_TRACE_VECTOR_BASE] << 1 + 1] << 8;
+			cd->graphics_y = cd->word_ram[(cd->gate_array[GA_TRACE_VECTOR_BASE] << 1) + 1] << 8;
 			cd->graphics_cycle += 2*4;
 			CHECK_CYCLES;
 		case FETCH_DX:
-			cd->graphics_dx = cd->word_ram[cd->gate_array[GA_TRACE_VECTOR_BASE] << 1 + 2];
+			cd->graphics_dx = cd->word_ram[(cd->gate_array[GA_TRACE_VECTOR_BASE] << 1) + 2];
 			if (cd->graphics_dx & 0x8000) {
 				cd->graphics_dx |= 0xFF0000;
 			}
 			cd->graphics_cycle += 2*4;
 			CHECK_CYCLES;
 		case FETCH_DY:
-			cd->graphics_dy = cd->word_ram[cd->gate_array[GA_TRACE_VECTOR_BASE] << 1 + 3];
+			cd->graphics_dy = cd->word_ram[(cd->gate_array[GA_TRACE_VECTOR_BASE] << 1) + 3];
 			if (cd->graphics_dy & 0x8000) {
 				cd->graphics_dy |= 0xFF0000;
 			}
