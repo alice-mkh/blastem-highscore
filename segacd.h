@@ -18,8 +18,16 @@ typedef struct {
 	uint8_t         *bram;
 	uint32_t        stopwatch_cycle;
 	uint32_t        int2_cycle;
+	uint32_t        graphics_int_cycle;
 	uint32_t        periph_reset_cycle;
+	uint32_t        graphics_cycle;
 	uint32_t        base;
+	uint32_t        graphics_x;
+	uint32_t        graphics_y;
+	uint32_t        graphics_dx;
+	uint32_t        graphics_dy;
+	uint16_t        graphics_dst_x;
+	uint8_t         graphics_pixels[4];
 	uint8_t         timer_pending;
 	uint8_t         timer_value;
 	uint8_t         busreq;
@@ -31,6 +39,8 @@ typedef struct {
 	cdd_mcu         cdd;
 	uint8_t         cdc_dst_low;
 	uint8_t         cdc_int_ack;
+	uint8_t         graphics_step;
+	uint8_t         graphics_dst_y;
 } segacd_context;
 
 segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8_t force_region, rom_info *info);

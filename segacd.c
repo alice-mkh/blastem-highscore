@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
-#include "segacd.h"
+#include "cd_graphics.h"
 #include "genesis.h"
 #include "util.h"
 
@@ -367,6 +367,12 @@ static void calculate_target_cycle(m68k_context * context)
 						context->int_cycle = cd->int2_cycle;
 						context->int_num = 2;
 					}
+					if (mask < 1) {
+						if (cd->graphics_int_cycle < context->int_cycle && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN1)) {
+							context->int_cycle = cd->graphics_int_cycle;
+							context->int_num = 1;
+						}
+					}
 				}
 			}
 		}
@@ -451,6 +457,14 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 			value |= pixel << (i * 4);
 		}
 		return value;
+	case GA_STAMP_SIZE:
+	case GA_IMAGE_BUFFER_LINES:
+		//these two have bits that change based on graphics operations
+		cd_graphics_run(cd, m68k->current_cycle);
+		return cd->gate_array[reg];
+	case GA_TRACE_VECTOR_BASE:
+		//write only
+		return 0xFFFF;
 	}
 	default:
 		return cd->gate_array[reg];
@@ -613,6 +627,40 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_FONT_BITS:
 		cd->gate_array[reg] = value;
 		break;
+	case GA_STAMP_SIZE:
+		cd_graphics_run(cd, m68k->current_cycle);
+		cd->gate_array[reg] &= BIT_GRON;
+		cd->gate_array[reg] |= value & (BIT_SMS|BIT_STS|BIT_RPT);
+		break;
+	case GA_STAMP_MAP_BASE:
+		cd_graphics_run(cd, m68k->current_cycle);
+		cd->gate_array[reg] = value & 0xFFE0;
+		break;
+	case GA_IMAGE_BUFFER_VCELLS:
+		cd_graphics_run(cd, m68k->current_cycle);
+		cd->gate_array[reg] = value & 0x1F;
+		break;
+	case GA_IMAGE_BUFFER_START:
+		cd_graphics_run(cd, m68k->current_cycle);
+		cd->gate_array[reg] = value & 0xFFF8;
+		break;
+	case GA_IMAGE_BUFFER_OFFSET:
+		cd_graphics_run(cd, m68k->current_cycle);
+		cd->gate_array[reg] = value & 0x3F;
+		break;
+	case GA_IMAGE_BUFFER_HDOTS:
+		cd_graphics_run(cd, m68k->current_cycle);
+		cd->gate_array[reg] = value & 0x1FF;
+		break;
+	case GA_IMAGE_BUFFER_LINES:
+		cd_graphics_run(cd, m68k->current_cycle);
+		cd->gate_array[reg] = value & 0xFF;
+		break;
+	case GA_TRACE_VECTOR_BASE:
+		cd_graphics_run(cd, m68k->current_cycle);
+		cd->gate_array[reg] = value & 0xFFFE;
+		cd_graphics_start(cd);
+		break;
 	default:
 		printf("Unhandled gate array write %X:%X\n", address, value);
 	}
@@ -747,6 +795,7 @@ static void scd_peripherals_run(segacd_context *cd, uint32_t cycle)
 {
 	timers_run(cd, cycle);
 	cdd_run(cd, cycle);
+	cd_graphics_run(cd, cycle);
 }
 
 static m68k_context *sync_components(m68k_context * context, uint32_t address)
@@ -755,6 +804,9 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 	scd_peripherals_run(cd, context->current_cycle);
 	switch (context->int_ack)
 	{
+	case 1:
+		cd->graphics_int_cycle = CYCLE_NEVER;
+		break;
 	case 2:
 		cd->int2_cycle = CYCLE_NEVER;
 		break;
@@ -816,6 +868,14 @@ void scd_adjust_cycle(segacd_context *cd, uint32_t deduction)
 	}
 	cdd_mcu_adjust_cycle(&cd->cdd, deduction);
 	lc8951_adjust_cycles(&cd->cdc, deduction);
+	cd->graphics_cycle -= deduction;
+	if (cd->graphics_int_cycle != CYCLE_NEVER) {
+		if (cd->graphics_int_cycle > deduction) {
+			cd->graphics_int_cycle -= deduction;
+		} else {
+			cd->graphics_int_cycle = 0;
+		}
+	}
 }
 
 static uint16_t main_gate_read16(uint32_t address, void *vcontext)
@@ -1106,6 +1166,7 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 		media = media->chain;
 	}
 	cdd_mcu_init(&cd->cdd, media);
+	cd_graphics_init(cd);
 
 	return cd;
 }
