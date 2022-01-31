@@ -116,7 +116,7 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 	if (after_inc) {
 		*after_inc = code->cur;
 	}
-	
+
 	if (opts->address_size == SZ_D && opts->address_mask != 0xFFFFFFFF) {
 		and_ir(code, opts->address_mask, adr_reg, SZ_D);
 	} else if (opts->address_size == SZ_W && opts->address_mask != 0xFFFF) {
@@ -127,19 +127,31 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 	uint32_t ram_flags_off = opts->ram_flags_off;
 	uint32_t min_address = 0;
 	uint32_t max_address = opts->max_address;
+	uint8_t need_wide_jcc = 0;
 	for (uint32_t chunk = 0; chunk < num_chunks; chunk++)
 	{
+		code_info chunk_start = *code;
 		if (memmap[chunk].start > min_address) {
 			cmp_ir(code, memmap[chunk].start, adr_reg, opts->address_size);
 			lb_jcc = code->cur + 1;
-			jcc(code, CC_C, code->cur + 2);
+			if (need_wide_jcc) {
+				jcc(code, CC_C, code->cur + 130);
+				lb_jcc++;
+			} else {
+				jcc(code, CC_C, code->cur + 2);
+			}
 		} else {
 			min_address = memmap[chunk].end;
 		}
 		if (memmap[chunk].end < max_address) {
 			cmp_ir(code, memmap[chunk].end, adr_reg, opts->address_size);
 			ub_jcc = code->cur + 1;
-			jcc(code, CC_NC, code->cur + 2);
+			if (need_wide_jcc) {
+				jcc(code, CC_NC, code->cur + 130);
+				ub_jcc++;
+			} else {
+				jcc(code, CC_NC, code->cur + 2);
+			}
 		} else {
 			max_address = memmap[chunk].start;
 		}
@@ -298,6 +310,33 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 			}
 			retn(code);
 		}
+		if (lb_jcc) {
+			if (need_wide_jcc) {
+				*((int32_t*)lb_jcc) = code->cur - (lb_jcc+4);
+			} else if (code->cur - (lb_jcc+1) > 0x7f) {
+				need_wide_jcc = 1;
+				chunk--;
+				*code = chunk_start;
+				continue;
+			} else {
+				*lb_jcc = code->cur - (lb_jcc+1);
+			}
+			lb_jcc = NULL;
+		}
+		if (ub_jcc) {
+			if (need_wide_jcc) {
+				*((int32_t*)ub_jcc) = code->cur - (ub_jcc+4);
+			} else if (code->cur - (ub_jcc+1) > 0x7f) {
+				need_wide_jcc = 1;
+				chunk--;
+				*code = chunk_start;
+				continue;
+			} else {
+				*ub_jcc = code->cur - (ub_jcc+1);
+			}
+
+			ub_jcc = NULL;
+		}
 		if (memmap[chunk].flags & MMAP_CODE) {
 			uint32_t added_offset;
 			if (memmap[chunk].mask == opts->address_mask) {
@@ -311,13 +350,8 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 				ram_flags_off += 1;
 			}
 		}
-		if (lb_jcc) {
-			*lb_jcc = code->cur - (lb_jcc+1);
-			lb_jcc = NULL;
-		}
-		if (ub_jcc) {
-			*ub_jcc = code->cur - (ub_jcc+1);
-			ub_jcc = NULL;
+		if (need_wide_jcc) {
+			need_wide_jcc = 0;
 		}
 	}
 	if (!is_write) {

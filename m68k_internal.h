@@ -106,8 +106,6 @@ void translate_m68k_reset(m68k_options *opts, m68kinst *inst);
 #define PREDEC_PENALTY 2
 extern char disasm_buf[1024];
 
-m68k_context * sync_components(m68k_context * context, uint32_t address);
-
 void m68k_invalid();
 void bcd_add();
 void bcd_sub();

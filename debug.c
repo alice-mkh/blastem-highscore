@@ -740,7 +740,7 @@ int run_debugger_command(m68k_context *context, uint32_t address, char *input_bu
 				m68k_disasm(&inst, input_buf);
 				printf("%X: %s\n", address, input_buf);
 			}
-			
+
 			break;
 		case 'n':
 			if (inst.op == M68K_RTS) {
@@ -1012,7 +1012,7 @@ void debugger(m68k_context * context, uint32_t address)
 
 	init_terminal();
 
-	sync_components(context, 0);
+	context->options->sync_components(context, 0);
 	genesis_context *gen = context->system;
 	vdp_force_update_framebuffer(gen->vdp);
 	//probably not necessary, but let's play it safe

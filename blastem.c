@@ -30,6 +30,7 @@
 #include "bindings.h"
 #include "menu.h"
 #include "zip.h"
+#include "cue.h"
 #include "event_log.h"
 #ifndef DISABLE_NUKLEAR
 #include "nuklear_ui/blastem_nuklear.h"
@@ -91,7 +92,7 @@ int load_smd_rom(ROMFILE f, void **buffer)
 	size_t readsize = 0;
 	uint16_t *dst, *buf;
 	dst = buf = malloc(filesize);
-	
+
 
 	size_t read;
 	do {
@@ -107,9 +108,9 @@ int load_smd_rom(ROMFILE f, void **buffer)
 		}
 	} while(read > 0);
 	romclose(f);
-	
+
 	*buffer = buf;
-	
+
 	return readsize;
 }
 
@@ -132,7 +133,7 @@ uint8_t is_smd_format(const char *filename, uint8_t *header)
 	return 0;
 }
 
-uint32_t load_rom_zip(const char *filename, void **dst)
+uint32_t load_media_zip(const char *filename, system_media *dst)
 {
 	static const char *valid_exts[] = {"bin", "md", "gen", "sms", "rom", "smd"};
 	const uint32_t num_exts = sizeof(valid_exts)/sizeof(*valid_exts);
@@ -140,7 +141,7 @@ uint32_t load_rom_zip(const char *filename, void **dst)
 	if (!z) {
 		return 0;
 	}
-	
+
 	for (uint32_t i = 0; i < z->num_entries; i++)
 	{
 		char *ext = path_extension(z->entries[i].name);
@@ -151,20 +152,23 @@ uint32_t load_rom_zip(const char *filename, void **dst)
 		{
 			if (!strcasecmp(ext, valid_exts[j])) {
 				size_t out_size = nearest_pow2(z->entries[i].size);
-				*dst = zip_read(z, i, &out_size);
-				if (*dst) {
-					if (is_smd_format(z->entries[i].name, *dst)) {
+				dst->buffer = zip_read(z, i, &out_size);
+				if (dst->buffer) {
+					if (is_smd_format(z->entries[i].name, dst->buffer)) {
 						size_t offset;
 						for (offset = 0; offset + SMD_BLOCK_SIZE + SMD_HEADER_SIZE <= out_size; offset += SMD_BLOCK_SIZE)
 						{
 							uint8_t tmp[SMD_BLOCK_SIZE];
-							uint8_t *u8dst = *dst;
+							uint8_t *u8dst = dst->buffer;
 							memcpy(tmp, u8dst + offset + SMD_HEADER_SIZE, SMD_BLOCK_SIZE);
 							process_smd_block((void *)(u8dst + offset), tmp, SMD_BLOCK_SIZE);
 						}
 						out_size = offset;
 					}
-					free(ext);
+					dst->extension = ext;
+					dst->dir = path_dirname(filename);
+					dst->name = basename_no_extension(filename);
+					dst->size = out_size;
 					zip_close(z);
 					return out_size;
 				}
@@ -176,13 +180,13 @@ uint32_t load_rom_zip(const char *filename, void **dst)
 	return 0;
 }
 
-uint32_t load_rom(const char * filename, void **dst, system_type *stype)
+uint32_t load_media(const char * filename, system_media *dst, system_type *stype)
 {
 	uint8_t header[10];
 	char *ext = path_extension(filename);
 	if (ext && !strcasecmp(ext, "zip")) {
 		free(ext);
-		return load_rom_zip(filename, dst);
+		return load_media_zip(filename, dst);
 	}
 	free(ext);
 	ROMFILE f = romopen(filename, "rb");
@@ -192,42 +196,56 @@ uint32_t load_rom(const char * filename, void **dst, system_type *stype)
 	if (sizeof(header) != romread(header, 1, sizeof(header), f)) {
 		fatal_error("Error reading from %s\n", filename);
 	}
-	
+
+	uint32_t ret = 0;
 	if (is_smd_format(filename, header)) {
-		if (stype) {
-			*stype = SYSTEM_GENESIS;
+			if (stype) {
+				*stype = SYSTEM_GENESIS;
+			}
+			ret = load_smd_rom(f, &dst->buffer);
 		}
-		return load_smd_rom(f, dst);
-	}
-	
-	size_t filesize = 512 * 1024;
-	size_t readsize = sizeof(header);
-		
-	char *buf = malloc(filesize);
-	memcpy(buf, header, readsize);
-	
-	size_t read;
-	do {
-		read = romread(buf + readsize, 1, filesize - readsize, f);
-		if (read > 0) {
-			readsize += read;
-			if (readsize == filesize) {
-				int one_more = romgetc(f);
-				if (one_more >= 0) {
-					filesize *= 2;
-					buf = realloc(buf, filesize);
-					buf[readsize++] = one_more;
-				} else {
-					read = 0;
+
+	if (!ret) {
+		size_t filesize = 512 * 1024;
+		size_t readsize = sizeof(header);
+
+		char *buf = malloc(filesize);
+		memcpy(buf, header, readsize);
+
+		size_t read;
+		do {
+			read = romread(buf + readsize, 1, filesize - readsize, f);
+			if (read > 0) {
+				readsize += read;
+				if (readsize == filesize) {
+					int one_more = romgetc(f);
+					if (one_more >= 0) {
+						filesize *= 2;
+						buf = realloc(buf, filesize);
+						buf[readsize++] = one_more;
+					} else {
+						read = 0;
+					}
 				}
 			}
-		}
-	} while (read > 0);
-	
-	*dst = buf;
-	
+		} while (read > 0);
+		dst->buffer = buf;
+		ret = (uint32_t)readsize;
+	}
+	dst->dir = path_dirname(filename);
+	dst->name = basename_no_extension(filename);
+	dst->extension = path_extension(filename);
+	dst->size = ret;
 	romclose(f);
-	return readsize;
+	if (!strcasecmp(dst->extension, "cue")) {
+		if (parse_cue(dst)) {
+			if (stype) {
+				*stype = SYSTEM_SEGACD;
+			}
+		}
+	}
+
+	return ret;
 }
 
 
@@ -389,10 +407,7 @@ void lockon_media(char *lock_on_path)
 	free(lock_on.dir);
 	free(lock_on.name);
 	free(lock_on.extension);
-	lock_on.dir = path_dirname(lock_on_path);
-	lock_on.name = basename_no_extension(lock_on_path);
-	lock_on.extension = path_extension(lock_on_path);
-	lock_on.size = load_rom(lock_on_path, &lock_on.buffer, NULL);
+	load_media(lock_on_path, &lock_on, NULL);
 }
 
 static uint32_t opts = 0;
@@ -411,16 +426,14 @@ void init_system_with_media(const char *path, system_type force_stype)
 		//start a new arena and save old one in suspended system context
 		current_system->arena = start_new_arena();
 	}
-	system_type stype = SYSTEM_UNKNOWN;
-	if (!(cart.size = load_rom(path, &cart.buffer, &stype))) {
-		fatal_error("Failed to open %s for reading\n", path);
-	}
 	free(cart.dir);
 	free(cart.name);
 	free(cart.extension);
-	cart.dir = path_dirname(path);
-	cart.name = basename_no_extension(path);
-	cart.extension = path_extension(path);
+	system_type stype = SYSTEM_UNKNOWN;
+	if (!(cart.size = load_media(path, &cart, &stype))) {
+		fatal_error("Failed to open %s for reading\n", path);
+	}
+
 	if (force_stype != SYSTEM_UNKNOWN) {
 		stype = force_stype;
 	}
@@ -572,12 +585,9 @@ int main(int argc, char ** argv)
 				if (i >= argc) {
 					fatal_error("-o must be followed by a lock on cartridge filename\n");
 				}
-				lock_on.size = load_rom(argv[i], &lock_on.buffer, NULL);
-				if (!lock_on.size) {
+				if (!load_media(argv[i], &lock_on, NULL)) {
 					fatal_error("Failed to load lock on cartridge %s\n", argv[i]);
 				}
-				lock_on.name = basename_no_extension(argv[i]);
-				lock_on.extension = path_extension(argv[i]);
 				cart.chain = &lock_on;
 				break;
 			}
@@ -611,12 +621,9 @@ int main(int argc, char ** argv)
 			if (reader_port) {
 				reader_addr = argv[i];
 			} else {
-				if (!(cart.size = load_rom(argv[i], &cart.buffer, stype == SYSTEM_UNKNOWN ? &stype : NULL))) {
-					fatal_error("Failed to open %s for reading\n", argv[i]);
-				}
-				cart.dir = path_dirname(argv[i]);
-				cart.name = basename_no_extension(argv[i]);
-				cart.extension = path_extension(argv[i]);
+			if (!load_media(argv[i], &cart, stype == SYSTEM_UNKNOWN ? &stype : NULL)) {
+				fatal_error("Failed to open %s for reading\n", argv[i]);
+			}
 			}
 			romfname = argv[i];
 			loaded = 1;
@@ -626,7 +633,7 @@ int main(int argc, char ** argv)
 			height = atoi(argv[i]);
 		}
 	}
-	
+
 	int def_width = 0, def_height = 0;
 	char *config_width = tern_find_path(config, "video\0width\0", TVAL_PTR).ptrval;
 	if (config_width) {
@@ -657,7 +664,7 @@ int main(int argc, char ** argv)
 		render_set_drag_drop_handler(on_drag_drop);
 	}
 	set_bindings();
-	
+
 	uint8_t menu = !loaded;
 	uint8_t use_nuklear = 0;
 #ifndef DISABLE_NUKLEAR
@@ -670,7 +677,7 @@ int main(int argc, char ** argv)
 			romfname = "menu.bin";
 		}
 		if (is_absolute_path(romfname)) {
-			if (!(cart.size = load_rom(romfname, &cart.buffer, &stype))) {
+			if (!(cart.size = load_media(romfname, &cart, &stype))) {
 				fatal_error("Failed to open UI ROM %s for reading", romfname);
 			}
 		} else {
@@ -683,12 +690,12 @@ int main(int argc, char ** argv)
 				cart.buffer = realloc(cart.buffer, rom_size);
 				cart.size = rom_size;
 			}
+			cart.dir = path_dirname(romfname);
+			cart.name = basename_no_extension(romfname);
+			cart.extension = path_extension(romfname);
 		}
 		//force system detection, value on command line is only for games not the menu
 		stype = detect_system_type(&cart);
-		cart.dir = path_dirname(romfname);
-		cart.name = basename_no_extension(romfname);
-		cart.extension = path_extension(romfname);
 		loaded = 1;
 	}
 	char *state_format = tern_find_path(config, "ui\0state_format\0", TVAL_PTR).ptrval;
@@ -705,12 +712,12 @@ int main(int argc, char ** argv)
 		if (stype == SYSTEM_UNKNOWN) {
 			fatal_error("Failed to detect system type for %s\n", romfname);
 		}
-		
+
 		current_system = alloc_config_system(stype, &cart, menu ? 0 : opts, force_region);
 		if (!current_system) {
 			fatal_error("Failed to configure emulated machine for %s\n", romfname);
 		}
-	
+
 		setup_saves(&cart, current_system);
 		update_title(current_system->info.name);
 		if (menu) {
@@ -719,7 +726,7 @@ int main(int argc, char ** argv)
 			game_system = current_system;
 		}
 	}
-	
+
 #ifndef DISABLE_NUKLEAR
 	if (use_nuklear) {
 		blastem_nuklear_init(!menu);
@@ -740,7 +747,7 @@ int main(int argc, char ** argv)
 		setup_saves(&cart, current_system);
 		update_title(current_system->info.name);
 	}
-	
+
 	current_system->debugger_type = dtype;
 	current_system->enter_debugger = start_in_debugger && menu == debug_target;
 	current_system->start_context(current_system,  menu ? NULL : statefile);
