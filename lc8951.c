@@ -317,10 +317,13 @@ uint32_t lc8951_next_interrupt(lc8951 *context)
 
 void lc8951_adjust_cycles(lc8951 *context, uint32_t deduction)
 {
+	printf("CDC deduction of %u cycles @ %u, ", deduction, context->cycle);
+	context->cycle -= deduction;
 	if (context->decode_end != CYCLE_NEVER) {
 		context->decode_end -= deduction;
 	}
 	if (context->transfer_end != CYCLE_NEVER) {
 		context->transfer_end -= deduction;
 	}
+	printf("cycle is now %u, decode_end %u, transfer_end %u\n", context->cycle, context->decode_end, context->transfer_end);
 }

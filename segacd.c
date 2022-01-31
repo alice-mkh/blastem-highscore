@@ -597,9 +597,9 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_CDD_CTRL: {
 		cdd_run(cd, m68k->current_cycle);
 		uint16_t changed = cd->gate_array[reg] ^ value;
-		cd->gate_array[reg] &= ~BIT_HOCK;
-		cd->gate_array[reg] |= value & BIT_HOCK;
 		if (changed & BIT_HOCK) {
+			cd->gate_array[reg] &= ~BIT_HOCK;
+			cd->gate_array[reg] |= value & BIT_HOCK;
 			if (value & BIT_HOCK) {
 				cdd_hock_enabled(&cd->cdd);
 			} else {
@@ -928,11 +928,6 @@ static uint16_t main_gate_read16(uint32_t address, void *vcontext)
 		return 0xFFFF;
 	default:
 		if (offset < GA_TIMER) {
-			if (offset == GA_CDC_CTRL) {
-				printf("CDC read(main): %X - %X @ %u (%u)\n", address, cd->gate_array[offset], m68k->current_cycle, scd_cycle);
-			} else if (offset >= GA_COMM_FLAG && offset <= GA_COMM_STATUS7) {
-				printf("COMM read(main): %X - %X @ %u (%u)\n", address, cd->gate_array[offset], m68k->current_cycle, scd_cycle);
-			}
 			return cd->gate_array[offset];
 		}
 		//TODO: open bus maybe?
@@ -1049,7 +1044,6 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		//Main CPU can only write the upper byte;
 		cd->gate_array[reg] &= 0xFF;
 		cd->gate_array[reg] |= value & 0xFF00;
-		printf("COMM write(main): %X - %X @ %u (%u)\n", address, value, m68k->current_cycle, scd_cycle);
 		break;
 	case GA_COMM_CMD0:
 	case GA_COMM_CMD1:
@@ -1060,7 +1054,6 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_COMM_CMD6:
 	case GA_COMM_CMD7:
 		//no effects for these other than saving the value
-		printf("COMM write(main): %X - %X @ %u (%u)\n", address, value, m68k->current_cycle, scd_cycle);
 		cd->gate_array[reg] = value;
 		break;
 	default:

@@ -255,8 +255,8 @@ static void update_status(cdd_mcu *context)
 			if (context->toc_valid) {
 				context->status_buffer.b.toct.first_track_high = 0;
 				context->status_buffer.b.toct.first_track_low = 1;
-				context->status_buffer.b.toct.last_track_high = (context->media->num_tracks + 1) / 10;
-				context->status_buffer.b.toct.last_track_low = (context->media->num_tracks + 1) % 10;
+				context->status_buffer.b.toct.last_track_high = (context->media->num_tracks) / 10;
+				context->status_buffer.b.toct.last_track_low = (context->media->num_tracks) % 10;
 				context->status_buffer.b.toct.version = 0;
 				context->status_buffer.format = SF_TOCT;
 			} else {
@@ -265,6 +265,10 @@ static void update_status(cdd_mcu *context)
 			break;
 		case SF_TOCN:
 			if (context->toc_valid) {
+				if (context->requested_track > context->media->num_tracks) {
+					printf("track number %d is bad\n", context->requested_track);
+					exit(0);
+				}
 				uint32_t lba = context->media->tracks[context->requested_track - 1].start_lba;
 				for (uint32_t i = 0; i < context->requested_track; i++) {
 					lba += context->media->tracks[i].fake_pregap;
@@ -407,6 +411,7 @@ static void run_command(cdd_mcu *context)
 			if (!context->media || context->requested_track > context->media->num_tracks) {
 				context->requested_format = SF_ABSOLUTE;
 				context->error_status = DS_CMD_ERROR;
+				break;
 			}
 			context->status = DS_TOC_READ;
 			context->seeking = 1;
@@ -581,16 +586,33 @@ void cdd_hock_disabled(cdd_mcu *context)
 void cdd_mcu_adjust_cycle(cdd_mcu *context, uint32_t deduction)
 {
 	uint32_t cd_deduction = mclks_to_cd_block(deduction);
+	if (context->cycle > cd_deduction) {
+		context->cycle -= cd_deduction;
+	} else {
+		context->cycle = 0;
+	}
 	if (context->next_int_cycle != CYCLE_NEVER) {
 		context->next_int_cycle -= deduction;
 	}
 	if (context->last_subcode_cycle != CYCLE_NEVER) {
-		context->last_subcode_cycle -= cd_deduction;
+		if (context->last_subcode_cycle > cd_deduction) {
+			context->last_subcode_cycle -= cd_deduction;
+		} else {
+			context->last_subcode_cycle = 0;
+		}
 	}
 	if (context->last_nibble_cycle != CYCLE_NEVER) {
-		context->last_nibble_cycle -= cd_deduction;
+		if (context->last_nibble_cycle > cd_deduction) {
+			context->last_nibble_cycle -= cd_deduction;
+		} else {
+			context->last_nibble_cycle = 0;
+		}
 	}
 	if (context->last_byte_cycle != CYCLE_NEVER) {
-		context->last_byte_cycle -= cd_deduction;
+		if (context->last_byte_cycle > cd_deduction) {
+			context->last_byte_cycle -= cd_deduction;
+		} else {
+			context->last_byte_cycle = 0;
+		}
 	}
 }
