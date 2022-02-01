@@ -486,7 +486,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 				}
 				if (context->current_status_nibble == 7) {
 					context->int_pending = 1;
-					context->next_int_cycle = cd_block_to_mclks(cycle + SECTOR_CLOCKS);
+					context->next_int_cycle = cd_block_to_mclks(context->cycle + SECTOR_CLOCKS);
 				}
 				context->current_status_nibble++;
 				context->last_nibble_cycle = context->cycle;
@@ -544,6 +544,7 @@ void cdd_hock_disabled(cdd_mcu *context)
 	context->last_subcode_cycle = CYCLE_NEVER;
 	context->next_int_cycle = CYCLE_NEVER;
 	context->last_nibble_cycle = CYCLE_NEVER;
+	context->last_byte_cycle = CYCLE_NEVER;
 	context->current_status_nibble = -1;
 	context->current_cmd_nibble = -1;
 }
