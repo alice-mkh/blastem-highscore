@@ -43,6 +43,81 @@ static uint32_t timecode_to_lba(char *timecode)
 
 }
 
+static void bin_seek(system_media *media, uint32_t sector)
+{
+	media->cur_sector = sector;
+	uint32_t lba = sector;
+	for (uint32_t i = 0; i < media->num_tracks; i++)
+	{
+		if (lba < media->tracks[i].fake_pregap) {
+			media->in_fake_pregap = 1;
+			break;
+		}
+		lba -= media->tracks[i].fake_pregap;
+		if (lba < media->tracks[i].start_lba) {
+			media->in_fake_pregap = 1;
+			break;
+		}
+		if (lba < media->tracks[i].end_lba) {
+			media->in_fake_pregap = 0;
+			break;
+		}
+	}
+	if (!media->in_fake_pregap) {
+		fseek(media->f, lba * 2352, SEEK_SET);
+	}
+}
+
+static uint8_t fake_read(uint32_t sector, uint32_t offset)
+{
+	if (!offset || (offset >= 16)) {
+		return 0;
+		//TODO: error detection and correction bytes
+	} else if (offset < 12) {
+		return 0xFF;
+	} else if (offset == 12) {
+		uint32_t minute = (sector / 75) / 60;
+		return (minute % 10) | ((minute / 10 ) << 4);
+	} else if (offset == 13) {
+		uint32_t seconds = (sector / 75) % 60;
+		return (seconds % 10) | ((seconds / 10 ) << 4);
+	} else if (offset == 14) {
+		uint32_t frames = sector % 75;
+		return (frames % 10) | ((frames / 10 ) << 4);
+	} else {
+		return 1;
+	}
+}
+
+static uint8_t bin_read(system_media *media, uint32_t offset)
+{
+	if (media->in_fake_pregap) {
+		return fake_read(media->cur_sector, offset);
+	} else {
+		return fgetc(media->f);
+	}
+}
+
+static void iso_seek(system_media *media, uint32_t sector)
+{
+	media->cur_sector = sector;
+	if (sector < (2 * 75)) {
+		media->in_fake_pregap = 1;
+	} else {
+		media->in_fake_pregap = 0;
+		fseek(media->f, (sector -  2 * 75) * 2048, SEEK_SET);
+	}
+}
+
+static uint8_t iso_read(system_media *media, uint32_t offset)
+{
+	if (media->in_fake_pregap || offset < 16 || offset > (2048 + 16)) {
+		return fake_read(media->cur_sector, offset);
+	} else {
+		return fgetc(media->f);
+	}
+}
+
 uint8_t parse_cue(system_media *media)
 {
 	char *line = media->buffer;
@@ -153,8 +228,38 @@ uint8_t parse_cue(system_media *media)
 
 		fseek(media->f, 16, SEEK_SET);
 		media->size = fread(media->buffer, 1, 2048, media->f);
+		media->seek = bin_seek;
+		media->read = bin_read;
 	}
 	uint8_t valid = tracks > 0 && media->f != NULL;
 	media->type = valid ? MEDIA_CDROM : MEDIA_CART;
 	return valid;
+}
+
+uint32_t make_iso_media(system_media *media, const char *filename)
+{
+	media->f = fopen(filename, "rb");
+	if (!media->f) {
+		return 0;
+	}
+	media->buffer = calloc(2048, 1);
+	media->size = fread(media->buffer, 1, 2048, media->f);
+	media->num_tracks = 2;
+	media->tracks = calloc(sizeof(track_info), 2);
+	media->tracks[0] = (track_info){
+		.fake_pregap = 2 * 75,
+		.start_lba = 0,
+		.end_lba = file_size(media->f),
+		.type = TRACK_DATA
+	};
+	media->tracks[1] = (track_info){
+		.fake_pregap = 2 * 75,
+		.start_lba = media->tracks[0].end_lba,
+		.end_lba = media->tracks[0].end_lba + 2 * 75,
+		.type = TRACK_DATA
+	};
+	media->type = MEDIA_CDROM;
+	media->seek = iso_seek;
+	media->read = iso_read;
+	return media->size;
 }

@@ -188,11 +188,18 @@ uint32_t load_media(const char * filename, system_media *dst, system_type *stype
 		free(ext);
 		return load_media_zip(filename, dst);
 	}
+	if (ext && !strcasecmp(ext, "iso")) {
+		if (stype) {
+			*stype = SYSTEM_SEGACD;
+		}
+		return make_iso_media(dst, filename);
+	}
 	free(ext);
 	ROMFILE f = romopen(filename, "rb");
 	if (!f) {
 		return 0;
 	}
+
 	if (sizeof(header) != romread(header, 1, sizeof(header), f)) {
 		fatal_error("Error reading from %s\n", filename);
 	}
@@ -248,15 +255,8 @@ uint32_t load_media(const char * filename, system_media *dst, system_type *stype
 	return ret;
 }
 
-
-
 int break_on_sync = 0;
 char *save_state_path;
-
-
-
-
-
 char * save_filename;
 system_header *current_system;
 system_header *menu_system;

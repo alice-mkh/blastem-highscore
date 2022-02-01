@@ -39,10 +39,12 @@ void cdd_mcu_init(cdd_mcu *context, system_media *media)
 	context->next_int_cycle = CYCLE_NEVER;
 	context->last_subcode_cycle = CYCLE_NEVER;
 	context->last_nibble_cycle = CYCLE_NEVER;
+	context->last_byte_cycle = CYCLE_NEVER;
 	context->requested_format = SF_NOTREADY;
 	context->media = media;
 	context->current_status_nibble = -1;
 	context->current_cmd_nibble = -1;
+	context->current_sector_byte = -1;
 }
 
 enum {
@@ -111,24 +113,7 @@ static void update_status(cdd_mcu *context)
 		handle_seek(context);
 		if (!context->seeking) {
 			context->head_pba++;
-			uint32_t lba = context->head_pba - LEADIN_SECTORS;
-			for (uint32_t i = 0; i < context->media->num_tracks; i++)
-			{
-				if (lba < context->media->tracks[i].fake_pregap) {
-					context->in_fake_pregap = 1;
-					break;
-				}
-				lba -= context->media->tracks[i].fake_pregap;
-				if (lba < context->media->tracks[i].start_lba) {
-					context->in_fake_pregap = 1;
-					break;
-				}
-				if (lba < context->media->tracks[i].end_lba) {
-					fseek(context->media->f, lba * 2352, SEEK_SET);
-					context->in_fake_pregap = 0;
-					break;
-				}
-			}
+			context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
 		}
 		break;
 	case DS_PAUSE:
@@ -523,28 +508,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			}
 		}
 		if (context->cycle >= next_byte) {
-			uint8_t byte;
-			if (context->in_fake_pregap) {
-				if (!context->current_sector_byte || (context->current_sector_byte >= 16)) {
-					byte = 0;
-					//TODO: error detection and correction bytes
-				} else if (context->current_sector_byte < 12) {
-					byte = 0xFF;
-				} else if (context->current_sector_byte == 12) {
-					uint32_t minute = ((context->head_pba - LEADIN_SECTORS) / 75) / 60;
-					byte = (minute % 10) | ((minute / 10 ) << 4);
-				} else if (context->current_sector_byte == 13) {
-					uint32_t seconds = ((context->head_pba - LEADIN_SECTORS) / 75) % 60;
-					byte = (seconds % 10) | ((seconds / 10 ) << 4);
-				} else if (context->current_sector_byte == 14) {
-					uint32_t frames = (context->head_pba - LEADIN_SECTORS) % 75;
-					byte = (frames % 10) | ((frames / 10 ) << 4);
-				} else {
-					byte = 1;
-				}
-			} else {
-				byte = fgetc(context->media->f);
-			}
+			uint8_t byte = context->media->read(context->media, context->current_sector_byte);
 			lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), context->current_sector_byte++, byte);
 			context->last_byte_cycle = context->cycle;
 			if (context->current_sector_byte == 2352) {

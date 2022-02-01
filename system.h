@@ -98,6 +98,9 @@ typedef struct {
 	track_type type;
 } track_info;
 
+typedef void (*seek_fun)(system_media *media, uint32_t sector);
+typedef uint8_t (*read_fun)(system_media *media, uint32_t offset);
+
 struct system_media {
 	void         *buffer;
 	char         *dir;
@@ -106,9 +109,13 @@ struct system_media {
 	system_media *chain;
 	track_info   *tracks;
 	FILE         *f;
+	seek_fun     seek;
+	read_fun     read;
 	uint32_t     num_tracks;
 	uint32_t     size;
+	uint32_t     cur_sector;
 	media_type   type;
+	uint8_t      in_fake_pregap;
 };
 
 #define OPT_ADDRESS_LOG (1U << 31U)
