@@ -44,7 +44,7 @@ static uint8_t get_src_pixel(segacd_context *cd)
 		//8 stamps in 32x32 mode, 16 stamps in 16x16 mode
 		row_shift = 8 - stamp_shift;
 	}
-	if (stamp_x > max || stamp_y > max) {
+	if (stamp_x >= max || stamp_y >= max) {
 		if (cd->gate_array[GA_STAMP_SIZE] & BIT_RPT) {
 			stamp_x &= max - 1;
 			stamp_y &= max - 1;
@@ -58,6 +58,7 @@ static uint8_t get_src_pixel(segacd_context *cd)
 	uint16_t stamp_num = stamp_def & stamp_num_mask;
 	if (!stamp_num) {
 		//manual says stamp 0 can't be used, I assume that means it's treated as transparent
+		//printf("src pixel (%u, %u = BLANK) stamp (%u, %u = %X), def %X\n", x, y, stamp_x, stamp_y, address, stamp_def);
 		return 0;
 	}
 	uint16_t pixel_x = x & pixel_mask;
@@ -90,6 +91,7 @@ static uint8_t get_src_pixel(segacd_context *cd)
 	uint32_t pixel_address = stamp_num << 6;
 	pixel_address += (pixel_y << 1) + (cell_x << (stamp_shift + 1)) + (pixel_x >> 2 & 1);
 	uint16_t word = cd->word_ram[pixel_address];
+	//printf("src pixel (%u, %u = %X) stamp (%u, %u = %X), def %X\n", x, y, pixel_address, stamp_x, stamp_y, address, stamp_def);
 	switch (pixel_x & 3)
 	{
 	default:
@@ -129,12 +131,13 @@ void draw_pixels(segacd_context *cd)
 		uint32_t dst_address = cd->gate_array[GA_IMAGE_BUFFER_START] << 1;
 		dst_address += cd->graphics_dst_y << 1;
 		dst_address += cd->graphics_dst_x >> 2 & 1;
-		dst_address += ((cd->graphics_dst_x >> 3) * cd->gate_array[GA_IMAGE_BUFFER_VCELLS]) << 4;
+		dst_address += ((cd->graphics_dst_x >> 3) * (cd->gate_array[GA_IMAGE_BUFFER_VCELLS] + 1)) << 4;
 		uint16_t pixel_shift = 12 - 4 * (cd->graphics_dst_x & 3);
 		uint16_t pixel = cd->graphics_pixels[i] << pixel_shift;
 		uint16_t src_mask_check = 0xF << pixel_shift;
 		uint16_t src_mask_keep = ~src_mask_check;
 		pixel &= src_mask_check;
+		//printf("dst (%u, %u = %X)\n", cd->graphics_dst_x, cd->graphics_dst_y, dst_address);
 		switch (cd->gate_array[1] >> 3 & 3)
 		{
 		case 0:
@@ -188,6 +191,7 @@ static void do_graphics(segacd_context *cd, uint32_t cycle)
 			CHECK_CYCLES;
 		case FETCH_Y:
 			cd->graphics_y = cd->word_ram[(cd->gate_array[GA_TRACE_VECTOR_BASE] << 1) + 1] << 8;
+			//printf("Fetching line start (%u, %u) from %X for dst y %u, %u lines remain\n", cd->graphics_x, cd->graphics_y, cd->gate_array[GA_TRACE_VECTOR_BASE] << 1, cd->graphics_dst_y, cd->gate_array[GA_IMAGE_BUFFER_LINES]);
 			cd->graphics_cycle += 2*4;
 			CHECK_CYCLES;
 		case FETCH_DX:
@@ -269,7 +273,7 @@ void cd_graphics_run(segacd_context *cd, uint32_t cycle)
 void cd_graphics_start(segacd_context *cd)
 {
 	if (!(cd->gate_array[GA_STAMP_SIZE] & BIT_GRON)) {
-		printf("grahpics start @ %u\n", cd->graphics_cycle);
+
 		cd->gate_array[GA_STAMP_SIZE] |= BIT_GRON;
 		//Manual scan is bad, but formula appears to be
 		// vsize * (13 + 2 * hoffset + 9 * (hdots + hoffset - 1))
@@ -277,8 +281,10 @@ void cd_graphics_start(segacd_context *cd)
 		uint32_t lines = cd->gate_array[GA_IMAGE_BUFFER_LINES];
 		uint32_t hdots = cd->gate_array[GA_IMAGE_BUFFER_HDOTS];
 		uint32_t hoffset = cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3;
+		printf("graphics start @ %u, %u lines, %u hdots\n", cd->graphics_cycle, lines, hdots);
 		cd->graphics_int_cycle = cd->graphics_cycle + 4 * lines * (13 + 2 * hoffset + 9 * (hdots + hoffset - 1));
 		cd->graphics_dst_y = cd->gate_array[GA_IMAGE_BUFFER_OFFSET] >> 3;
+		cd->graphics_step = FETCH_X;
 	} else {
 		printf("graphics start ignored @ %u\n", cd->graphics_cycle);
 	}
