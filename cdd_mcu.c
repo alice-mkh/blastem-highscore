@@ -124,7 +124,7 @@ static void update_status(cdd_mcu *context)
 		if (!context->seeking) {
 			context->head_pba++;
 			if (context->media && context->media->type == MEDIA_CDROM && context->media->num_tracks) {
-				if (context->head_pba > 3*context->media->num_tracks + 1) {
+				if (context->head_pba > 3*(context->media->num_tracks + 2)) {
 					context->toc_valid = 1;
 					context->seeking = 1;
 					context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].start_lba;

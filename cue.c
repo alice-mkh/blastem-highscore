@@ -244,18 +244,12 @@ uint32_t make_iso_media(system_media *media, const char *filename)
 	}
 	media->buffer = calloc(2048, 1);
 	media->size = fread(media->buffer, 1, 2048, media->f);
-	media->num_tracks = 2;
-	media->tracks = calloc(sizeof(track_info), 2);
+	media->num_tracks = 1;
+	media->tracks = calloc(sizeof(track_info), 1);
 	media->tracks[0] = (track_info){
 		.fake_pregap = 2 * 75,
 		.start_lba = 0,
 		.end_lba = file_size(media->f),
-		.type = TRACK_DATA
-	};
-	media->tracks[1] = (track_info){
-		.fake_pregap = 2 * 75,
-		.start_lba = media->tracks[0].end_lba,
-		.end_lba = media->tracks[0].end_lba + 2 * 75,
 		.type = TRACK_DATA
 	};
 	media->type = MEDIA_CDROM;
