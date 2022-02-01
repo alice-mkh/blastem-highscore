@@ -486,11 +486,11 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 					context->cmd_recv_pending = 0;
 					context->current_cmd_nibble = 0;
 					gate_array[GAO_CDD_STATUS] |= BIT_DTS;
-					next_nibble = context->cycle + NIBBLE_CLOCKS;
+					next_cmd_nibble = context->cycle + NIBBLE_CLOCKS;
 				} else {
 					context->cmd_recv_wait = 1;
-					next_nibble = CYCLE_NEVER;
 				}
+				next_nibble = CYCLE_NEVER;
 			} else {
 				uint8_t value = ((uint8_t *)&context->status_buffer)[context->current_status_nibble];
 				int ga_index = GAO_CDD_STATUS + (context->current_status_nibble >> 1);
@@ -547,10 +547,11 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			}
 			lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), context->current_sector_byte++, byte);
 			context->last_byte_cycle = context->cycle;
-			next_byte = context->cycle + BYTE_CLOCKS;
 			if (context->current_sector_byte == 2352) {
 				context->current_sector_byte = -1;
-
+				next_byte = CYCLE_NEVER;
+			} else {
+				next_byte = context->cycle + BYTE_CLOCKS;
 			}
 		}
 	}
