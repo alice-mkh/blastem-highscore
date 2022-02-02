@@ -98,7 +98,7 @@ typedef struct {
 	track_type type;
 } track_info;
 
-typedef void (*seek_fun)(system_media *media, uint32_t sector);
+typedef uint8_t (*seek_fun)(system_media *media, uint32_t sector);
 typedef uint8_t (*read_fun)(system_media *media, uint32_t offset);
 
 struct system_media {

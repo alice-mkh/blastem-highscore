@@ -43,22 +43,28 @@ static uint32_t timecode_to_lba(char *timecode)
 
 }
 
-static void bin_seek(system_media *media, uint32_t sector)
+enum {
+	FAKE_DATA = 1,
+	FAKE_AUDIO,
+};
+
+static uint8_t bin_seek(system_media *media, uint32_t sector)
 {
 	media->cur_sector = sector;
 	uint32_t lba = sector;
-	for (uint32_t i = 0; i < media->num_tracks; i++)
+	uint8_t track;
+	for (track = 0; track < media->num_tracks; track++)
 	{
-		if (lba < media->tracks[i].fake_pregap) {
-			media->in_fake_pregap = 1;
+		if (lba < media->tracks[track].fake_pregap) {
+			media->in_fake_pregap = media->tracks[track].type == TRACK_DATA ? FAKE_DATA : FAKE_AUDIO;
 			break;
 		}
-		lba -= media->tracks[i].fake_pregap;
-		if (lba < media->tracks[i].start_lba) {
-			media->in_fake_pregap = 1;
+		lba -= media->tracks[track].fake_pregap;
+		if (lba < media->tracks[track].start_lba) {
+			media->in_fake_pregap = media->tracks[track].type == TRACK_DATA ? FAKE_DATA : FAKE_AUDIO;
 			break;
 		}
-		if (lba < media->tracks[i].end_lba) {
+		if (lba < media->tracks[track].end_lba) {
 			media->in_fake_pregap = 0;
 			break;
 		}
@@ -66,6 +72,7 @@ static void bin_seek(system_media *media, uint32_t sector)
 	if (!media->in_fake_pregap) {
 		fseek(media->f, lba * 2352, SEEK_SET);
 	}
+	return track;
 }
 
 static uint8_t fake_read(uint32_t sector, uint32_t offset)
@@ -91,22 +98,25 @@ static uint8_t fake_read(uint32_t sector, uint32_t offset)
 
 static uint8_t bin_read(system_media *media, uint32_t offset)
 {
-	if (media->in_fake_pregap) {
+	if (media->in_fake_pregap == FAKE_DATA) {
 		return fake_read(media->cur_sector, offset);
+	} else if (media->in_fake_pregap == FAKE_AUDIO) {
+		return 0;
 	} else {
 		return fgetc(media->f);
 	}
 }
 
-static void iso_seek(system_media *media, uint32_t sector)
+static uint8_t iso_seek(system_media *media, uint32_t sector)
 {
 	media->cur_sector = sector;
 	if (sector < (2 * 75)) {
-		media->in_fake_pregap = 1;
+		media->in_fake_pregap = FAKE_DATA;
 	} else {
 		media->in_fake_pregap = 0;
 		fseek(media->f, (sector -  2 * 75) * 2048, SEEK_SET);
 	}
+	return 0;
 }
 
 static uint8_t iso_read(system_media *media, uint32_t offset)

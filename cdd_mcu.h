@@ -2,6 +2,7 @@
 #define CDD_MCU_H_
 #include "system.h"
 #include "lc8951.h"
+#include "cdd_fader.h"
 
 typedef enum {
 	SF_ABSOLUTE,
@@ -159,7 +160,7 @@ typedef struct {
 } cdd_mcu;
 
 void cdd_mcu_init(cdd_mcu *context, system_media *media);
-void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951* cdc);
+void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951 *cdc, cdd_fader *fader);
 void cdd_hock_enabled(cdd_mcu *context);
 void cdd_hock_disabled(cdd_mcu *context);
 void cdd_mcu_start_cmd_recv(cdd_mcu *context, uint16_t *gate_array);

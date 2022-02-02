@@ -77,6 +77,9 @@ enum {
 #define BIT_EDT        0x8000
 #define BIT_DSR        0x4000
 
+//GA_CDD_CTRL
+#define BIT_MUTE       0x0100
+
 enum {
 	DST_MAIN_CPU = 2,
 	DST_SUB_CPU,
@@ -306,7 +309,7 @@ static void timers_run(segacd_context *cd, uint32_t cycle)
 
 static void cdd_run(segacd_context *cd, uint32_t cycle)
 {
-	cdd_mcu_run(&cd->cdd, cycle, cd->gate_array + GA_CDD_CTRL, &cd->cdc);
+	cdd_mcu_run(&cd->cdd, cycle, cd->gate_array + GA_CDD_CTRL, &cd->cdc, &cd->fader);
 	lc8951_run(&cd->cdc, cycle);
 }
 
@@ -594,6 +597,13 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cd->gate_array[reg] = value & (BIT_MASK_IEN6|BIT_MASK_IEN5|BIT_MASK_IEN4|BIT_MASK_IEN3|BIT_MASK_IEN2|BIT_MASK_IEN1);
 		calculate_target_cycle(m68k);
 		break;
+	case GA_CDD_FADER:
+		cdd_run(cd, m68k->current_cycle);
+		value &= 0x7FFF;
+		cdd_fader_attenuation_write(&cd->fader, value);
+		cd->gate_array[reg] &= 0x8000;
+		cd->gate_array[reg] |= value;
+		break;
 	case GA_CDD_CTRL: {
 		cdd_run(cd, m68k->current_cycle);
 		uint16_t changed = cd->gate_array[reg] ^ value;
@@ -604,6 +614,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 				cdd_hock_enabled(&cd->cdd);
 			} else {
 				cdd_hock_disabled(&cd->cdd);
+				cd->gate_array[reg] |= BIT_MUTE;
 			}
 			calculate_target_cycle(m68k);
 		}
@@ -802,6 +813,9 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 {
 	segacd_context *cd = context->system;
 	scd_peripherals_run(cd, context->current_cycle);
+	if (context->int_ack) {
+		printf("int ack %d\n", context->int_ack);
+	}
 	switch (context->int_ack)
 	{
 	case 1:
@@ -1153,13 +1167,14 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	cd->reset = 1; //active low, so reset is not active on start
 	cd->memptr_start_index = 0;
 	cd->gate_array[1] = 1;
-	cd->gate_array[0x1B] = 0x100;
+	cd->gate_array[GA_CDD_CTRL] = BIT_MUTE; //Data/mute flag is set on start
 	lc8951_init(&cd->cdc, handle_cdc_byte, cd);
 	if (media->chain && media->type != MEDIA_CDROM) {
 		media = media->chain;
 	}
 	cdd_mcu_init(&cd->cdd, media);
 	cd_graphics_init(cd);
+	cdd_fader_init(&cd->fader);
 
 	return cd;
 }

@@ -402,9 +402,15 @@ static void sync_sound(genesis_context * gen, uint32_t target)
 		psg_run(gen->psg, cur_target);
 		//printf("Running YM-2612 to cycle %d\n", cur_target);
 		ym_run(gen->ym, cur_target);
+		if (gen->expansion) {
+			scd_run(gen->expansion, gen_cycle_to_scd(cur_target, gen));
+		}
 	}
 	psg_run(gen->psg, target);
 	ym_run(gen->ym, target);
+	if (gen->expansion) {
+		scd_run(gen->expansion, gen_cycle_to_scd(target, gen));
+	}
 
 	//printf("Target: %d, YM bufferpos: %d, PSG bufferpos: %d\n", target, gen->ym->buffer_pos, gen->psg->buffer_pos * 2);
 }

@@ -149,6 +149,9 @@ void lc8951_reg_write(lc8951 *context, uint8_t value)
 	case RESET:
 		context->comin_count = 0;
 		context->regs[IFSTAT] = 0xFF;
+		context->ifctrl = 0;
+		context->ctrl0 = 0;
+		context->ctrl1 = 0;
 		break;
 	default:
 		break;
@@ -277,7 +280,7 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 				context->regs[PTL] = block_start;
 				context->regs[PTH] = block_start >> 8;
 			}
-			printf("Decoding block starting at %X\n", context->regs[PTL] | (context->regs[PTH] << 8));
+			printf("Decoding block starting at %X (WRRQ: %d)\n", context->regs[PTL] | (context->regs[PTH] << 8), !!(context->ctrl0 & BIT_WRRQ));
 			//TODO: Datasheet has some hints about how long decoding takes in the form of how long DECI is asserted
 			context->decode_end = context->cycle + 2352 * context->clock_step * 4;
 		}

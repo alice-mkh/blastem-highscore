@@ -2,7 +2,6 @@
 #define SEGACD_H_
 #include <stdint.h>
 #include "genesis.h"
-#include "lc8951.h"
 #include "cdd_mcu.h"
 
 typedef struct {
@@ -37,6 +36,7 @@ typedef struct {
 	uint8_t         memptr_start_index;
 	lc8951          cdc;
 	cdd_mcu         cdd;
+	cdd_fader       fader;
 	uint8_t         cdc_dst_low;
 	uint8_t         cdc_int_ack;
 	uint8_t         graphics_step;

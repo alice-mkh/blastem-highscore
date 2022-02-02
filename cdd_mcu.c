@@ -39,7 +39,7 @@ void cdd_mcu_init(cdd_mcu *context, system_media *media)
 	context->next_int_cycle = CYCLE_NEVER;
 	context->last_subcode_cycle = CYCLE_NEVER;
 	context->last_nibble_cycle = CYCLE_NEVER;
-	context->last_byte_cycle = CYCLE_NEVER;
+	context->last_byte_cycle = 0;
 	context->requested_format = SF_NOTREADY;
 	context->media = media;
 	context->current_status_nibble = -1;
@@ -52,6 +52,11 @@ enum {
 	GAO_CDD_STATUS,
 	GAO_CDD_CMD = GAO_CDD_STATUS+5
 };
+//GAO_CDD_CTRL
+#define BIT_MUTE 0x100
+#define BIT_HOCK 0x0004
+#define BIT_DRS  0x0002
+#define BIT_DTS  0x0001
 
 static uint8_t checksum(uint8_t *vbuffer)
 {
@@ -105,15 +110,19 @@ static void lba_to_status(cdd_mcu *context, uint32_t lba)
 	context->status_buffer.b.time.frame_low = frames % 10;
 }
 
-static void update_status(cdd_mcu *context)
+static void update_status(cdd_mcu *context, uint16_t *gate_array)
 {
+	gate_array[GAO_CDD_CTRL] |= BIT_MUTE;
 	switch (context->status)
 	{
 	case DS_PLAY:
 		handle_seek(context);
 		if (!context->seeking) {
 			context->head_pba++;
-			context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
+			uint8_t track = context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
+			if (context->media->tracks[track].type == TRACK_AUDIO) {
+				gate_array[GAO_CDD_CTRL] &= ~BIT_MUTE;
+			}
 		}
 		break;
 	case DS_PAUSE:
@@ -287,7 +296,7 @@ static void update_status(cdd_mcu *context)
 			context->error_status = DS_STOP;
 		}
 		if (context->requested_format != SF_TOCN) {
-			context->status_buffer.b.time.flags = 1; //TODO: populate these
+			context->status_buffer.b.time.flags = !!(gate_array[GAO_CDD_CTRL] & BIT_MUTE); //TODO: populate these
 		}
 	} else {
 		// Did not receive our first command so just send zeroes
@@ -432,34 +441,37 @@ static void run_command(cdd_mcu *context)
 	}
 }
 
-#define BIT_HOCK 0x4
-#define BIT_DRS  0x2
-#define BIT_DTS  0x1
-
-void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951* cdc)
+void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951* cdc, cdd_fader* fader)
 {
 	uint32_t cd_cycle = mclks_to_cd_block(cycle);
+	uint32_t next_byte = context->last_byte_cycle + BYTE_CLOCKS;
 	if (!(gate_array[GAO_CDD_CTRL] & BIT_HOCK)) {
 		//it's a little unclear if this gates the actual cd block clock or just handshaking
 		//assum it's actually the clock for now
-		context->cycle = cd_cycle;
+		for (; context->cycle < cd_cycle; context->cycle += CDD_MCU_DIVIDER) {
+			if (context->cycle >= next_byte) {
+				cdd_fader_data(fader, 0);
+				next_byte = context->cycle + BYTE_CLOCKS;
+				context->last_byte_cycle = context->cycle;
+			}
+		}
+		gate_array[GAO_CDD_CTRL] |= BIT_MUTE;
 		return;
 	}
 	uint32_t next_subcode = context->last_subcode_cycle + SECTOR_CLOCKS;
 	uint32_t next_nibble = context->current_status_nibble >= 0 ? context->last_nibble_cycle + NIBBLE_CLOCKS : CYCLE_NEVER;
 	uint32_t next_cmd_nibble = context->current_cmd_nibble >= 0 ? context->last_nibble_cycle + NIBBLE_CLOCKS : CYCLE_NEVER;
-	uint32_t next_byte = context->current_sector_byte >= 0 ? context->last_byte_cycle + BYTE_CLOCKS : CYCLE_NEVER;
+
 	for (; context->cycle < cd_cycle; context->cycle += CDD_MCU_DIVIDER)
 	{
 		if (context->cycle >= next_subcode) {
 			context->last_subcode_cycle = context->cycle;
 			next_subcode = context->cycle + SECTOR_CLOCKS;
-			update_status(context);
+			update_status(context, gate_array);
 			next_nibble = context->cycle;
 			context->current_status_nibble = 0;
 			gate_array[GAO_CDD_STATUS] |= BIT_DRS;
 			if (context->status == DS_PLAY && !context->seeking) {
-				next_byte = context->cycle;
 				context->current_sector_byte = 0;
 			}
 		}
@@ -508,15 +520,18 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			}
 		}
 		if (context->cycle >= next_byte) {
-			uint8_t byte = context->media->read(context->media, context->current_sector_byte);
-			lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), context->current_sector_byte++, byte);
+			if (context->current_sector_byte >= 0) {
+				uint8_t byte = context->media->read(context->media, context->current_sector_byte);
+				lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), context->current_sector_byte++, byte);
+				cdd_fader_data(fader, gate_array[GAO_CDD_CTRL] & BIT_MUTE ? 0 : byte);
+			} else {
+				cdd_fader_data(fader, 0);
+			}
 			context->last_byte_cycle = context->cycle;
 			if (context->current_sector_byte == 2352) {
 				context->current_sector_byte = -1;
-				next_byte = CYCLE_NEVER;
-			} else {
-				next_byte = context->cycle + BYTE_CLOCKS;
 			}
+			next_byte = context->cycle + BYTE_CLOCKS;
 		}
 	}
 }
@@ -544,7 +559,6 @@ void cdd_hock_disabled(cdd_mcu *context)
 	context->last_subcode_cycle = CYCLE_NEVER;
 	context->next_int_cycle = CYCLE_NEVER;
 	context->last_nibble_cycle = CYCLE_NEVER;
-	context->last_byte_cycle = CYCLE_NEVER;
 	context->current_status_nibble = -1;
 	context->current_cmd_nibble = -1;
 }
