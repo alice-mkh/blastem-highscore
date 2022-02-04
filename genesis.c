@@ -21,6 +21,7 @@
 #include "jcart.h"
 #include "config.h"
 #include "event_log.h"
+#include "paths.h"
 #define MCLKS_NTSC 53693175
 #define MCLKS_PAL  53203395
 
@@ -1473,10 +1474,22 @@ static void request_exit(system_header *system)
 static void persist_save(system_header *system)
 {
 	genesis_context *gen = (genesis_context *)system;
+	FILE *f;
+	if (gen->expansion) {
+		segacd_context *cd = gen->expansion;
+		char *bram_name = path_append(system->save_dir, "internal.bram");
+		f = fopen(bram_name, "wb");
+		if (f) {
+			fwrite(cd->bram, 1, 8 * 1024, f);
+			fclose(f);
+			printf("Saved internal BRAM to %s\n", bram_name);
+		}
+		free(bram_name);
+	}
 	if (gen->save_type == SAVE_NONE) {
 		return;
 	}
-	FILE * f = fopen(save_filename, "wb");
+	f = fopen(save_filename, "wb");
 	if (!f) {
 		fprintf(stderr, "Failed to open %s file %s for writing\n", save_type_name(gen->save_type), save_filename);
 		return;
@@ -1505,6 +1518,19 @@ static void load_save(system_header *system)
 			}
 			printf("Loaded %s from %s\n", save_type_name(gen->save_type), save_filename);
 		}
+	}
+	if (gen->expansion) {
+		segacd_context *cd = gen->expansion;
+		char *bram_name = path_append(system->save_dir, "internal.bram");
+		f = fopen(bram_name, "rb");
+		if (f) {
+			uint32_t read = fread(cd->bram, 1, 8 * 1024, f);
+			fclose(f);
+			if (read > 0) {
+				printf("Loaded internal BRAM from %s\n", bram_name);
+			}
+		}
+		free(bram_name);
 	}
 }
 
@@ -2204,5 +2230,6 @@ genesis_context *alloc_config_genesis_cdboot(system_media *media, uint32_t syste
 			gen->m68k->mem_pointers[map[i].ptr_index] = map[i].buffer;
 		}
 	}
+	gen->header.type = SYSTEM_SEGACD;
 	return gen;
 }

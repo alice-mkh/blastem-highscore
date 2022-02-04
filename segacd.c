@@ -1143,15 +1143,11 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	};
 
 	segacd_context *cd = calloc(sizeof(segacd_context), 1);
-	FILE *f = fopen("cdbios.bin", "rb");
-	if (!f) {
-		fatal_error("Failed to open CD firmware for reading");
-	}
-	long firmware_size = file_size(f);
+	uint32_t firmware_size;
+	cd->rom = (uint16_t *)read_bundled_file("cdbios.bin", &firmware_size);
 	uint32_t adjusted_size = nearest_pow2(firmware_size);
-	cd->rom = malloc(adjusted_size);
-	if (firmware_size != fread(cd->rom, 1, firmware_size, f)) {
-		fatal_error("Failed to read CD firmware");
+	if (adjusted_size != firmware_size) {
+		cd->rom = realloc(cd->rom, adjusted_size);
 	}
 	cd->rom_mut = malloc(adjusted_size);
 	byteswap_rom(adjusted_size, cd->rom);
@@ -1162,11 +1158,11 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	//tern_node *db = get_rom_db();
 	//*info = configure_rom(db, media->buffer, media->size, media->chain ? media->chain->buffer : NULL, media->chain ? media->chain->size : 0, NULL, 0);
 
-	cd->prog_ram = malloc(512*1024);
-	cd->word_ram = malloc(256*1024);
-	cd->pcm_ram = malloc(64*1024);
+	cd->prog_ram = calloc(512*1024, 1);
+	cd->word_ram = calloc(256*1024, 1);
+	cd->pcm_ram = calloc(64*1024, 1);
 	//TODO: Load state from file
-	cd->bram = malloc(8*1024);
+	cd->bram = calloc(8*1024, 1);
 
 
 	sub_cpu_map[0].buffer = sub_cpu_map[1].buffer = cd->prog_ram;

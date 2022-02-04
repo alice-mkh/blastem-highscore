@@ -422,13 +422,13 @@ void handle_binding_up(keybinding * binding)
 			}
 #endif
 			break;
-		case UI_PLANE_DEBUG: 
-		case UI_VRAM_DEBUG: 
+		case UI_PLANE_DEBUG:
+		case UI_VRAM_DEBUG:
 		case UI_CRAM_DEBUG:
 		case UI_COMPOSITE_DEBUG:
 			if (allow_content_binds) {
 				vdp_context *vdp = NULL;
-				if (current_system->type == SYSTEM_GENESIS) {
+				if (current_system->type == SYSTEM_GENESIS || current_system->type == SYSTEM_SEGACD) {
 					genesis_context *gen = (genesis_context *)current_system;
 					vdp = gen->vdp;
 				} else if (current_system->type == SYSTEM_SMS) {
@@ -533,7 +533,7 @@ void handle_mouse_moved(int mouse, uint16_t x, uint16_t y, int16_t deltax, int16
 				float scale_y = (render_emulated_height() * 2.0f) / ((float)render_height());
 				int32_t adj_x = x * scale_x + 2 * render_overscan_left() - 2 * BORDER_LEFT;
 				int32_t adj_y = y * scale_y + 2 * render_overscan_top() - 4;
-				
+
 				current_system->mouse_motion_absolute(current_system, target_mouse, adj_x, adj_y);
 			}
 			break;
@@ -1090,11 +1090,11 @@ void set_bindings(void)
 	tern_node *padbuttons = get_pad_buttons();
 
 	tern_node *mousebuttons = get_mouse_buttons();
-	
+
 	tern_node * keys = tern_find_path(config, "bindings\0keys\0", TVAL_NODE).ptrval;
 	process_keys(keys, special, padbuttons, mousebuttons, NULL);
 	tern_free(special);
-	
+
 	memset(mice, 0, sizeof(mice));
 	tern_node * mice = tern_find_path(config, "bindings\0mice\0", TVAL_NODE).ptrval;
 	if (mice) {
