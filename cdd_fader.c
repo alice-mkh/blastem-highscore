@@ -3,7 +3,7 @@
 
 void cdd_fader_init(cdd_fader *fader)
 {
-	fader->audio = render_audio_source(16934400, 384, 2);
+	fader->audio = render_audio_source("CDDA", 16934400, 384, 2);
 	fader->cur_attenuation = 0x4000;
 	fader->dst_attenuation = 0x4000;
 	fader->attenuation_step = 0;

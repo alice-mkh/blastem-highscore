@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "genesis.h"
 #include "cdd_mcu.h"
+#include "rf5c164.h"
 
 typedef struct {
 	m68k_context    *m68k;
@@ -34,6 +35,7 @@ typedef struct {
 	uint8_t         reset;
 	uint8_t         need_reset;
 	uint8_t         memptr_start_index;
+	rf5c164         pcm;
 	lc8951          cdc;
 	cdd_mcu         cdd;
 	cdd_fader       fader;

@@ -77,7 +77,7 @@ static void handle_seek(cdd_mcu *context)
 		if (context->seek_pba == context->head_pba) {
 			context->seeking = 0;
 		} else if (context->seek_pba > context->head_pba) {
-			if (context->seek_pba - context->head_pba >= COARSE_SEEK) {
+			if (context->seek_pba - context->head_pba >= COARSE_SEEK || context->head_pba < LEADIN_SECTORS) {
 				context->head_pba += COARSE_SEEK;
 			} else if (context->seek_pba - context->head_pba >= FINE_SEEK) {
 				context->head_pba += FINE_SEEK;
@@ -119,6 +119,8 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		handle_seek(context);
 		if (!context->seeking) {
 			context->head_pba++;
+		}
+		if (context->head_pba >= LEADIN_SECTORS) {
 			uint8_t track = context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
 			if (context->media->tracks[track].type == TRACK_AUDIO) {
 				gate_array[GAO_CDD_CTRL] &= ~BIT_MUTE;
@@ -471,7 +473,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			next_nibble = context->cycle;
 			context->current_status_nibble = 0;
 			gate_array[GAO_CDD_STATUS] |= BIT_DRS;
-			if (context->status == DS_PLAY && !context->seeking) {
+			if (context->status == DS_PLAY && context->head_pba >= LEADIN_SECTORS) {
 				context->current_sector_byte = 0;
 			}
 		}

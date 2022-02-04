@@ -139,7 +139,7 @@ uint8_t all_sources_ready(void)
 
 void render_audio_adjust_clock(audio_source *src, uint64_t master_clock, uint64_t sample_divider)
 {
-	src->buffer_inc = ((BUFFER_INC_RES * (uint64_t)sample_rate) / master_clock) * sample_divider;
+	src->buffer_inc = ((BUFFER_INC_RES * sample_divider * (uint64_t)sample_rate) / master_clock);
 }
 
 void render_audio_adjust_speed(float adjust_ratio)
@@ -150,13 +150,14 @@ void render_audio_adjust_speed(float adjust_ratio)
 	}
 }
 
-audio_source *render_audio_source(uint64_t master_clock, uint64_t sample_divider, uint8_t channels)
+audio_source *render_audio_source(const char *name, uint64_t master_clock, uint64_t sample_divider, uint8_t channels)
 {
 	audio_source *ret = NULL;
 	uint32_t alloc_size = render_is_audio_sync() ? channels * buffer_samples : nearest_pow2(render_min_buffered() * 4 * channels);
 	render_lock_audio();
 		if (num_audio_sources < 8) {
 			ret = calloc(1, sizeof(audio_source));
+			ret->name = name;
 			ret->back = malloc(alloc_size * sizeof(int16_t));
 			ret->front = render_is_audio_sync() ? malloc(alloc_size * sizeof(int16_t)) : ret->back;
 			ret->front_populated = 0;
@@ -183,7 +184,7 @@ audio_source *render_audio_source(uint64_t master_clock, uint64_t sample_divider
 		ret->gain_mult = 1.0f;
 	}
 	render_audio_created(ret);
-	
+
 	return ret;
 }
 
@@ -211,7 +212,7 @@ void render_pause_source(audio_source *src)
 				break;
 			}
 		}
-		
+
 	render_unlock_audio();
 	if (found) {
 		render_source_paused(src, remaining_sources);
@@ -250,7 +251,7 @@ void render_free_source(audio_source *src)
 		render_pause_source(src);
 		num_inactive_audio_sources--;
 	}
-	
+
 	free(src->front);
 	if (render_is_audio_sync()) {
 		free(src->back);
@@ -283,7 +284,7 @@ void render_put_mono_sample(audio_source *src, int16_t value)
 	{
 		src->buffer_fraction -= BUFFER_INC_RES;
 		interp_sample(src, src->last_left, value);
-		
+
 		if (((src->buffer_pos - base) & src->mask) >= sync_samples) {
 			render_do_audio_ready(src);
 		}
@@ -301,10 +302,10 @@ void render_put_stereo_sample(audio_source *src, int16_t left, int16_t right)
 	while (src->buffer_fraction > BUFFER_INC_RES)
 	{
 		src->buffer_fraction -= BUFFER_INC_RES;
-		
+
 		interp_sample(src, src->last_left, left);
 		interp_sample(src, src->last_right, right);
-		
+
 		if (((src->buffer_pos - base) & src->mask)/2 >= sync_samples) {
 			render_do_audio_ready(src);
 		}

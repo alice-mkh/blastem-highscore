@@ -262,7 +262,14 @@ static void *cell_image_write8(uint32_t address, void *vcontext, uint8_t value)
 
 static uint8_t pcm_read8(uint32_t address, void *vcontext)
 {
-	return 0;
+	m68k_context *m68k = vcontext;
+	segacd_context *cd = m68k->system;
+	if (address & 1) {
+		rf5c164_run(&cd->pcm, m68k->current_cycle);
+		return rf5c164_read(&cd->pcm, address >> 1);
+	} else {
+		return 0xFF;
+	}
 }
 
 static uint16_t pcm_read16(uint32_t address, void *vcontext)
@@ -272,6 +279,12 @@ static uint16_t pcm_read16(uint32_t address, void *vcontext)
 
 static void *pcm_write8(uint32_t address, void *vcontext, uint8_t value)
 {
+	m68k_context *m68k = vcontext;
+	segacd_context *cd = m68k->system;
+	if (address & 1) {
+		rf5c164_run(&cd->pcm, m68k->current_cycle);
+		rf5c164_write(&cd->pcm, address >> 1, value);
+	}
 	return vcontext;
 }
 
@@ -760,7 +773,7 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		break;
 	case DST_PCM_RAM:
 		dma_addr &= (1 << 13) - 1;
-		//TODO: write to currently visible 8K bank of PCM RAM I guess?
+		rf5c164_write(&cd->pcm, 0x1000 | (dma_addr >> 1), value);
 		dma_addr += 2;
 		cd->cdc_dst_low = dma_addr & 7;
 		cd->gate_array[GA_CDC_DMA_ADDR] = dma_addr >> 3;
@@ -807,6 +820,7 @@ static void scd_peripherals_run(segacd_context *cd, uint32_t cycle)
 	timers_run(cd, cycle);
 	cdd_run(cd, cycle);
 	cd_graphics_run(cd, cycle);
+	rf5c164_run(&cd->pcm, cycle);
 }
 
 static m68k_context *sync_components(m68k_context * context, uint32_t address)
@@ -890,6 +904,7 @@ void scd_adjust_cycle(segacd_context *cd, uint32_t deduction)
 			cd->graphics_int_cycle = 0;
 		}
 	}
+	cd->pcm.cycle -= deduction;
 }
 
 static uint16_t main_gate_read16(uint32_t address, void *vcontext)
@@ -1175,7 +1190,7 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	cdd_mcu_init(&cd->cdd, media);
 	cd_graphics_init(cd);
 	cdd_fader_init(&cd->fader);
-
+	rf5c164_init(&cd->pcm, SCD_MCLKS, 4);
 	return cd;
 }
 
