@@ -122,13 +122,19 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		}
 		if (context->head_pba >= LEADIN_SECTORS) {
 			uint8_t track = context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
-			if (context->media->tracks[track].type == TRACK_AUDIO) {
+			if (!context->seeking && context->media->tracks[track].type == TRACK_AUDIO) {
 				gate_array[GAO_CDD_CTRL] &= ~BIT_MUTE;
 			}
 		}
 		break;
 	case DS_PAUSE:
 		handle_seek(context);
+		if (context->head_pba >= LEADIN_SECTORS) {
+			uint8_t track = context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
+			if (!context->seeking && context->media->tracks[track].type == TRACK_AUDIO) {
+				gate_array[GAO_CDD_CTRL] &= ~BIT_MUTE;
+			}
+		}
 		break;
 	case DS_TOC_READ:
 		handle_seek(context);
@@ -147,7 +153,18 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 			}
 		}
 		break;
-
+	case DS_TRACKING:
+		handle_seek(context);
+		if (!context->seeking) {
+			context->status = DS_PAUSE;
+		}
+		if (context->head_pba >= LEADIN_SECTORS) {
+			uint8_t track = context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
+			if (!context->seeking && context->media->tracks[track].type == TRACK_AUDIO) {
+				gate_array[GAO_CDD_CTRL] &= ~BIT_MUTE;
+			}
+		}
+		break;
 	}
 	if (context->first_cmd_received) {
 		switch (context->requested_format)
@@ -287,7 +304,7 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		if (context->error_status == DS_STOP) {
 			if (context->requested_format >= SF_TOCO && context->requested_format <= SF_TOCN) {
 				context->status_buffer.status = DS_TOC_READ;
-			} else if (context->seeking) {
+			} else if (context->seeking && context->status != DS_TRACKING) {
 				context->status_buffer.status = DS_SEEK;
 			} else {
 				context->status_buffer.status = context->status;
@@ -438,6 +455,53 @@ static void run_command(cdd_mcu *context)
 		}
 		context->status = DS_PAUSE;
 		break;
+	case CMD_PLAY:
+		if (context->status == DS_DOOR_OPEN || context->status == DS_TRAY_MOVING || context->status == DS_DISC_LEADOUT || context->status == DS_DISC_LEADIN) {
+			context->error_status = DS_CMD_ERROR;
+			break;
+		}
+		if (context->requested_format == SF_TOCT || context->requested_format == SF_TOCN) {
+			context->requested_format = SF_ABSOLUTE;
+		}
+		if (!context->toc_valid) {
+			context->error_status = DS_CMD_ERROR;
+			break;
+		}
+		if (context->status == DS_STOP || context->status == DS_TOC_READ) {
+			context->seeking = 1;
+			context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].fake_pregap + context->media->tracks[0].start_lba;
+			printf("CDD CMD: PAUSE, seeking to %u\n", context->seek_pba);
+		} else {
+			puts("CDD CMD: PAUSE");
+		}
+		break;
+	//TODO: CMD_FFWD, CMD_RWD
+	case CMD_TRACK_SKIP:
+		if (context->status != DS_PLAY && context->status != DS_PAUSE && context->status != DS_DISC_LEADOUT) {
+			context->error_status = DS_CMD_ERROR;
+			break;
+		}
+		if (context->requested_format == SF_TOCT || context->requested_format == SF_TOCN) {
+			context->requested_format = SF_ABSOLUTE;
+		}
+		if (!context->toc_valid) {
+			context->error_status = DS_CMD_ERROR;
+			break;
+		}
+		{
+			int32_t to_skip = context->cmd_buffer.b.skip.tracks_highest << 12 | context->cmd_buffer.b.skip.tracks_midhigh << 8
+				| context->cmd_buffer.b.skip.tracks_midlow << 4 | context->cmd_buffer.b.skip.tracks_lowest;
+			if (context->cmd_buffer.b.skip.direction) {
+				to_skip = -to_skip;
+			}
+			printf("CDD CMD: TRACK_SKIP direction %u, num_tracks %i, delta %i\n", context->cmd_buffer.b.skip.direction, abs(to_skip), to_skip);
+			//circumference at 83mm point (roughly half way between inner and outer edge of program area)
+			//~ 260.75cm ~ 15 sectors
+			context->seek_pba = context->head_pba + to_skip * 15;
+			context->seeking = 1;
+		}
+		context->status = DS_TRACKING;
+		break;
 	default:
 		printf("CDD CMD: Unimplemented(%d)\n", context->cmd_buffer.cmd_type);
 	}
@@ -473,7 +537,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			next_nibble = context->cycle;
 			context->current_status_nibble = 0;
 			gate_array[GAO_CDD_STATUS] |= BIT_DRS;
-			if (context->status == DS_PLAY && context->head_pba >= LEADIN_SECTORS) {
+			if ((context->status == DS_PLAY || context->status == DS_PAUSE) && context->head_pba >= LEADIN_SECTORS) {
 				context->current_sector_byte = 0;
 			}
 		}
