@@ -242,12 +242,42 @@ static void *unmapped_word_write8(uint32_t address, void *vcontext, uint8_t valu
 
 static uint16_t cell_image_read16(uint32_t address, void *vcontext)
 {
-	return 0xFFFF;
+	uint32_t word_of_cell = address & 2;
+	if (address < 0x10000) {
+		//64x32 cell view
+		uint32_t line_of_column = address & 0x3FC;
+		uint32_t column = address & 0xFC00;
+		address = (line_of_column << 6) | (column >> 8) | word_of_cell;
+	} else if (address < 0x18000) {
+		//64x16 cell view
+		uint32_t line_of_column = address & 0x1FC;
+		uint32_t column = address & 0x7E00;
+		address = 0x10000 | (line_of_column << 6) | (column >> 7) | word_of_cell;
+	} else if (address < 0x1C000) {
+		//64x8 cell view
+		uint32_t line_of_column = address & 0x00FC;
+		uint32_t column = address & 0x3F00;
+		address = 0x18000 | (line_of_column << 6) | (column >> 6) | word_of_cell;
+	} else {
+		//64x4 cell view
+		uint32_t line_of_column = address & 0x007C;
+		uint32_t column = address & 0x1F80;
+		address &= 0x1E000;
+		address |= (line_of_column << 6) | (column >> 5) | word_of_cell;
+	}
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	segacd_context *cd = gen->expansion;
+	return m68k->mem_pointers[cd->memptr_start_index + 1][address>>1];
 }
 
 static uint8_t cell_image_read8(uint32_t address, void *vcontext)
 {
-	return 0xFF;
+	uint16_t word = cell_image_read16(address & 0xFFFFFE, vcontext);
+	if (address & 1) {
+		return word;
+	}
+	return word >> 8;
 }
 
 static void *cell_image_write16(uint32_t address, void *vcontext, uint16_t value)
