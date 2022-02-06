@@ -52,7 +52,7 @@ static uint8_t bin_seek(system_media *media, uint32_t sector)
 {
 	media->cur_sector = sector;
 	uint32_t lba = sector;
-	uint8_t track;
+	uint32_t track;
 	for (track = 0; track < media->num_tracks; track++)
 	{
 		if (lba < media->tracks[track].fake_pregap) {
@@ -68,6 +68,9 @@ static uint8_t bin_seek(system_media *media, uint32_t sector)
 			media->in_fake_pregap = 0;
 			break;
 		}
+	}
+	if (track < media->num_tracks) {
+		media->cur_track = track;
 	}
 	if (!media->in_fake_pregap) {
 		fseek(media->f, lba * 2352, SEEK_SET);
@@ -103,6 +106,12 @@ static uint8_t bin_read(system_media *media, uint32_t offset)
 	} else if (media->in_fake_pregap == FAKE_AUDIO) {
 		return 0;
 	} else {
+		if (media->tracks[media->cur_track].need_swap) {
+			if (offset & 1) {
+				return media->byte_storage;
+			}
+			media->byte_storage = fgetc(media->f);
+		}
 		return fgetc(media->f);
 	}
 }
@@ -147,6 +156,7 @@ uint8_t parse_cue(system_media *media)
 	media->tracks = tracks;
 	line = media->buffer;
 	int track = -1;
+	uint8_t audio_byte_swap = 0;
 	do {
 		char *cmd = cmd_start(line);
 		if (cmd) {
@@ -161,6 +171,7 @@ uint8_t parse_cue(system_media *media)
 				cmd = cmd_start(end);
 				if (cmd) {
 					tracks[track].type = startswith(cmd, "AUDIO") ? TRACK_AUDIO : TRACK_DATA;
+					tracks[track].need_swap = tracks[track].type == TRACK_AUDIO && audio_byte_swap;
 				}
 			} else if (startswith(cmd, "FILE ")) {
 				if (media->f) {
@@ -191,6 +202,19 @@ uint8_t parse_cue(system_media *media)
 								fatal_error("Failed to open %s specified by FILE command in CUE sheet %s.%s\n", fname, media->name, media->extension);
 							}
 							free(fname);
+							for (end++; *end && *end != '\n' && *end != '\r'; end++)
+							{
+								if (!isspace(*end)) {
+									if (startswith(end, "BINARY")) {
+										audio_byte_swap = 0;
+									} else if (startswith(end, "MOTOROLA")) {
+										audio_byte_swap = 1;
+									} else {
+										warning("Unsupported FILE type in CUE sheet. Only BINARY and MOTOROLA are supported\n");
+									}
+									break;
+								}
+							}
 						}
 					}
 				}
@@ -227,13 +251,15 @@ uint8_t parse_cue(system_media *media)
 		//replace cue sheet with first sector
 		free(media->buffer);
 		media->buffer = calloc(2048, 1);
-		if (tracks[0].type = TRACK_DATA) {
+		if (tracks[0].type == TRACK_DATA) {
 			// if the first track is a data track, don't trust the CUE sheet and look at the MM:SS:FF from first sector
 			uint8_t msf[3];
 			fseek(media->f, 12, SEEK_SET);
 			if (sizeof(msf) == fread(msf, 1, sizeof(msf), media->f)) {
 				tracks[0].fake_pregap = msf[2] + (msf[0] * 60 + msf[1]) * 75;
 			}
+		} else if (!tracks[0].start_lba && !tracks[0].fake_pregap) {
+			tracks[0].fake_pregap = 2 * 75;
 		}
 
 		fseek(media->f, 16, SEEK_SET);

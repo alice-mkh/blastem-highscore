@@ -39,7 +39,7 @@ void cdd_mcu_init(cdd_mcu *context, system_media *media)
 	context->next_int_cycle = CYCLE_NEVER;
 	context->last_subcode_cycle = CYCLE_NEVER;
 	context->last_nibble_cycle = CYCLE_NEVER;
-	context->last_byte_cycle = 0;
+	context->next_byte_cycle = 0;
 	context->requested_format = SF_NOTREADY;
 	context->media = media;
 	context->current_status_nibble = -1;
@@ -510,15 +510,13 @@ static void run_command(cdd_mcu *context)
 void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951* cdc, cdd_fader* fader)
 {
 	uint32_t cd_cycle = mclks_to_cd_block(cycle);
-	uint32_t next_byte = context->last_byte_cycle + BYTE_CLOCKS;
 	if (!(gate_array[GAO_CDD_CTRL] & BIT_HOCK)) {
 		//it's a little unclear if this gates the actual cd block clock or just handshaking
 		//assum it's actually the clock for now
 		for (; context->cycle < cd_cycle; context->cycle += CDD_MCU_DIVIDER) {
-			if (context->cycle >= next_byte) {
+			if (context->cycle >= context->next_byte_cycle) {
 				cdd_fader_data(fader, 0);
-				next_byte = context->cycle + BYTE_CLOCKS;
-				context->last_byte_cycle = context->cycle;
+				context->next_byte_cycle += BYTE_CLOCKS;
 			}
 		}
 		gate_array[GAO_CDD_CTRL] |= BIT_MUTE;
@@ -585,7 +583,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 				next_cmd_nibble = context->cycle + NIBBLE_CLOCKS;
 			}
 		}
-		if (context->cycle >= next_byte) {
+		if (context->cycle >= context->next_byte_cycle) {
 			if (context->current_sector_byte >= 0) {
 				uint8_t byte = context->media->read(context->media, context->current_sector_byte);
 				lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), context->current_sector_byte++, byte);
@@ -593,11 +591,10 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			} else {
 				cdd_fader_data(fader, 0);
 			}
-			context->last_byte_cycle = context->cycle;
 			if (context->current_sector_byte == 2352) {
 				context->current_sector_byte = -1;
 			}
-			next_byte = context->cycle + BYTE_CLOCKS;
+			context->next_byte_cycle += BYTE_CLOCKS;
 		}
 	}
 }
@@ -654,11 +651,5 @@ void cdd_mcu_adjust_cycle(cdd_mcu *context, uint32_t deduction)
 			context->last_nibble_cycle = 0;
 		}
 	}
-	if (context->last_byte_cycle != CYCLE_NEVER) {
-		if (context->last_byte_cycle > cd_deduction) {
-			context->last_byte_cycle -= cd_deduction;
-		} else {
-			context->last_byte_cycle = 0;
-		}
-	}
+	context->next_byte_cycle -= deduction;
 }

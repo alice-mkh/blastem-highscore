@@ -138,7 +138,7 @@ typedef struct {
 	uint32_t      next_int_cycle; //this is in SCD MCLKS
 	uint32_t      last_subcode_cycle;
 	uint32_t      last_nibble_cycle;
-	uint32_t      last_byte_cycle;
+	uint32_t      next_byte_cycle;
 	int           current_status_nibble;
 	int           current_cmd_nibble;
 	int           current_sector_byte;

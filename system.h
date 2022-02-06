@@ -95,6 +95,7 @@ typedef struct {
 	uint32_t   pregap_lba;
 	uint32_t   start_lba;
 	uint32_t   end_lba;
+	uint8_t    need_swap;
 	track_type type;
 } track_info;
 
@@ -112,10 +113,12 @@ struct system_media {
 	seek_fun     seek;
 	read_fun     read;
 	uint32_t     num_tracks;
+	uint32_t     cur_track;
 	uint32_t     size;
 	uint32_t     cur_sector;
 	media_type   type;
 	uint8_t      in_fake_pregap;
+	uint8_t      byte_storage;
 };
 
 #define OPT_ADDRESS_LOG (1U << 31U)
