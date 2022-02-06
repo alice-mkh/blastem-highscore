@@ -54,15 +54,14 @@ uint16_t is_label(uint32_t address)
 typedef struct {
 	uint32_t num_labels;
 	uint32_t storage;
+	uint32_t full_address;
 	char     *labels[];
 } label_names;
 
-tern_node * add_label(tern_node * head, char * name, uint32_t address)
+tern_node * weak_label(tern_node * head, const char *name, uint32_t address)
 {
 	char key[MAX_INT_KEY_SIZE];
-	address &= 0xFFFFFF;
-	reference(address);
-	tern_int_key(address, key);
+	tern_int_key(address & 0xFFFFFF, key);
 	label_names * names = tern_find_ptr(head, key);
 	if (names)
 	{
@@ -78,7 +77,13 @@ tern_node * add_label(tern_node * head, char * name, uint32_t address)
 		head = tern_insert_ptr(head, key, names);
 	}
 	names->labels[names->num_labels++] = strdup(name);
+	names->full_address = address;
 	return head;
+}
+tern_node *add_label(tern_node * head, const char *name, uint32_t address)
+{
+	reference(address);
+	return weak_label(head, name, address);
 }
 
 typedef struct deferred {
@@ -154,6 +159,7 @@ int main(int argc, char ** argv)
 	tern_node * named_labels = NULL;
 
 	uint32_t address_off = 0, address_end;
+	uint8_t do_cd_labels = 0;
 	for(uint8_t opt = 2; opt < argc; ++opt) {
 		if (argv[opt][0] == '-') {
 			FILE * address_log;
@@ -173,6 +179,9 @@ int main(int argc, char ** argv)
 				break;
 			case 'r':
 				reset = 1;
+				break;
+			case 'c':
+				do_cd_labels = 1;
 				break;
 			case 's':
 				opt++;
@@ -257,34 +266,153 @@ int main(int argc, char ** argv)
 			def = defer(filebuf[2] << 16 | filebuf[3], def);
 			named_labels = add_label(named_labels, "reset", filebuf[2] << 16 | filebuf[3]);
 		}
-	} else {
-		address_end = address_off + filesize;
-		filebuf = malloc(filesize);
-		if (fread(filebuf, 2, filesize/2, f) != filesize/2)
-		{
+	} else if (filesize > 0x1000) {
+		long boot_size = filesize > (32*1024) ? 32*1024 : filesize;
+		filebuf = malloc(boot_size);
+		if (fread(filebuf, 1, boot_size, f) != boot_size) {
 			fprintf(stderr, "Failure while reading file %s\n", argv[1]);
+			return 1;
 		}
-		fclose(f);
-		for(cur = filebuf; cur - filebuf < (filesize/2); ++cur)
-		{
-			*cur = (*cur >> 8) | (*cur << 8);
+		uint8_t is_scd_iso = !memcmp("SEGADISCSYSTEM  ", filebuf, 0x10);
+		if (!is_scd_iso && !memcmp("SEGADISCSYSTEM  ", filebuf + 0x8, 0x10)) {
+			is_scd_iso = 1;
+			uint32_t end = 16 * 2352;
+			if (end > filesize) {
+				end = (filesize / 2352) * 2352;
+			}
+			for(uint32_t offset = 0x10, dst_offset = 0; offset < end; offset += 2352, dst_offset += 2048)
+			{
+				memmove(filebuf + dst_offset/2, filebuf + offset/2, 2048);
+			}
+			boot_size = (end / 2352) * 2048;
 		}
-		if (!address_off) {
-			uint32_t start = filebuf[2] << 16 | filebuf[3];
-			uint32_t int_2 = filebuf[0x68/2] << 16 | filebuf[0x6A/2];
-			uint32_t int_4 = filebuf[0x70/2] << 16 | filebuf[0x72/2];
-			uint32_t int_6 = filebuf[0x78/2] << 16 | filebuf[0x7A/2];
-			named_labels = add_label(named_labels, "start", start);
-			named_labels = add_label(named_labels, "int_2", int_2);
-			named_labels = add_label(named_labels, "int_4", int_4);
-			named_labels = add_label(named_labels, "int_6", int_6);
-			if (!def || !only) {
-				def = defer(start, def);
-				def = defer(int_2, def);
-				def = defer(int_4, def);
-				def = defer(int_6, def);
+		if (is_scd_iso) {
+			for(cur = filebuf; cur - filebuf < (boot_size/2); ++cur)
+			{
+				*cur = (*cur >> 8) | (*cur << 8);
+			}
+			uint32_t sub_start =filebuf[0x40/2] << 16 | filebuf[0x42/2];
+			uint32_t sub_end =filebuf[0x44/2] << 16 | filebuf[0x46/2];
+			if (sub_start > (boot_size - 0x20)) {
+				fprintf(stderr, "System Program start offset is %X, but image is only %X bytes\n", sub_start, (uint32_t)boot_size);
+				return 1;
+			}
+			if (sub_end > boot_size) {
+				sub_end = boot_size;
+			}
+			uint32_t offset_start = (filebuf[(sub_start + 0x18)/2] << 16 | filebuf[(sub_start + 0x1A)/2]) + sub_start;
+			uint8_t has_manual_defs = !!def;
+			for(uint32_t cur = offset_start, index = 0; cur < sub_end && filebuf[cur/2]; cur+=2, ++index)
+			{
+				uint32_t offset = offset_start + filebuf[cur/2];
+				if (offset >= boot_size) {
+					break;
+				}
+				static const char* fixed_names[3] = {
+					"init",
+					"main",
+					"int_2"
+				};
+				char namebuf[32];
+				const char *name;
+				if (index < 3) {
+					name = fixed_names[index];
+				} else {
+					name = namebuf;
+					sprintf(namebuf, "usercall%u", index);
+				}
+				uint32_t address = 0x6000 + offset - sub_start;
+				named_labels = add_label(named_labels, name, address);
+				if (!has_manual_defs || !only) {
+					def = defer(address, def);
+				}
+			}
+			do_cd_labels = 1;
+			filebuf += sub_start / 2;
+			address_off = 0x6000;
+			address_end = sub_end-sub_start + address_off;
+		} else {
+			if (filesize > (32*1024)) {
+				filebuf = realloc(f, filesize);
+				fseek(f, 32*1024, SEEK_SET);
+				uint32_t to_read = filesize/2 - 16*1024;
+				if (fread(filebuf, 2, to_read, f) != to_read)
+				{
+					fprintf(stderr, "Failure while reading file %s\n", argv[1]);
+				}
+			}
+			address_end = address_off + filesize;
+			fclose(f);
+			for(cur = filebuf; cur - filebuf < (filesize/2); ++cur)
+			{
+				*cur = (*cur >> 8) | (*cur << 8);
+			}
+			if (!address_off) {
+				uint32_t start = filebuf[2] << 16 | filebuf[3];
+				uint32_t int_2 = filebuf[0x68/2] << 16 | filebuf[0x6A/2];
+				uint32_t int_4 = filebuf[0x70/2] << 16 | filebuf[0x72/2];
+				uint32_t int_6 = filebuf[0x78/2] << 16 | filebuf[0x7A/2];
+				named_labels = add_label(named_labels, "start", start);
+				named_labels = add_label(named_labels, "int_2", int_2);
+				named_labels = add_label(named_labels, "int_4", int_4);
+				named_labels = add_label(named_labels, "int_6", int_6);
+				if (!def || !only) {
+					def = defer(start, def);
+					def = defer(int_2, def);
+					def = defer(int_4, def);
+					def = defer(int_6, def);
+				}
 			}
 		}
+	}
+	if (do_cd_labels) {
+		named_labels = weak_label(named_labels, "bios_common_work", 0x5E80);
+		named_labels = weak_label(named_labels, "_setjmptbl", 0x5F0A);
+		named_labels = weak_label(named_labels, "_waitvsync", 0x5F10);
+		named_labels = weak_label(named_labels, "_buram", 0x5F16);
+		named_labels = weak_label(named_labels, "_cdboot", 0x5F1C);
+		named_labels = weak_label(named_labels, "_cdbios", 0x5F22);
+		named_labels = weak_label(named_labels, "_usercall0", 0x5F28);
+		named_labels = weak_label(named_labels, "_usercall1", 0x5F2E);
+		named_labels = weak_label(named_labels, "_usercall2", 0x5F34);
+		named_labels = weak_label(named_labels, "_usercall2Address", 0x5F36);
+		named_labels = weak_label(named_labels, "_usercall3", 0x5F3A);
+		named_labels = weak_label(named_labels, "_slevel1", 0x5F76);
+		named_labels = weak_label(named_labels, "_slevel1Address", 0x5F78);
+		named_labels = weak_label(named_labels, "_slevel2", 0x5F7C);
+		named_labels = weak_label(named_labels, "_slevel2Address", 0x5F7E);
+		named_labels = weak_label(named_labels, "_slevel3", 0x5F82);
+		named_labels = weak_label(named_labels, "_slevel3Address", 0x5F84);
+		named_labels = weak_label(named_labels, "LED_CONTROL", 0xFFFF8000);
+		named_labels = weak_label(named_labels, "VERSION_RESET", 0xFFFF8001);
+		named_labels = weak_label(named_labels, "MEM_MODE_WORD", 0xFFFF8002);
+		named_labels = weak_label(named_labels, "MEM_MODE_BYTE", 0xFFFF8003);
+		named_labels = weak_label(named_labels, "CDC_CTRL", 0xFFFF8004);
+		named_labels = weak_label(named_labels, "CDC_AR", 0xFFFF8005);
+		named_labels = weak_label(named_labels, "CDC_REG_DATA_WORD", 0xFFFF8006);
+		named_labels = weak_label(named_labels, "CDC_REG_DATA", 0xFFFF8007);
+		named_labels = weak_label(named_labels, "CDC_HOST_DATA", 0xFFFF8008);
+		named_labels = weak_label(named_labels, "CDC_DMA_ADDR", 0xFFFF800A);
+		named_labels = weak_label(named_labels, "COMM_CMD0", 0xFFFF8010);
+		named_labels = weak_label(named_labels, "COMM_CMD1", 0xFFFF8012);
+		named_labels = weak_label(named_labels, "COMM_CMD2", 0xFFFF8014);
+		named_labels = weak_label(named_labels, "COMM_CMD3", 0xFFFF8016);
+		named_labels = weak_label(named_labels, "COMM_CMD4", 0xFFFF8018);
+		named_labels = weak_label(named_labels, "COMM_CMD5", 0xFFFF801A);
+		named_labels = weak_label(named_labels, "COMM_CMD6", 0xFFFF801C);
+		named_labels = weak_label(named_labels, "COMM_CMD7", 0xFFFF801E);
+		named_labels = weak_label(named_labels, "COMM_STATUS0", 0xFFFF8020);
+		named_labels = weak_label(named_labels, "COMM_STATUS1", 0xFFFF8022);
+		named_labels = weak_label(named_labels, "COMM_STATUS2", 0xFFFF8024);
+		named_labels = weak_label(named_labels, "COMM_STATUS3", 0xFFFF8026);
+		named_labels = weak_label(named_labels, "COMM_STATUS4", 0xFFFF8028);
+		named_labels = weak_label(named_labels, "COMM_STATUS5", 0xFFFF802A);
+		named_labels = weak_label(named_labels, "COMM_STATUS6", 0xFFFF802C);
+		named_labels = weak_label(named_labels, "COMM_STATUS7", 0xFFFF802E);
+		named_labels = weak_label(named_labels, "TIMER_WORD", 0xFFFF8030);
+		named_labels = weak_label(named_labels, "TIMER", 0xFFFF8031);
+		named_labels = weak_label(named_labels, "INT_MASK_WORD", 0xFFFF8032);
+		named_labels = weak_label(named_labels, "INT_MASK", 0xFFFF8033);
 	}
 	uint16_t *encoded, *next;
 	uint32_t size, tmp_addr;
@@ -359,20 +487,32 @@ int main(int argc, char ** argv)
 	if (labels) {
 		for (address = 0; address < address_off; address++) {
 			if (is_label(address)) {
-				printf("ADR_%X equ $%X\n", address, address);
+				char key[MAX_INT_KEY_SIZE];
+				tern_int_key(address, key);
+				label_names *names = tern_find_ptr(named_labels, key);
+				if (names) {
+					for (int i = 0; i < names->num_labels; i++)
+					{
+						printf("%s equ $%X\n", names->labels[i], address);
+					}
+				} else  {
+					printf("ADR_%X equ $%X\n", address, address);
+				}
 			}
 		}
-		for (address = filesize; address < (16*1024*1024); address++) {
-			char key[MAX_INT_KEY_SIZE];
-			tern_int_key(address, key);
-			label_names *names = tern_find_ptr(named_labels, key);
-			if (names) {
-				for (int i = 0; i < names->num_labels; i++)
-				{
-					printf("%s equ $%X\n", names->labels[i], address);
+		for (address = address_end; address < (16*1024*1024); address++) {
+			if (is_label(address)) {
+				char key[MAX_INT_KEY_SIZE];
+				tern_int_key(address, key);
+				label_names *names = tern_find_ptr(named_labels, key);
+				if (names) {
+					for (int i = 0; i < names->num_labels; i++)
+					{
+						printf("%s equ $%X\n", names->labels[i], names->full_address);
+					}
+				} else  {
+					printf("ADR_%X equ $%X\n", address, address);
 				}
-			} else if (is_label(address)) {
-				printf("ADR_%X equ $%X\n", address, address);
 			}
 		}
 		puts("");
