@@ -2131,7 +2131,7 @@ genesis_context *alloc_config_genesis(void *rom, uint32_t rom_size, void *lock_o
 	}
 	memmap_chunk* map = info.map;
 	uint32_t map_chunks = info.map_chunks;
-	if (info.wants_cd) {
+	if (info.wants_cd || (current_media()->chain && current_media()->chain->type == MEDIA_CDROM)) {
 		segacd_context *cd = alloc_configure_segacd((system_media *)current_media(), 0, force_region, &info);
 		gen->expansion = cd;
 		gen->version_reg &= ~NO_DISK;
