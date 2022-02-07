@@ -214,6 +214,8 @@ void render_source_resumed(audio_source *src)
 	}
 }
 
+uint8_t audio_deadlock_hack(void);
+
 void render_do_audio_ready(audio_source *src)
 {
 	if (sync_src == SYNC_AUDIO_THREAD) {
@@ -228,6 +230,11 @@ void render_do_audio_ready(audio_source *src)
 		}
 	} else if (sync_src == SYNC_AUDIO) {
 		SDL_LockMutex(audio_mutex);
+			if (src->front_populated) {
+				if (audio_deadlock_hack()) {
+					SDL_CondSignal(audio_ready);
+				}
+			}
 			while (src->front_populated) {
 				SDL_CondWait(src->opaque, audio_mutex);
 			}
@@ -349,7 +356,7 @@ static GLuint load_shader(char * fname, GLenum shader_type)
 	}
 #endif
 	text[fsize] = 0;
-	
+
 	if (strncmp(text, "#version", strlen("#version"))) {
 		GLchar *tmp = text;
 		text = alloc_concat(shader_prefix, tmp);
@@ -999,7 +1006,7 @@ void window_setup(void)
 	if (is_fullscreen) {
 		flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 	}
-	
+
 	tern_val def = {.ptrval = "audio"};
 	if (external_sync) {
 		sync_src = SYNC_EXTERNAL;
@@ -1013,7 +1020,7 @@ void window_setup(void)
 			sync_src = SYNC_VIDEO;
 		}
 	}
-	
+
 	if (!num_buffers && (sync_src == SYNC_AUDIO_THREAD || sync_src == SYNC_EXTERNAL)) {
 		frame_mutex = SDL_CreateMutex();
 		free_buffer_mutex = SDL_CreateMutex();
@@ -1023,7 +1030,7 @@ void window_setup(void)
 		frame_buffers[0] = texture_buf;
 		num_buffers = 1;
 	}
-	
+
 	const char *vsync;
 	if (sync_src == SYNC_AUDIO) {
 		def.ptrval = "off";
@@ -1031,7 +1038,7 @@ void window_setup(void)
 	} else {
 		vsync = "on";
 	}
-	
+
 	tern_node *video = tern_find_node(config, "video");
 	if (video)
 	{
@@ -1059,7 +1066,7 @@ void window_setup(void)
 		}
 	}
 	render_gl = 0;
-	
+
 #ifndef DISABLE_OPENGL
 	char *gl_enabled_str = tern_find_path_default(config, "video\0gl\0", def, TVAL_PTR).ptrval;
 	uint8_t gl_enabled = strcmp(gl_enabled_str, "off") != 0;
@@ -1162,7 +1169,7 @@ void render_init(int width, int height, char * title, uint8_t fullscreen)
 	debug_message("width: %d, height: %d\n", width, height);
 	windowed_width = width;
 	windowed_height = height;
-	
+
 	SDL_DisplayMode mode;
 	//TODO: Explicit multiple monitor support
 	SDL_GetCurrentDisplayMode(0, &mode);
@@ -1177,16 +1184,16 @@ void render_init(int width, int height, char * title, uint8_t fullscreen)
 	main_width = width;
 	main_height = height;
 	is_fullscreen = fullscreen;
-	
+
 	caption = title;
-	
+
 	window_setup();
 
 	audio_mutex = SDL_CreateMutex();
 	audio_ready = SDL_CreateCond();
-	
+
 	init_audio();
-	
+
 	uint32_t db_size;
 	char *db_data = read_bundled_file("gamecontrollerdb.txt", &db_size);
 	if (db_data) {
@@ -1194,11 +1201,11 @@ void render_init(int width, int height, char * title, uint8_t fullscreen)
 		free(db_data);
 		debug_message("Added %d game controller mappings from gamecontrollerdb.txt\n", added);
 	}
-	
+
 	controller_add_mappings();
-	
+
 	SDL_JoystickEventState(SDL_ENABLE);
-	
+
 	render_set_video_standard(VID_NTSC);
 
 	atexit(render_quit);
@@ -1238,7 +1245,7 @@ void render_config_updated(void)
 	SDL_DestroyWindow(main_window);
 	main_window = NULL;
 	drain_events();
-	
+
 	char *config_width = tern_find_path(config, "video\0width\0", TVAL_PTR).ptrval;
 	if (config_width) {
 		windowed_width = atoi(config_width);
@@ -1265,7 +1272,7 @@ void render_config_updated(void)
 	if (on_ui_fb_resized) {
 		on_ui_fb_resized();
 	}
-	
+
 	window_setup();
 	update_aspect();
 #ifndef DISABLE_OPENGL
@@ -1280,7 +1287,7 @@ void render_config_updated(void)
 	quitting = 0;
 	init_audio();
 	render_set_video_standard(video_standard);
-	
+
 	drain_events();
 	in_toggle = 0;
 	if (!was_paused) {
@@ -1364,7 +1371,7 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 			break;
 		}
 	}
-	
+
 	if (win_idx == 0xFF) {
 		num_textures++;
 		sdl_textures = realloc(sdl_textures, num_textures * sizeof(*sdl_textures));
@@ -1388,7 +1395,7 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 	}
 	close_handlers[win_idx] = close_handler;
 	return texture_idx;
-	
+
 fail_texture:
 	SDL_DestroyRenderer(extra_renderers[win_idx]);
 fail_renderer:
@@ -1404,7 +1411,7 @@ void render_destroy_window(uint8_t which)
 	//Destroying the renderers also frees the textures
 	SDL_DestroyRenderer(extra_renderers[win_idx]);
 	SDL_DestroyWindow(extra_windows[win_idx]);
-	
+
 	extra_renderers[win_idx] = NULL;
 	extra_windows[win_idx] = NULL;
 }
@@ -1494,9 +1501,9 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 		//TODO: Figure out what to do about SDL Render API texture locking
 		return;
 	}
-	
+
 	last_width = width;
-	uint32_t height = which <= FRAMEBUFFER_EVEN 
+	uint32_t height = which <= FRAMEBUFFER_EVEN
 		? (video_standard == VID_NTSC ? 243 : 294) - (overscan_top[video_standard] + overscan_bot[video_standard])
 		: 240;
 	FILE *screenshot_file = NULL;
@@ -1524,7 +1531,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 		SDL_GL_MakeCurrent(main_window, main_context);
 		glBindTexture(GL_TEXTURE_2D, textures[which]);
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LINEBUF_SIZE, height, SRC_FORMAT, GL_UNSIGNED_BYTE, buffer + overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard]);
-		
+
 		if (screenshot_file) {
 			//properly supporting interlaced modes here is non-trivial, so only save the odd field for now
 #ifndef DISABLE_ZLIB
@@ -1646,7 +1653,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 			|| (average_change >0 && local_cur_min > 5 * min_buffered / 4)
 			|| cur_min_buffered < 0
 		) {
-			
+
 			if (cur_min_buffered < 0) {
 				adjust_ratio = max_adjust;
 				SDL_PauseAudio(1);
@@ -1665,7 +1672,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 		if (adjust_ratio != 0.0f) {
 			average_change = 0;
 			render_audio_adjust_speed(adjust_ratio);
-			
+
 		}
 		while (source_frame_count > 0)
 		{
@@ -1753,7 +1760,7 @@ void render_video_loop(void)
 				break;
 			}
 		}
-	
+
 	SDL_UnlockMutex(frame_mutex);
 }
 
@@ -1791,7 +1798,7 @@ void render_update_display()
 		glDrawElements(GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_SHORT, (void *)0);
 
 		glDisableVertexAttribArray(at_pos);
-		
+
 		if (render_ui) {
 			render_ui();
 		}
@@ -1902,7 +1909,7 @@ int32_t render_translate_input_name(int32_t controller, char *name, uint8_t is_a
 	if (controller > MAX_JOYSTICKS || !joysticks[controller]) {
 		return RENDER_NOT_PLUGGED_IN;
 	}
-	
+
 	if (!SDL_IsGameController(joystick_sdl_index[controller])) {
 		return RENDER_NOT_MAPPED;
 	}
@@ -1911,11 +1918,11 @@ int32_t render_translate_input_name(int32_t controller, char *name, uint8_t is_a
 		warning("Failed to open game controller %d: %s\n", controller, SDL_GetError());
 		return RENDER_NOT_PLUGGED_IN;
 	}
-	
+
 	SDL_GameControllerButtonBind cbind;
 	int32_t is_positive = RENDER_AXIS_POS;
 	if (is_axis) {
-		
+
 		int sdl_axis = render_lookup_axis(name);
 		if (sdl_axis == SDL_CONTROLLER_AXIS_INVALID) {
 			SDL_GameControllerClose(control);
@@ -1979,7 +1986,7 @@ void render_toggle_fullscreen()
 		return;
 	}
 	in_toggle = 1;
-	
+
 	//toggling too fast seems to cause a deadlock
 	static uint32_t last_toggle;
 	uint32_t cur = SDL_GetTicks();
@@ -1988,7 +1995,7 @@ void render_toggle_fullscreen()
 		return;
 	}
 	last_toggle = cur;
-	
+
 	drain_events();
 	is_fullscreen = !is_fullscreen;
 	if (is_fullscreen) {
@@ -2052,7 +2059,7 @@ uint8_t render_get_active_framebuffer(void)
 	for (int i = 0; i < num_textures - 2; i++)
 	{
 		if (extra_windows[i] && (SDL_GetWindowFlags(extra_windows[i]) & SDL_WINDOW_INPUT_FOCUS)) {
-			return FRAMEBUFFER_USER_START + i; 
+			return FRAMEBUFFER_USER_START + i;
 		}
 	}
 	return 0xFF;
