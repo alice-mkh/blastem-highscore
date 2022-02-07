@@ -2151,7 +2151,7 @@ genesis_context *alloc_config_genesis(void *rom, uint32_t rom_size, void *lock_o
 				max_ptr_index = map[i].ptr_index;
 			}
 		}
-		cd->memptr_start_index + max_ptr_index + 1;
+		cd->memptr_start_index = max_ptr_index + 1;
 		for (int i = info.map_chunks - 1; i < map_chunks - 1; i++)
 		{
 			if (map[i].flags & MMAP_PTR_IDX) {
