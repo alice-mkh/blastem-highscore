@@ -214,6 +214,7 @@ static void do_graphics(segacd_context *cd, uint32_t cycle)
 			if ((cd->graphics_dst_x & 3) == 3 || (cd->graphics_dst_x + 1 == cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3))) {
 				cd->graphics_step = DRAW;
 				CHECK_ONLY;
+				goto draw;
 			} else {
 				CHECK_CYCLES;
 			}
@@ -223,6 +224,7 @@ static void do_graphics(segacd_context *cd, uint32_t cycle)
 			if ((cd->graphics_dst_x & 3) == 2 || (cd->graphics_dst_x + 2 == cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3))) {
 				cd->graphics_step = DRAW;
 				CHECK_ONLY;
+				goto draw;
 			} else {
 				CHECK_CYCLES;
 			}
@@ -232,6 +234,7 @@ static void do_graphics(segacd_context *cd, uint32_t cycle)
 			if ((cd->graphics_dst_x & 3) == 1 || (cd->graphics_dst_x + 3 == cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3))) {
 				cd->graphics_step = DRAW;
 				CHECK_ONLY;
+				goto draw;
 			} else {
 				CHECK_CYCLES;
 			}
@@ -239,6 +242,7 @@ static void do_graphics(segacd_context *cd, uint32_t cycle)
 			cd->graphics_pixels[3] = get_src_pixel(cd);
 			cd->graphics_cycle += 2*4;
 			CHECK_CYCLES;
+draw:
 		case DRAW:
 			draw_pixels(cd);
 			cd->graphics_cycle += 1*4;
