@@ -149,7 +149,7 @@ char * strip_ws(char * text)
 int main(int argc, char ** argv)
 {
 	long filesize;
-	unsigned short *filebuf;
+	unsigned short *filebuf = NULL;
 	char disbuf[1024];
 	m68kinst instbuf;
 	unsigned short * cur;
@@ -233,6 +233,7 @@ int main(int argc, char ** argv)
 	fseek(f, 0, SEEK_SET);
 
 	char int_key[MAX_INT_KEY_SIZE];
+	uint8_t is_scd_iso = 0;
 	if (vos)
 	{
 		vos_program_module header;
@@ -273,7 +274,7 @@ int main(int argc, char ** argv)
 			fprintf(stderr, "Failure while reading file %s\n", argv[1]);
 			return 1;
 		}
-		uint8_t is_scd_iso = !memcmp("SEGADISCSYSTEM  ", filebuf, 0x10);
+		is_scd_iso = !memcmp("SEGADISCSYSTEM  ", filebuf, 0x10);
 		if (!is_scd_iso && !memcmp("SEGADISCSYSTEM  ", filebuf + 0x8, 0x10)) {
 			is_scd_iso = 1;
 			uint32_t end = 16 * 2352;
@@ -327,41 +328,51 @@ int main(int argc, char ** argv)
 					def = defer(address, def);
 				}
 			}
+			fclose(f);
 			do_cd_labels = 1;
 			filebuf += sub_start / 2;
 			address_off = 0x6000;
 			address_end = sub_end-sub_start + address_off;
-		} else {
+		}
+	}
+	if (!vos && !is_scd_iso) {
+		if (filebuf) {
 			if (filesize > (32*1024)) {
-				filebuf = realloc(f, filesize);
+				filebuf = realloc(filebuf, filesize);
 				fseek(f, 32*1024, SEEK_SET);
 				uint32_t to_read = filesize/2 - 16*1024;
-				if (fread(filebuf, 2, to_read, f) != to_read)
+				if (fread(filebuf + 16*1024, 2, to_read, f) != to_read)
 				{
 					fprintf(stderr, "Failure while reading file %s\n", argv[1]);
 				}
 			}
-			address_end = address_off + filesize;
-			fclose(f);
-			for(cur = filebuf; cur - filebuf < (filesize/2); ++cur)
+		} else {
+			filebuf = malloc(filesize);
+			if (fread(filebuf, 2, filesize/2, f) != filesize/2)
 			{
-				*cur = (*cur >> 8) | (*cur << 8);
+				fprintf(stderr, "Failure while reading file %s\n", argv[1]);
 			}
-			if (!address_off) {
-				uint32_t start = filebuf[2] << 16 | filebuf[3];
-				uint32_t int_2 = filebuf[0x68/2] << 16 | filebuf[0x6A/2];
-				uint32_t int_4 = filebuf[0x70/2] << 16 | filebuf[0x72/2];
-				uint32_t int_6 = filebuf[0x78/2] << 16 | filebuf[0x7A/2];
-				named_labels = add_label(named_labels, "start", start);
-				named_labels = add_label(named_labels, "int_2", int_2);
-				named_labels = add_label(named_labels, "int_4", int_4);
-				named_labels = add_label(named_labels, "int_6", int_6);
-				if (!def || !only) {
-					def = defer(start, def);
-					def = defer(int_2, def);
-					def = defer(int_4, def);
-					def = defer(int_6, def);
-				}
+		}
+		address_end = address_off + filesize;
+		fclose(f);
+		for(cur = filebuf; cur - filebuf < (filesize/2); ++cur)
+		{
+			*cur = (*cur >> 8) | (*cur << 8);
+		}
+		if (!address_off) {
+			uint32_t start = filebuf[2] << 16 | filebuf[3];
+			uint32_t int_2 = filebuf[0x68/2] << 16 | filebuf[0x6A/2];
+			uint32_t int_4 = filebuf[0x70/2] << 16 | filebuf[0x72/2];
+			uint32_t int_6 = filebuf[0x78/2] << 16 | filebuf[0x7A/2];
+			named_labels = add_label(named_labels, "start", start);
+			named_labels = add_label(named_labels, "int_2", int_2);
+			named_labels = add_label(named_labels, "int_4", int_4);
+			named_labels = add_label(named_labels, "int_6", int_6);
+			if (!def || !only) {
+				def = defer(start, def);
+				def = defer(int_2, def);
+				def = defer(int_4, def);
+				def = defer(int_6, def);
 			}
 		}
 	}
@@ -422,7 +433,10 @@ int main(int argc, char ** argv)
 			encoded = NULL;
 			address = def->address;
 			if (!is_visited(address)) {
-				encoded = filebuf + ((address & 0xFFFFFF) - address_off)/2;
+				address &= 0xFFFFFF;
+				if (address < address_end) {
+					encoded = filebuf + ((address & 0xFFFFFF) - address_off)/2;
+				}
 			}
 			tmpd = def;
 			def = def->next;
