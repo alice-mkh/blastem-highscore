@@ -265,7 +265,7 @@ void add_memmap_header(rom_info *info, uint8_t *rom, uint32_t size, memmap_chunk
 	}
 	info->save_type = SAVE_NONE;
 	uint8_t is_med_ssf = size >= 0x108 && !memcmp("SEGA SSF", rom + 0x100, 8);
-	if (is_med_ssf || (size >= 0x400000 && rom_end_raw <= 0x400000)) {
+	if (is_med_ssf || (size > 0x400000 && rom_end_raw <= 0x400000)) {
 		if (is_med_ssf && rom_end < 16*1024*1024) {
 			info->rom = rom = realloc(rom, 16*1024*1024);
 		}
