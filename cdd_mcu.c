@@ -76,6 +76,9 @@ static void handle_seek(cdd_mcu *context)
 	if (context->seeking) {
 		if (context->seek_pba == context->head_pba) {
 			context->seeking = 0;
+			if (context->status == DS_PAUSE) {
+				context->pause_pba = context->head_pba;
+			}
 		} else if (context->seek_pba > context->head_pba) {
 			if (context->seek_pba - context->head_pba >= COARSE_SEEK || context->head_pba < LEADIN_SECTORS) {
 				context->head_pba += COARSE_SEEK;
@@ -129,6 +132,15 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		break;
 	case DS_PAUSE:
 		handle_seek(context);
+		if (!context->seeking) {
+			context->head_pba++;
+			if (context->head_pba > context->pause_pba + FINE_SEEK) {
+				context->head_pba = context->pause_pba - FINE_SEEK;
+				if (context->head_pba < LEADIN_SECTORS) {
+					context->head_pba = LEADIN_SECTORS;
+				}
+			}
+		}
 		if (context->head_pba >= LEADIN_SECTORS) {
 			uint8_t track = context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
 			if (!context->seeking && context->media->tracks[track].type == TRACK_AUDIO) {
@@ -144,7 +156,7 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 				if (context->head_pba > 3*(context->media->num_tracks + 2)) {
 					context->toc_valid = 1;
 					context->seeking = 1;
-					context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].start_lba;
+					context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].start_lba + context->media->tracks[0].fake_pregap;
 					context->status = DS_PAUSE;
 				}
 
@@ -157,6 +169,7 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		handle_seek(context);
 		if (!context->seeking) {
 			context->status = DS_PAUSE;
+			context->pause_pba = context->head_pba;
 		}
 		if (context->head_pba >= LEADIN_SECTORS) {
 			uint8_t track = context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
@@ -454,6 +467,9 @@ static void run_command(cdd_mcu *context)
 			puts("CDD CMD: PAUSE");
 		}
 		context->status = DS_PAUSE;
+		if (!context->seeking) {
+			context->pause_pba = context->head_pba;
+		}
 		break;
 	case CMD_PLAY:
 		if (context->status == DS_DOOR_OPEN || context->status == DS_TRAY_MOVING || context->status == DS_DISC_LEADOUT || context->status == DS_DISC_LEADIN) {

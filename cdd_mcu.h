@@ -144,6 +144,7 @@ typedef struct {
 	int           current_sector_byte;
 	uint32_t      head_pba;
 	uint32_t      seek_pba;
+	uint32_t      pause_pba;
 	cdd_status    status_buffer;
 	cdd_cmd       cmd_buffer;
 	status_format requested_format;
