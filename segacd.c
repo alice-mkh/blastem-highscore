@@ -375,9 +375,10 @@ static void calculate_target_cycle(m68k_context * context)
 	segacd_context *cd = context->system;
 	context->int_cycle = CYCLE_NEVER;
 	uint8_t mask = context->status & 0x7;
+	uint32_t cdc_cycle = CYCLE_NEVER;
 	if (mask < 5) {
 		if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN5) {
-			uint32_t cdc_cycle = lc8951_next_interrupt(&cd->cdc);
+			cdc_cycle = lc8951_next_interrupt(&cd->cdc);
 			//CDC interrupts only generated on falling edge of !INT signal
 			if (cd->cdc_int_ack) {
 				if (cdc_cycle > cd->cdc.cycle) {
@@ -436,6 +437,12 @@ static void calculate_target_cycle(m68k_context * context)
 		return;
 	}
 	context->target_cycle = context->sync_cycle < context->int_cycle ? context->sync_cycle : context->int_cycle;
+	if (context->target_cycle == cdc_cycle && context->int_num == 5) {
+		uint32_t before = context->target_cycle - 2 * cd->cdc.clock_step;
+		if (before > context->current_cycle) {
+			context->target_cycle = context->sync_cycle = before;
+		}
+	}
 }
 
 static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
@@ -803,6 +810,7 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		break;
 	case DST_PCM_RAM:
 		dma_addr &= (1 << 13) - 1;
+		rf5c164_run(&cd->pcm, cd->cdc.cycle);
 		rf5c164_write(&cd->pcm, 0x1000 | (dma_addr >> 1), value);
 		dma_addr += 2;
 		cd->cdc_dst_low = dma_addr & 7;
@@ -824,6 +832,7 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		} else {
 			//2M mode, check if Sub CPU has access
 			if (!(cd->gate_array[GA_MEM_MODE] & BIT_RET)) {
+				cd_graphics_run(cd, cd->cdc.cycle);
 				dma_addr &= (1 << 18) - 1;
 				cd->word_ram[dma_addr >> 1] = cd->gate_array[GA_CDC_HOST_DATA];
 				m68k_invalidate_code_range(cd->m68k, 0x080000 + dma_addr, 0x080000 + dma_addr + 1);
@@ -886,7 +895,7 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 void scd_run(segacd_context *cd, uint32_t cycle)
 {
 	uint8_t m68k_run = !can_main_access_prog(cd);
-	if (cycle > cd->m68k->current_cycle) {
+	while (cycle > cd->m68k->current_cycle) {
 		if (m68k_run) {
 			uint32_t start = cd->m68k->current_cycle;
 			cd->m68k->sync_cycle = cycle;
@@ -900,8 +909,9 @@ void scd_run(segacd_context *cd, uint32_t cycle)
 		} else {
 			cd->m68k->current_cycle = cycle;
 		}
+		scd_peripherals_run(cd, cd->m68k->current_cycle);
 	}
-	scd_peripherals_run(cd, cycle);
+
 }
 
 uint32_t gen_cycle_to_scd(uint32_t cycle, genesis_context *gen)
