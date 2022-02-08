@@ -667,5 +667,5 @@ void cdd_mcu_adjust_cycle(cdd_mcu *context, uint32_t deduction)
 			context->last_nibble_cycle = 0;
 		}
 	}
-	context->next_byte_cycle -= deduction;
+	context->next_byte_cycle -= cd_deduction;
 }
