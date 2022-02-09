@@ -127,6 +127,9 @@ static uint16_t word_ram_2M_read16(uint32_t address, void *vcontext)
 	m68k_context *m68k = vcontext;
 	//TODO: fixme for interleaving
 	uint16_t* bank = m68k->mem_pointers[1];
+	if (!bank) {
+		return 0xFFFF;
+	}
 	uint16_t raw = bank[address >> 2];
 	if (address & 2) {
 		return (raw & 0xF) | (raw << 4 & 0xF00);
@@ -164,6 +167,9 @@ static void *word_ram_2M_write8(uint32_t address, void *vcontext, uint8_t value)
 		}
 	}
 	uint16_t* bank = m68k->mem_pointers[1];
+	if (!bank) {
+		return vcontext;
+	}
 	uint16_t raw = bank[address >> 2];
 	uint16_t shift = ((address & 3) * 4);
 	raw &= ~(0xF000 >> shift);
@@ -268,6 +274,9 @@ static uint16_t cell_image_read16(uint32_t address, void *vcontext)
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
+	if (!m68k->mem_pointers[cd->memptr_start_index + 1]) {
+		return 0xFFFF;
+	}
 	return m68k->mem_pointers[cd->memptr_start_index + 1][address>>1];
 }
 
