@@ -485,11 +485,12 @@ static void run_command(cdd_mcu *context)
 		}
 		if (context->status == DS_STOP || context->status == DS_TOC_READ) {
 			context->seeking = 1;
-			context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].fake_pregap + context->media->tracks[0].start_lba;
-			printf("CDD CMD: PAUSE, seeking to %u\n", context->seek_pba);
+			context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].fake_pregap + context->media->tracks[0].start_lba - 4;
+			printf("CDD CMD: PLAY, seeking to %u\n", context->seek_pba);
 		} else {
-			puts("CDD CMD: PAUSE");
+			puts("CDD CMD: PLAY");
 		}
+		context->status = DS_PLAY;
 		break;
 	//TODO: CMD_FFWD, CMD_RWD
 	case CMD_TRACK_SKIP:
@@ -600,12 +601,16 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			}
 		}
 		if (context->cycle >= context->next_byte_cycle) {
-			if (context->current_sector_byte >= 0) {
+			if (context->current_sector_byte >= 0 && (!fader->byte_counter || context->current_sector_byte)) {
 				uint8_t byte = context->media->read(context->media, context->current_sector_byte);
 				lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), context->current_sector_byte++, byte);
 				cdd_fader_data(fader, gate_array[GAO_CDD_CTRL] & BIT_MUTE ? 0 : byte);
 			} else {
 				cdd_fader_data(fader, 0);
+				if (context->current_sector_byte >= 0) {
+					next_subcode += BYTE_CLOCKS;
+					context->last_subcode_cycle += BYTE_CLOCKS;
+				}
 			}
 			if (context->current_sector_byte == 2352) {
 				context->current_sector_byte = -1;
