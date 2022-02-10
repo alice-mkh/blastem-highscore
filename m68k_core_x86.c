@@ -2738,6 +2738,10 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	opts->write_8 = gen_mem_fun(&opts->gen, memmap, num_chunks, WRITE_8, NULL);
 
 	opts->read_32 = code->cur;
+	if (opts->gen.align_error_mask) {
+		test_ir(code, opts->gen.align_error_mask, opts->gen.scratch1, SZ_D);
+		jcc(code, CC_NZ, opts->gen.handle_align_error_read);
+	}
 	push_r(code, opts->gen.scratch1);
 	call(code, opts->read_16);
 	mov_rr(code, opts->gen.scratch1, opts->gen.scratch2, SZ_W);
@@ -2752,6 +2756,10 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	retn(code);
 
 	opts->write_32_lowfirst = code->cur;
+	if (opts->gen.align_error_mask) {
+		test_ir(code, opts->gen.align_error_mask, opts->gen.scratch2, SZ_D);
+		jcc(code, CC_NZ, opts->gen.handle_align_error_write);
+	}
 	push_r(code, opts->gen.scratch2);
 	push_r(code, opts->gen.scratch1);
 	add_ir(code, 2, opts->gen.scratch2, SZ_D);
@@ -2762,6 +2770,10 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	jmp(code, opts->write_16);
 
 	opts->write_32_highfirst = code->cur;
+	if (opts->gen.align_error_mask) {
+		test_ir(code, opts->gen.align_error_mask, opts->gen.scratch2, SZ_D);
+		jcc(code, CC_NZ, opts->gen.handle_align_error_write);
+	}
 	push_r(code, opts->gen.scratch1);
 	push_r(code, opts->gen.scratch2);
 	shr_ir(code, 16, opts->gen.scratch1, SZ_D);
