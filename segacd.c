@@ -1155,7 +1155,7 @@ static void *main_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	segacd_context *cd = gen->expansion;
 	uint32_t reg = (address & 0x1FF) >> 1;
 	uint16_t value16;
-	switch (reg >> 1)
+	switch (reg)
 	{
 	case GA_SUB_CPU_CTRL:
 		if (address & 1) {
