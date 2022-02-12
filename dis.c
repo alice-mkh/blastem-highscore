@@ -159,7 +159,7 @@ int main(int argc, char ** argv)
 	tern_node * named_labels = NULL;
 
 	uint32_t address_off = 0, address_end;
-	uint8_t do_cd_labels = 0;
+	uint8_t do_cd_labels = 0, main_cpu = 0;
 	for(uint8_t opt = 2; opt < argc; ++opt) {
 		if (argv[opt][0] == '-') {
 			FILE * address_log;
@@ -182,6 +182,9 @@ int main(int argc, char ** argv)
 				break;
 			case 'c':
 				do_cd_labels = 1;
+				break;
+			case 'm':
+				main_cpu = 1;
 				break;
 			case 's':
 				opt++;
@@ -234,6 +237,7 @@ int main(int argc, char ** argv)
 
 	char int_key[MAX_INT_KEY_SIZE];
 	uint8_t is_scd_iso = 0;
+	uint8_t has_manual_defs = !!def;
 	if (vos)
 	{
 		vos_program_module header;
@@ -288,51 +292,70 @@ int main(int argc, char ** argv)
 			boot_size = (end / 2352) * 2048;
 		}
 		if (is_scd_iso) {
+			fclose(f);
 			for(cur = filebuf; cur - filebuf < (boot_size/2); ++cur)
 			{
 				*cur = (*cur >> 8) | (*cur << 8);
 			}
-			uint32_t sub_start =filebuf[0x40/2] << 16 | filebuf[0x42/2];
-			uint32_t sub_end =filebuf[0x44/2] << 16 | filebuf[0x46/2];
-			if (sub_start > (boot_size - 0x20)) {
-				fprintf(stderr, "System Program start offset is %X, but image is only %X bytes\n", sub_start, (uint32_t)boot_size);
-				return 1;
-			}
-			if (sub_end > boot_size) {
-				sub_end = boot_size;
-			}
-			uint32_t offset_start = (filebuf[(sub_start + 0x18)/2] << 16 | filebuf[(sub_start + 0x1A)/2]) + sub_start;
-			uint8_t has_manual_defs = !!def;
-			for(uint32_t cur = offset_start, index = 0; cur < sub_end && filebuf[cur/2]; cur+=2, ++index)
-			{
-				uint32_t offset = offset_start + filebuf[cur/2];
-				if (offset >= boot_size) {
-					break;
+			if (main_cpu) {
+				uint32_t main_start = 0x200;
+				uint32_t extra_start = filebuf[0x30/2] << 16 | filebuf[0x32/2];
+				uint32_t main_end = (filebuf[0x34/2] << 16 | filebuf[0x36/2]) + extra_start;
+				if (main_end > boot_size) {
+					main_end = boot_size;
 				}
-				static const char* fixed_names[3] = {
-					"init",
-					"main",
-					"int_2"
-				};
-				char namebuf[32];
-				const char *name;
-				if (index < 3) {
-					name = fixed_names[index];
-				} else {
-					name = namebuf;
-					sprintf(namebuf, "usercall%u", index);
-				}
-				uint32_t address = 0x6000 + offset - sub_start;
-				named_labels = add_label(named_labels, name, address);
+				address_off = 0xFF0000;
+				address_end = address_off + main_end-main_start;
+				filebuf += main_start / 2;
+				named_labels = add_label(named_labels, "start", 0xFF0000);
 				if (!has_manual_defs || !only) {
-					def = defer(address, def);
+					def = defer(0xFF0000, def);
 				}
+				//TODO: other regions
+				named_labels = add_label(named_labels, "user_start", 0xFF0584);
+				do_cd_labels = 1;
+			} else {
+				uint32_t sub_start =filebuf[0x40/2] << 16 | filebuf[0x42/2];
+				uint32_t sub_end =filebuf[0x44/2] << 16 | filebuf[0x46/2];
+				if (sub_start > (boot_size - 0x20)) {
+					fprintf(stderr, "System Program start offset is %X, but image is only %X bytes\n", sub_start, (uint32_t)boot_size);
+					return 1;
+				}
+				if (sub_end > boot_size) {
+					sub_end = boot_size;
+				}
+				uint32_t offset_start = (filebuf[(sub_start + 0x18)/2] << 16 | filebuf[(sub_start + 0x1A)/2]) + sub_start;
+				for(uint32_t cur = offset_start, index = 0; cur < sub_end && filebuf[cur/2]; cur+=2, ++index)
+				{
+					uint32_t offset = offset_start + filebuf[cur/2];
+					if (offset >= boot_size) {
+						break;
+					}
+					static const char* fixed_names[3] = {
+						"init",
+						"main",
+						"int_2"
+					};
+					char namebuf[32];
+					const char *name;
+					if (index < 3) {
+						name = fixed_names[index];
+					} else {
+						name = namebuf;
+						sprintf(namebuf, "usercall%u", index);
+					}
+					uint32_t address = 0x6000 + offset - sub_start;
+					named_labels = add_label(named_labels, name, address);
+					if (!has_manual_defs || !only) {
+						def = defer(address, def);
+					}
+				}
+
+				do_cd_labels = 1;
+				filebuf += sub_start / 2;
+				address_off = 0x6000;
+				address_end = sub_end-sub_start + address_off;
 			}
-			fclose(f);
-			do_cd_labels = 1;
-			filebuf += sub_start / 2;
-			address_off = 0x6000;
-			address_end = sub_end-sub_start + address_off;
 		}
 	}
 	if (!vos && !is_scd_iso) {
@@ -377,79 +400,159 @@ int main(int argc, char ** argv)
 		}
 	}
 	if (do_cd_labels) {
-		named_labels = weak_label(named_labels, "bios_common_work", 0x5E80);
-		named_labels = weak_label(named_labels, "_setjmptbl", 0x5F0A);
-		named_labels = weak_label(named_labels, "_waitvsync", 0x5F10);
-		named_labels = weak_label(named_labels, "_buram", 0x5F16);
-		named_labels = weak_label(named_labels, "_cdboot", 0x5F1C);
-		named_labels = weak_label(named_labels, "_cdbios", 0x5F22);
-		named_labels = weak_label(named_labels, "_usercall0", 0x5F28);
-		named_labels = weak_label(named_labels, "_usercall1", 0x5F2E);
-		named_labels = weak_label(named_labels, "_usercall2", 0x5F34);
-		named_labels = weak_label(named_labels, "_usercall2Address", 0x5F36);
-		named_labels = weak_label(named_labels, "_usercall3", 0x5F3A);
-		named_labels = weak_label(named_labels, "_adrerr", 0x5F40);
-		named_labels = weak_label(named_labels, "_adrerrAddress", 0x5F42);
-		named_labels = weak_label(named_labels, "_coderr", 0x5F46);
-		named_labels = weak_label(named_labels, "_coderrAddress", 0x5F48);
-		named_labels = weak_label(named_labels, "_diverr", 0x5F4C);
-		named_labels = weak_label(named_labels, "_diverrAddress", 0x5F4E);
-		named_labels = weak_label(named_labels, "_chkerr", 0x5F52);
-		named_labels = weak_label(named_labels, "_chkerrAddress", 0x5F54);
-		named_labels = weak_label(named_labels, "_trperr", 0x5F58);
-		named_labels = weak_label(named_labels, "_trperrAddress", 0x5F5A);
-		named_labels = weak_label(named_labels, "_spverr", 0x5F5E);
-		named_labels = weak_label(named_labels, "_spverrAddress", 0x5F60);
-		named_labels = weak_label(named_labels, "_trace", 0x5F64);
-		named_labels = weak_label(named_labels, "_traceAddress", 0x5F66);
-		named_labels = weak_label(named_labels, "_nocod0", 0x5F6A);
-		named_labels = weak_label(named_labels, "_nocod0Address", 0x5F6C);
-		named_labels = weak_label(named_labels, "_nocod0", 0x5F70);
-		named_labels = weak_label(named_labels, "_nocod0Address", 0x5F72);
-		named_labels = weak_label(named_labels, "_slevel1", 0x5F76);
-		named_labels = weak_label(named_labels, "_slevel1Address", 0x5F78);
-		named_labels = weak_label(named_labels, "_slevel2", 0x5F7C);
-		named_labels = weak_label(named_labels, "_slevel2Address", 0x5F7E);
-		named_labels = weak_label(named_labels, "_slevel3", 0x5F82);
-		named_labels = weak_label(named_labels, "_slevel3Address", 0x5F84);
-		named_labels = weak_label(named_labels, "WORD_RAM_2M", 0x80000);
-		named_labels = weak_label(named_labels, "WORD_RAM_1M", 0xC0000);
-		named_labels = weak_label(named_labels, "LED_CONTROL", 0xFFFF8000);
-		named_labels = weak_label(named_labels, "VERSION_RESET", 0xFFFF8001);
-		named_labels = weak_label(named_labels, "MEM_MODE_WORD", 0xFFFF8002);
-		named_labels = weak_label(named_labels, "MEM_MODE_BYTE", 0xFFFF8003);
-		named_labels = weak_label(named_labels, "CDC_CTRL", 0xFFFF8004);
-		named_labels = weak_label(named_labels, "CDC_AR", 0xFFFF8005);
-		named_labels = weak_label(named_labels, "CDC_REG_DATA_WORD", 0xFFFF8006);
-		named_labels = weak_label(named_labels, "CDC_REG_DATA", 0xFFFF8007);
-		named_labels = weak_label(named_labels, "CDC_HOST_DATA", 0xFFFF8008);
-		named_labels = weak_label(named_labels, "CDC_DMA_ADDR", 0xFFFF800A);
-		named_labels = weak_label(named_labels, "STOP_WATCH", 0xFFFF800C);
-		named_labels = weak_label(named_labels, "COMM_MAIN_FLAG", 0xFFFF800E);
-		named_labels = weak_label(named_labels, "COMM_SUB_FLAG", 0xFFFF800F);
-		named_labels = weak_label(named_labels, "COMM_CMD0", 0xFFFF8010);
-		named_labels = weak_label(named_labels, "COMM_CMD1", 0xFFFF8012);
-		named_labels = weak_label(named_labels, "COMM_CMD2", 0xFFFF8014);
-		named_labels = weak_label(named_labels, "COMM_CMD3", 0xFFFF8016);
-		named_labels = weak_label(named_labels, "COMM_CMD4", 0xFFFF8018);
-		named_labels = weak_label(named_labels, "COMM_CMD5", 0xFFFF801A);
-		named_labels = weak_label(named_labels, "COMM_CMD6", 0xFFFF801C);
-		named_labels = weak_label(named_labels, "COMM_CMD7", 0xFFFF801E);
-		named_labels = weak_label(named_labels, "COMM_STATUS0", 0xFFFF8020);
-		named_labels = weak_label(named_labels, "COMM_STATUS1", 0xFFFF8022);
-		named_labels = weak_label(named_labels, "COMM_STATUS2", 0xFFFF8024);
-		named_labels = weak_label(named_labels, "COMM_STATUS3", 0xFFFF8026);
-		named_labels = weak_label(named_labels, "COMM_STATUS4", 0xFFFF8028);
-		named_labels = weak_label(named_labels, "COMM_STATUS5", 0xFFFF802A);
-		named_labels = weak_label(named_labels, "COMM_STATUS6", 0xFFFF802C);
-		named_labels = weak_label(named_labels, "COMM_STATUS7", 0xFFFF802E);
-		named_labels = weak_label(named_labels, "TIMER_WORD", 0xFFFF8030);
-		named_labels = weak_label(named_labels, "TIMER", 0xFFFF8031);
-		named_labels = weak_label(named_labels, "INT_MASK_WORD", 0xFFFF8032);
-		named_labels = weak_label(named_labels, "INT_MASK", 0xFFFF8033);
-		named_labels = weak_label(named_labels, "CDD_FADER", 0xFFFF8034);
-		named_labels = weak_label(named_labels, "CDD_CTRL_WORD", 0xFFFF8036);
-		named_labels = weak_label(named_labels, "CDD_CTRL_BYTE", 0xFFFF8037);
+		if (main_cpu) {
+			named_labels = weak_label(named_labels, "_bios_reset", 0x280);
+			named_labels = weak_label(named_labels, "_bios_entry", 0x284);
+			named_labels = weak_label(named_labels, "_bios_init", 0x288);
+			named_labels = weak_label(named_labels, "_bios_init_sp", 0x28C);
+			named_labels = weak_label(named_labels, "_bios_vint", 0x290);
+			named_labels = weak_label(named_labels, "_bios_set_hint", 0x294);
+			named_labels = weak_label(named_labels, "_bios_poll_io", 0x298);
+			named_labels = weak_label(named_labels, "_bios_detect_io", 0x29C);
+			named_labels = weak_label(named_labels, "_bios_clear_vram", 0x2A0);
+			named_labels = weak_label(named_labels, "_bios_clear_nmtbl", 0x2A4);
+			named_labels = weak_label(named_labels, "_bios_clear_vsram", 0x2A8);
+			named_labels = weak_label(named_labels, "_bios_init_vdp", 0x2AC);
+			named_labels = weak_label(named_labels, "_bios_vdp_loadregs", 0x2B0);
+			named_labels = weak_label(named_labels, "_bios_vdp_fill", 0x2B4);
+			named_labels = weak_label(named_labels, "_bios_clear_vram_range", 0x2B8);
+			named_labels = weak_label(named_labels, "_bios_clear_vram_range_dma", 0x2BC);
+			named_labels = weak_label(named_labels, "_bios_vram_dma_fill", 0x2C0);
+			named_labels = weak_label(named_labels, "_bios_update_nmtbl", 0x2C4);
+			named_labels = weak_label(named_labels, "_bios_update_nmtbl_template", 0x2C8);
+			named_labels = weak_label(named_labels, "_bios_fill_nmtbl", 0x2CC);
+			named_labels = weak_label(named_labels, "_bios_vdp_dma", 0x2D0);
+			named_labels = weak_label(named_labels, "_bios_vdp_dma_wordram", 0x2D4);
+			named_labels = weak_label(named_labels, "_bios_vdp_display_enable", 0x2D8);
+			named_labels = weak_label(named_labels, "_bios_vdp_display_disable", 0x2DC);
+			named_labels = weak_label(named_labels, "_bios_pal_buffer", 0x2E0);
+			named_labels = weak_label(named_labels, "_bios_pal_buffer_update", 0x2E4);
+			named_labels = weak_label(named_labels, "_bios_pal_dma", 0x2E8);
+			named_labels = weak_label(named_labels, "_bios_gfx_decomp", 0x2EC);
+			named_labels = weak_label(named_labels, "_bios_gfx_decomp_ram", 0x2F0);
+			named_labels = weak_label(named_labels, "_bios_update_sprites", 0x2F4);
+			named_labels = weak_label(named_labels, "_bios_clear_ram", 0x2F8);
+			named_labels = weak_label(named_labels, "_bios_display_sprite", 0x300);
+			named_labels = weak_label(named_labels, "_bios_wait_vint", 0x304);
+			named_labels = weak_label(named_labels, "_bios_wait_vint_flags", 0x308);
+			named_labels = weak_label(named_labels, "_bios_dma_sat", 0x30C);
+			named_labels = weak_label(named_labels, "_bios_set_hint_direct", 0x314);
+			named_labels = weak_label(named_labels, "_bios_disable_hint", 0x318);
+			named_labels = weak_label(named_labels, "_bios_print", 0x31C);
+			named_labels = weak_label(named_labels, "_bios_load_user_font", 0x320);
+			named_labels = weak_label(named_labels, "_bios_load_bios_font", 0x324);
+			named_labels = weak_label(named_labels, "_bios_load_bios_font_default", 0x328);
+			//TODO: more functions in the middle here
+			named_labels = weak_label(named_labels, "_bios_prng_mod", 0x338);
+			named_labels = weak_label(named_labels, "_bios_prng", 0x33C);
+			named_labels = weak_label(named_labels, "_bios_clear_comm", 0x340);
+			named_labels = weak_label(named_labels, "_bios_comm_update", 0x344);
+			//TODO: more functions in the middle here
+			named_labels = weak_label(named_labels, "_bios_sega_logo", 0x364);
+			named_labels = weak_label(named_labels, "_bios_set_vint", 0x368);
+			//TODO: more functions at the end here
+
+			named_labels = weak_label(named_labels, "CD_RESET_IFL2", 0xA12000);
+			named_labels = weak_label(named_labels, "CD_RESET_IFL2_BYTE", 0xA12001);
+			named_labels = weak_label(named_labels, "CD_WRITE_PROTECT", 0xA12002);
+			named_labels = weak_label(named_labels, "CD_MEM_MODE", 0xA12003);
+			named_labels = weak_label(named_labels, "CDC_CTRL", 0xA12004);
+			named_labels = weak_label(named_labels, "HINT_VECTOR", 0xA12006);
+			named_labels = weak_label(named_labels, "CDC_HOST_DATA", 0xA12008);
+			named_labels = weak_label(named_labels, "STOP_WATCH", 0xA1200C);
+			named_labels = weak_label(named_labels, "COMM_MAIN_FLAG", 0xA1200E);
+			named_labels = weak_label(named_labels, "COMM_SUB_FLAG", 0xA1200F);
+			named_labels = weak_label(named_labels, "COMM_CMD0", 0xA12010);
+			named_labels = weak_label(named_labels, "COMM_CMD1", 0xA12012);
+			named_labels = weak_label(named_labels, "COMM_CMD2", 0xA12014);
+			named_labels = weak_label(named_labels, "COMM_CMD3", 0xA12016);
+			named_labels = weak_label(named_labels, "COMM_CMD4", 0xA12018);
+			named_labels = weak_label(named_labels, "COMM_CMD5", 0xA1201A);
+			named_labels = weak_label(named_labels, "COMM_CMD6", 0xA1201C);
+			named_labels = weak_label(named_labels, "COMM_CMD7", 0xA1201E);
+			named_labels = weak_label(named_labels, "COMM_STATUS0", 0xA12020);
+			named_labels = weak_label(named_labels, "COMM_STATUS1", 0xA12022);
+			named_labels = weak_label(named_labels, "COMM_STATUS2", 0xA12024);
+			named_labels = weak_label(named_labels, "COMM_STATUS3", 0xA12026);
+			named_labels = weak_label(named_labels, "COMM_STATUS4", 0xA12028);
+			named_labels = weak_label(named_labels, "COMM_STATUS5", 0xA1202A);
+			named_labels = weak_label(named_labels, "COMM_STATUS6", 0xA1202C);
+			named_labels = weak_label(named_labels, "COMM_STATUS7", 0xA1202E);
+		} else {
+			named_labels = weak_label(named_labels, "bios_common_work", 0x5E80);
+			named_labels = weak_label(named_labels, "_setjmptbl", 0x5F0A);
+			named_labels = weak_label(named_labels, "_waitvsync", 0x5F10);
+			named_labels = weak_label(named_labels, "_buram", 0x5F16);
+			named_labels = weak_label(named_labels, "_cdboot", 0x5F1C);
+			named_labels = weak_label(named_labels, "_cdbios", 0x5F22);
+			named_labels = weak_label(named_labels, "_usercall0", 0x5F28);
+			named_labels = weak_label(named_labels, "_usercall1", 0x5F2E);
+			named_labels = weak_label(named_labels, "_usercall2", 0x5F34);
+			named_labels = weak_label(named_labels, "_usercall2Address", 0x5F36);
+			named_labels = weak_label(named_labels, "_usercall3", 0x5F3A);
+			named_labels = weak_label(named_labels, "_adrerr", 0x5F40);
+			named_labels = weak_label(named_labels, "_adrerrAddress", 0x5F42);
+			named_labels = weak_label(named_labels, "_coderr", 0x5F46);
+			named_labels = weak_label(named_labels, "_coderrAddress", 0x5F48);
+			named_labels = weak_label(named_labels, "_diverr", 0x5F4C);
+			named_labels = weak_label(named_labels, "_diverrAddress", 0x5F4E);
+			named_labels = weak_label(named_labels, "_chkerr", 0x5F52);
+			named_labels = weak_label(named_labels, "_chkerrAddress", 0x5F54);
+			named_labels = weak_label(named_labels, "_trperr", 0x5F58);
+			named_labels = weak_label(named_labels, "_trperrAddress", 0x5F5A);
+			named_labels = weak_label(named_labels, "_spverr", 0x5F5E);
+			named_labels = weak_label(named_labels, "_spverrAddress", 0x5F60);
+			named_labels = weak_label(named_labels, "_trace", 0x5F64);
+			named_labels = weak_label(named_labels, "_traceAddress", 0x5F66);
+			named_labels = weak_label(named_labels, "_nocod0", 0x5F6A);
+			named_labels = weak_label(named_labels, "_nocod0Address", 0x5F6C);
+			named_labels = weak_label(named_labels, "_nocod0", 0x5F70);
+			named_labels = weak_label(named_labels, "_nocod0Address", 0x5F72);
+			named_labels = weak_label(named_labels, "_slevel1", 0x5F76);
+			named_labels = weak_label(named_labels, "_slevel1Address", 0x5F78);
+			named_labels = weak_label(named_labels, "_slevel2", 0x5F7C);
+			named_labels = weak_label(named_labels, "_slevel2Address", 0x5F7E);
+			named_labels = weak_label(named_labels, "_slevel3", 0x5F82);
+			named_labels = weak_label(named_labels, "_slevel3Address", 0x5F84);
+			named_labels = weak_label(named_labels, "WORD_RAM_2M", 0x80000);
+			named_labels = weak_label(named_labels, "WORD_RAM_1M", 0xC0000);
+			named_labels = weak_label(named_labels, "LED_CONTROL", 0xFFFF8000);
+			named_labels = weak_label(named_labels, "VERSION_RESET", 0xFFFF8001);
+			named_labels = weak_label(named_labels, "MEM_MODE_WORD", 0xFFFF8002);
+			named_labels = weak_label(named_labels, "MEM_MODE_BYTE", 0xFFFF8003);
+			named_labels = weak_label(named_labels, "CDC_CTRL", 0xFFFF8004);
+			named_labels = weak_label(named_labels, "CDC_AR", 0xFFFF8005);
+			named_labels = weak_label(named_labels, "CDC_REG_DATA_WORD", 0xFFFF8006);
+			named_labels = weak_label(named_labels, "CDC_REG_DATA", 0xFFFF8007);
+			named_labels = weak_label(named_labels, "CDC_HOST_DATA", 0xFFFF8008);
+			named_labels = weak_label(named_labels, "CDC_DMA_ADDR", 0xFFFF800A);
+			named_labels = weak_label(named_labels, "STOP_WATCH", 0xFFFF800C);
+			named_labels = weak_label(named_labels, "COMM_MAIN_FLAG", 0xFFFF800E);
+			named_labels = weak_label(named_labels, "COMM_SUB_FLAG", 0xFFFF800F);
+			named_labels = weak_label(named_labels, "COMM_CMD0", 0xFFFF8010);
+			named_labels = weak_label(named_labels, "COMM_CMD1", 0xFFFF8012);
+			named_labels = weak_label(named_labels, "COMM_CMD2", 0xFFFF8014);
+			named_labels = weak_label(named_labels, "COMM_CMD3", 0xFFFF8016);
+			named_labels = weak_label(named_labels, "COMM_CMD4", 0xFFFF8018);
+			named_labels = weak_label(named_labels, "COMM_CMD5", 0xFFFF801A);
+			named_labels = weak_label(named_labels, "COMM_CMD6", 0xFFFF801C);
+			named_labels = weak_label(named_labels, "COMM_CMD7", 0xFFFF801E);
+			named_labels = weak_label(named_labels, "COMM_STATUS0", 0xFFFF8020);
+			named_labels = weak_label(named_labels, "COMM_STATUS1", 0xFFFF8022);
+			named_labels = weak_label(named_labels, "COMM_STATUS2", 0xFFFF8024);
+			named_labels = weak_label(named_labels, "COMM_STATUS3", 0xFFFF8026);
+			named_labels = weak_label(named_labels, "COMM_STATUS4", 0xFFFF8028);
+			named_labels = weak_label(named_labels, "COMM_STATUS5", 0xFFFF802A);
+			named_labels = weak_label(named_labels, "COMM_STATUS6", 0xFFFF802C);
+			named_labels = weak_label(named_labels, "COMM_STATUS7", 0xFFFF802E);
+			named_labels = weak_label(named_labels, "TIMER_WORD", 0xFFFF8030);
+			named_labels = weak_label(named_labels, "TIMER", 0xFFFF8031);
+			named_labels = weak_label(named_labels, "INT_MASK_WORD", 0xFFFF8032);
+			named_labels = weak_label(named_labels, "INT_MASK", 0xFFFF8033);
+			named_labels = weak_label(named_labels, "CDD_FADER", 0xFFFF8034);
+			named_labels = weak_label(named_labels, "CDD_CTRL_WORD", 0xFFFF8036);
+			named_labels = weak_label(named_labels, "CDD_CTRL_BYTE", 0xFFFF8037);
+		}
 	}
 	uint16_t *encoded, *next;
 	uint32_t size, tmp_addr;
