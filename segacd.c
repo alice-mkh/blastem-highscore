@@ -3,6 +3,8 @@
 #include "cd_graphics.h"
 #include "genesis.h"
 #include "util.h"
+#include "debug.h"
+#include "gdb_remote.h"
 
 #define SCD_MCLKS 50000000
 #define SCD_PERIPH_RESET_CLKS (SCD_MCLKS / 10)
@@ -875,8 +877,13 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 {
 	segacd_context *cd = context->system;
 	scd_peripherals_run(cd, context->current_cycle);
-	if (context->int_ack) {
-		printf("int ack %d\n", context->int_ack);
+	if (address && cd->enter_debugger) {
+		genesis_context *gen = cd->genesis;
+		if (gen->header.debugger_type == DEBUGGER_NATIVE) {
+			debugger(context, address);
+		} else {
+			gdb_debug_enter(context, address);
+		}
 	}
 	switch (context->int_ack)
 	{
@@ -907,7 +914,7 @@ void scd_run(segacd_context *cd, uint32_t cycle)
 	while (cycle > cd->m68k->current_cycle) {
 		if (m68k_run) {
 			uint32_t start = cd->m68k->current_cycle;
-			cd->m68k->sync_cycle = cycle;
+			cd->m68k->sync_cycle = cd->enter_debugger ? cd->m68k->current_cycle + 1 : cycle;
 			if (cd->need_reset) {
 				cd->need_reset = 0;
 				m68k_reset(cd->m68k);

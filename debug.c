@@ -1,6 +1,8 @@
 #include "debug.h"
 #include "genesis.h"
 #include "68kinst.h"
+#include "segacd.h"
+#include "blastem.h"
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
@@ -582,6 +584,97 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 
 #endif
 
+int run_debugger_command(m68k_context *context, uint32_t address, char *input_buf, m68kinst inst, uint32_t after);
+int run_genesis_debugger_command(m68k_context *context, uint32_t address, char *input_buf)
+{
+	genesis_context * gen = context->system;
+	char *param;
+	uint32_t value;
+	bp_def *new_bp;
+	switch (input_buf[0])
+	{
+	case 'v':
+		//VDP debug commands
+		switch(input_buf[1])
+		{
+		case 's':
+			vdp_print_sprite_table(gen->vdp);
+			break;
+		case 'r':
+			vdp_print_reg_explain(gen->vdp);
+			break;
+		}
+		break;
+	case 'y':
+		//YM-2612 debug commands
+		switch(input_buf[1])
+		{
+		case 'c':
+			if (input_buf[2] == ' ') {
+				int channel = atoi(input_buf+3)-1;
+				ym_print_channel_info(gen->ym, channel);
+			} else {
+				for (int i = 0; i < 6; i++) {
+					ym_print_channel_info(gen->ym, i);
+				}
+			}
+			break;
+		case 't':
+			ym_print_timer_info(gen->ym);
+			break;
+		}
+		break;
+	case 'u':
+		if (gen->expansion) {
+			segacd_context *cd = gen->expansion;
+			if (input_buf[1]) {
+				//TODO: filter out commands that are unsafe to run when we don't have the current Sub CPU address
+				run_debugger_command(cd->m68k, 0, input_buf + 1, (m68kinst){}, 0);
+			} else {
+				cd->enter_debugger = 1;
+				return 0;
+			}
+		} else {
+			fputs("u command only valid when Sega/Mega CD is active\n", stderr);
+		}
+		break;
+#ifndef NO_Z80
+	case 'z':
+		//Z80 debug commands
+		switch(input_buf[1])
+		{
+		case 'b':
+			param = find_param(input_buf);
+			if (!param) {
+				fputs("zb command requires a parameter\n", stderr);
+				break;
+			}
+			value = strtol(param, NULL, 16);
+			zinsert_breakpoint(gen->z80, value, (uint8_t *)zdebugger);
+			new_bp = malloc(sizeof(bp_def));
+			new_bp->next = zbreakpoints;
+			new_bp->address = value;
+			new_bp->index = zbp_index++;
+			zbreakpoints = new_bp;
+			printf("Z80 Breakpoint %d set at %X\n", new_bp->index, value);
+			break;
+		case 'p':
+			param = find_param(input_buf);
+			if (!param) {
+				fputs("zp command requires a parameter\n", stderr);
+				break;
+			}
+			zdebugger_print(gen->z80, input_buf[2] == '/' ? input_buf[3] : 0, param);
+		}
+		break;
+#endif
+	default:
+		fprintf(stderr, "Unrecognized debugger command %s\nUse '?' for help.\n", input_buf);
+		break;
+	}
+	return 1;
+}
+
 static uint32_t branch_t;
 static uint32_t branch_f;
 
@@ -880,73 +973,6 @@ int run_debugger_command(m68k_context *context, uint32_t address, char *input_bu
 				insert_breakpoint(context, after, debugger);
 				return 0;
 			}
-		case 'v': {
-			genesis_context * gen = context->system;
-			//VDP debug commands
-			switch(input_buf[1])
-			{
-			case 's':
-				vdp_print_sprite_table(gen->vdp);
-				break;
-			case 'r':
-				vdp_print_reg_explain(gen->vdp);
-				break;
-			}
-			break;
-		}
-		case 'y': {
-			genesis_context * gen = context->system;
-			//YM-2612 debug commands
-			switch(input_buf[1])
-			{
-			case 'c':
-				if (input_buf[2] == ' ') {
-					int channel = atoi(input_buf+3)-1;
-					ym_print_channel_info(gen->ym, channel);
-				} else {
-					for (int i = 0; i < 6; i++) {
-						ym_print_channel_info(gen->ym, i);
-					}
-				}
-				break;
-			case 't':
-				ym_print_timer_info(gen->ym);
-				break;
-			}
-			break;
-		}
-#ifndef NO_Z80
-		case 'z': {
-			genesis_context * gen = context->system;
-			//Z80 debug commands
-			switch(input_buf[1])
-			{
-			case 'b':
-				param = find_param(input_buf);
-				if (!param) {
-					fputs("zb command requires a parameter\n", stderr);
-					break;
-				}
-				value = strtol(param, NULL, 16);
-				zinsert_breakpoint(gen->z80, value, (uint8_t *)zdebugger);
-				new_bp = malloc(sizeof(bp_def));
-				new_bp->next = zbreakpoints;
-				new_bp->address = value;
-				new_bp->index = zbp_index++;
-				zbreakpoints = new_bp;
-				printf("Z80 Breakpoint %d set at %X\n", new_bp->index, value);
-				break;
-			case 'p':
-				param = find_param(input_buf);
-				if (!param) {
-					fputs("zp command requires a parameter\n", stderr);
-					break;
-				}
-				zdebugger_print(gen->z80, input_buf[2] == '/' ? input_buf[3] : 0, param);
-			}
-			break;
-		}
-#endif
 		case '?':
 			print_m68k_help();
 			break;
@@ -954,9 +980,17 @@ int run_debugger_command(m68k_context *context, uint32_t address, char *input_bu
 			puts("Quitting");
 			exit(0);
 			break;
-		default:
-			fprintf(stderr, "Unrecognized debugger command %s\nUse '?' for help.\n", input_buf);
+		default: {
+			if (context->system == current_system) {
+				//primary 68K for current system
+				return run_genesis_debugger_command(context, address, input_buf);
+			} else {
+				//presumably Sega CD sub CPU
+				//TODO: consider making this more generic
+				fprintf(stderr, "Unrecognized debugger command %s\nUse '?' for help.\n", input_buf);
+			}
 			break;
+		}
 	}
 	return 1;
 }
@@ -1013,8 +1047,10 @@ void debugger(m68k_context * context, uint32_t address)
 	init_terminal();
 
 	context->options->sync_components(context, 0);
-	genesis_context *gen = context->system;
-	vdp_force_update_framebuffer(gen->vdp);
+	if (context->system == current_system) {
+		genesis_context *gen = context->system;
+		vdp_force_update_framebuffer(gen->vdp);
+	}
 	//probably not necessary, but let's play it safe
 	address &= 0xFFFFFF;
 	if (address == branch_t) {

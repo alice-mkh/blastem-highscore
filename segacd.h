@@ -43,6 +43,7 @@ typedef struct {
 	uint8_t         cdc_int_ack;
 	uint8_t         graphics_step;
 	uint8_t         graphics_dst_y;
+	uint8_t         enter_debugger;
 } segacd_context;
 
 segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8_t force_region, rom_info *info);
