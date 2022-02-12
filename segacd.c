@@ -879,6 +879,7 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 	scd_peripherals_run(cd, context->current_cycle);
 	if (address && cd->enter_debugger) {
 		genesis_context *gen = cd->genesis;
+		cd->enter_debugger = 0;
 		if (gen->header.debugger_type == DEBUGGER_NATIVE) {
 			debugger(context, address);
 		} else {
