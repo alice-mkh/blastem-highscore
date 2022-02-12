@@ -2507,7 +2507,11 @@ void m68k_invalidate_code_range(m68k_context *context, uint32_t start, uint32_t 
 {
 	m68k_options *opts = context->options;
 	native_map_slot *native_code_map = opts->gen.native_code_map;
-	start -= M68K_MAX_INST_SIZE - 2;
+	if (start > M68K_MAX_INST_SIZE - 2) {
+		start -= M68K_MAX_INST_SIZE - 2;
+	} else {
+		start = 0;
+	}
 	memmap_chunk const *mem_chunk = find_map_chunk(start, &opts->gen, 0, NULL);
 	if (mem_chunk) {
 		//calculate the lowest alias for this address
