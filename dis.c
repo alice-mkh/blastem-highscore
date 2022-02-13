@@ -311,8 +311,18 @@ int main(int argc, char ** argv)
 				if (!has_manual_defs || !only) {
 					def = defer(0xFF0000, def);
 				}
-				//TODO: other regions
-				named_labels = add_label(named_labels, "user_start", 0xFF0584);
+				uint32_t user_start;
+				if (filebuf[0xA/2] == 0x57A) {
+					//US
+					user_start = 0xFF0584;
+				} else if (filebuf[0xA/2] == 0x564) {
+					//EU
+					user_start = 0xFF056E;
+				} else {
+					//JP
+					user_start = 0xFF0156;
+				}
+				named_labels = add_label(named_labels, "user_start", user_start);
 				do_cd_labels = 1;
 			} else {
 				uint32_t sub_start =filebuf[0x40/2] << 16 | filebuf[0x42/2];
@@ -452,6 +462,7 @@ int main(int argc, char ** argv)
 			named_labels = weak_label(named_labels, "_bios_set_vint", 0x368);
 			//TODO: more functions at the end here
 
+			named_labels = weak_label(named_labels, "WORD_RAM", 0x200000);
 			named_labels = weak_label(named_labels, "CD_RESET_IFL2", 0xA12000);
 			named_labels = weak_label(named_labels, "CD_RESET_IFL2_BYTE", 0xA12001);
 			named_labels = weak_label(named_labels, "CD_WRITE_PROTECT", 0xA12002);
