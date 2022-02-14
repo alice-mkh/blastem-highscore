@@ -56,11 +56,11 @@ memmap_chunk const *find_map_chunk(uint32_t address, cpu_options *opts, uint16_t
 	if (size_sum) {
 		*size_sum = 0;
 	}
-	uint32_t minsize;
+	uint32_t size_round_mask;
 	if (flags == MMAP_CODE) {
-		minsize = 1 << (opts->ram_flags_shift + 3);
+		size_round_mask = (1 << (opts->ram_flags_shift + 3)) - 1;
 	} else {
-		minsize = 0;
+		size_round_mask = 0;
 	}
 	address &= opts->address_mask;
 	for (memmap_chunk const *cur = opts->memmap, *end = opts->memmap + opts->memmap_chunks; cur != end; cur++)
@@ -69,8 +69,11 @@ memmap_chunk const *find_map_chunk(uint32_t address, cpu_options *opts, uint16_t
 			return cur;
 		} else if (size_sum && (cur->flags & flags) == flags) {
 			uint32_t size = chunk_size(opts, cur);
-			if (size < minsize) {
-				size = minsize;
+			if (size_round_mask) {
+				if (size & size_round_mask) {
+					size &= ~size_round_mask;
+					size += size_round_mask + 1;
+				}
 			}
 			*size_sum += size;
 		}
