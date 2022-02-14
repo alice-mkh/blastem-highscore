@@ -137,6 +137,7 @@ void debugger_print(m68k_context *context, char format_char, char *param, uint32
 	case 'X':
 	case 'd':
 	case 'c':
+	case 's':
 		format[5] = format_char;
 		break;
 	case '\0':
@@ -198,7 +199,22 @@ void debugger_print(m68k_context *context, char format_char, char *param, uint32
 		fprintf(stderr, "Unrecognized parameter to p: %s\n", param);
 		return;
 	}
-	printf(format, param, value);
+	if (format_char == 's') {
+		char tmp[128];
+		int i;
+		for (i = 0; i < sizeof(tmp)-1; i++, value++)
+		{
+			char c = m68k_read_byte(value, context);
+			if (c < 0x20 || c > 0x7F) {
+				break;
+			}
+			tmp[i] = c;
+		}
+		tmp[i] = 0;
+		printf(format, param, tmp);
+	} else {
+		printf(format, param, value);
+	}
 }
 
 #ifndef NO_Z80
