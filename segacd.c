@@ -1188,15 +1188,15 @@ static void *main_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8_t force_region, rom_info *info)
 {
 	static memmap_chunk sub_cpu_map[] = {
-		{0x000000, 0x01FEFF, 0xFFFFFF, .flags=MMAP_READ | MMAP_CODE, .write_16 = prog_ram_wp_write16, .write_8 = prog_ram_wp_write8},
-		{0x01FF00, 0x07FFFF, 0xFFFFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE},
-		{0x080000, 0x0BFFFF, 0x03FFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE | MMAP_PTR_IDX | MMAP_FUNC_NULL, .ptr_index = 0,
+		{0x000000, 0x01FF00, 0xFFFFFF, .flags=MMAP_READ | MMAP_CODE, .write_16 = prog_ram_wp_write16, .write_8 = prog_ram_wp_write8},
+		{0x01FF00, 0x080000, 0xFFFFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE},
+		{0x080000, 0x0C0000, 0x03FFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE | MMAP_PTR_IDX | MMAP_FUNC_NULL, .ptr_index = 0,
 			.read_16 = word_ram_2M_read16, .write_16 = word_ram_2M_write16, .read_8 = word_ram_2M_read8, .write_8 = word_ram_2M_write8},
-		{0x0C0000, 0x0DFFFF, 0x01FFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE | MMAP_PTR_IDX | MMAP_FUNC_NULL, .ptr_index = 1,
+		{0x0C0000, 0x0E0000, 0x01FFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE | MMAP_PTR_IDX | MMAP_FUNC_NULL, .ptr_index = 1,
 			.read_16 = word_ram_1M_read16, .write_16 = word_ram_1M_write16, .read_8 = word_ram_1M_read8, .write_8 = word_ram_1M_write8},
-		{0xFE0000, 0xFEFFFF, 0x003FFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_ONLY_ODD},
-		{0xFF0000, 0xFF7FFF, 0x003FFF, .read_16 = pcm_read16, .write_16 = pcm_write16, .read_8 = pcm_read8, .write_8 = pcm_write8},
-		{0xFF8000, 0xFF81FF, 0x0001FF, .read_16 = sub_gate_read16, .write_16 = sub_gate_write16, .read_8 = sub_gate_read8, .write_8 = sub_gate_write8}
+		{0xFE0000, 0xFF0000, 0x003FFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_ONLY_ODD},
+		{0xFF0000, 0xFF8000, 0x003FFF, .read_16 = pcm_read16, .write_16 = pcm_write16, .read_8 = pcm_read8, .write_8 = pcm_write8},
+		{0xFF8000, 0xFF8200, 0x0001FF, .read_16 = sub_gate_read16, .write_16 = sub_gate_write16, .read_8 = sub_gate_read8, .write_8 = sub_gate_write8}
 	};
 
 	segacd_context *cd = calloc(sizeof(segacd_context), 1);
@@ -1250,16 +1250,16 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_t *num_chunks)
 {
 	static memmap_chunk main_cpu_map[] = {
-		{0x000000, 0x01FFFF, 0x01FFFF, .flags=MMAP_READ},
-		{0x020000, 0x03FFFF, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 0,
+		{0x000000, 0x020000, 0x01FFFF, .flags=MMAP_READ},
+		{0x020000, 0x040000, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 0,
 			.read_16 = unmapped_prog_read16, .write_16 = unmapped_prog_write16, .read_8 = unmapped_prog_read8, .write_8 = unmapped_prog_write8},
-		{0x040000, 0x05FFFF, 0x01FFFF, .flags=MMAP_READ}, //first ROM alias
+		{0x040000, 0x060000, 0x01FFFF, .flags=MMAP_READ}, //first ROM alias
 		//TODO: additional ROM/prog RAM aliases
-		{0x200000, 0x21FFFF, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 1,
+		{0x200000, 0x220000, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 1,
 			.read_16 = unmapped_word_read16, .write_16 = unmapped_word_write16, .read_8 = unmapped_word_read8, .write_8 = unmapped_word_write8},
-		{0x220000, 0x23FFFF, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 2,
+		{0x220000, 0x240000, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 2,
 			.read_16 = cell_image_read16, .write_16 = cell_image_write16, .read_8 = cell_image_read8, .write_8 = cell_image_write8},
-		{0xA12000, 0xA12FFF, 0xFFFFFF, .read_16 = main_gate_read16, .write_16 = main_gate_write16, .read_8 = main_gate_read8, .write_8 = main_gate_write8}
+		{0xA12000, 0xA13000, 0xFFFFFF, .read_16 = main_gate_read16, .write_16 = main_gate_write16, .read_8 = main_gate_read8, .write_8 = main_gate_write8}
 	};
 	for (int i = 0; i < sizeof(main_cpu_map) / sizeof(*main_cpu_map); i++)
 	{
