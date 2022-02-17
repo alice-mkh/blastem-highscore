@@ -91,10 +91,13 @@ typedef enum {
 } track_type;
 
 typedef struct {
+	FILE       *f;
+	uint32_t   file_offset;
 	uint32_t   fake_pregap;
 	uint32_t   pregap_lba;
 	uint32_t   start_lba;
 	uint32_t   end_lba;
+	uint16_t   sector_bytes;
 	uint8_t    need_swap;
 	track_type type;
 } track_info;
@@ -109,7 +112,6 @@ struct system_media {
 	char         *extension;
 	system_media *chain;
 	track_info   *tracks;
-	FILE         *f;
 	seek_fun     seek;
 	read_fun     read;
 	uint32_t     num_tracks;

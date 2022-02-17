@@ -30,7 +30,7 @@
 #include "bindings.h"
 #include "menu.h"
 #include "zip.h"
-#include "cue.h"
+#include "cdimage.h"
 #include "event_log.h"
 #ifndef DISABLE_NUKLEAR
 #include "nuklear_ui/blastem_nuklear.h"
@@ -246,6 +246,12 @@ uint32_t load_media(const char * filename, system_media *dst, system_type *stype
 	romclose(f);
 	if (!strcasecmp(dst->extension, "cue")) {
 		if (parse_cue(dst)) {
+			if (stype) {
+				*stype = SYSTEM_SEGACD;
+			}
+		}
+	} else if (!strcasecmp(dst->extension, "toc")) {
+		if (parse_toc(dst)) {
 			if (stype) {
 				*stype = SYSTEM_SEGACD;
 			}
