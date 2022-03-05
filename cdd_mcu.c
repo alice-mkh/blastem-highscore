@@ -7,6 +7,7 @@
 #define SECTOR_CLOCKS (CD_BLOCK_CLKS/75)
 #define NIBBLE_CLOCKS (CDD_MCU_DIVIDER * 77)
 #define BYTE_CLOCKS (SECTOR_CLOCKS/2352) // 96
+#define PROCESSING_DELAY 54000 //approximate, based on Wondermega M1 measurements
 
 //lead in start max diameter 46 mm
 //program area start max diameter 50 mm
@@ -116,6 +117,7 @@ static void lba_to_status(cdd_mcu *context, uint32_t lba)
 static void update_status(cdd_mcu *context, uint16_t *gate_array)
 {
 	gate_array[GAO_CDD_CTRL] |= BIT_MUTE;
+	uint32_t prev_pba = context->head_pba;
 	switch (context->status)
 	{
 	case DS_PLAY:
@@ -183,16 +185,16 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		switch (context->requested_format)
 		{
 		case SF_ABSOLUTE:
-			if (context->toc_valid && context->head_pba >= LEADIN_SECTORS) {
-				lba_to_status(context, context->head_pba - LEADIN_SECTORS);
+			if (context->toc_valid && prev_pba >= LEADIN_SECTORS) {
+				lba_to_status(context, prev_pba - LEADIN_SECTORS);
 				context->status_buffer.format = SF_ABSOLUTE;
 			} else {
 				context->status_buffer.format = SF_NOTREADY;
 			}
 			break;
 		case SF_RELATIVE:
-			if (context->toc_valid && context->head_pba >= LEADIN_SECTORS) {
-				uint32_t lba =context->head_pba - LEADIN_SECTORS;
+			if (context->toc_valid && prev_pba >= LEADIN_SECTORS) {
+				uint32_t lba =prev_pba - LEADIN_SECTORS;
 				for (uint32_t i = 0; i < context->media->num_tracks; i++)
 				{
 					if (lba < context->media->tracks[i].end_lba) {
@@ -223,8 +225,8 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 			}
 			break;
 		case SF_TRACK:
-			if (context->toc_valid && context->head_pba >= LEADIN_SECTORS) {
-				uint32_t lba =context->head_pba - LEADIN_SECTORS;
+			if (context->toc_valid && prev_pba >= LEADIN_SECTORS) {
+				uint32_t lba =prev_pba - LEADIN_SECTORS;
 				uint32_t i;
 				for (i = 0; i < context->media->num_tracks; i++)
 				{
@@ -540,7 +542,14 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 		return;
 	}
 	uint32_t next_subcode = context->last_subcode_cycle + SECTOR_CLOCKS;
-	uint32_t next_nibble = context->current_status_nibble >= 0 ? context->last_nibble_cycle + NIBBLE_CLOCKS : CYCLE_NEVER;
+	uint32_t next_nibble;
+	if (context->current_status_nibble > 0) {
+		next_nibble = context->last_nibble_cycle + NIBBLE_CLOCKS;
+	} else if (!context->current_status_nibble) {
+		next_nibble = context->last_subcode_cycle + PROCESSING_DELAY;
+	} else {
+		next_nibble = CYCLE_NEVER;
+	}
 	uint32_t next_cmd_nibble = context->current_cmd_nibble >= 0 ? context->last_nibble_cycle + NIBBLE_CLOCKS : CYCLE_NEVER;
 
 	for (; context->cycle < cd_cycle; context->cycle += CDD_MCU_DIVIDER)
@@ -549,7 +558,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			context->last_subcode_cycle = context->cycle;
 			next_subcode = context->cycle + SECTOR_CLOCKS;
 			update_status(context, gate_array);
-			next_nibble = context->cycle;
+			next_nibble = context->cycle + PROCESSING_DELAY;
 			context->current_status_nibble = 0;
 			gate_array[GAO_CDD_STATUS] |= BIT_DRS;
 			if ((context->status == DS_PLAY || context->status == DS_PAUSE) && context->head_pba >= LEADIN_SECTORS) {
@@ -635,7 +644,7 @@ void cdd_mcu_start_cmd_recv(cdd_mcu *context, uint16_t *gate_array)
 void cdd_hock_enabled(cdd_mcu *context)
 {
 	context->last_subcode_cycle = context->cycle;
-	context->next_int_cycle = cd_block_to_mclks(context->cycle + SECTOR_CLOCKS + 7 * NIBBLE_CLOCKS);
+	context->next_int_cycle = cd_block_to_mclks(context->cycle + SECTOR_CLOCKS + PROCESSING_DELAY + 7 * NIBBLE_CLOCKS);
 }
 
 void cdd_hock_disabled(cdd_mcu *context)
