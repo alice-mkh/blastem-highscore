@@ -136,12 +136,16 @@ typedef struct {
 	system_media  *media;
 	uint32_t      cycle;          //this is in CD block CLKS
 	uint32_t      next_int_cycle; //this is in SCD MCLKS
-	uint32_t      last_subcode_cycle;
+	uint32_t      next_subcode_int_cycle;
+	uint32_t      last_sector_cycle;
 	uint32_t      last_nibble_cycle;
 	uint32_t      next_byte_cycle;
+	uint32_t      next_subcode_cycle;
 	int           current_status_nibble;
 	int           current_cmd_nibble;
 	int           current_sector_byte;
+	int           current_subcode_byte;
+	int           current_subcode_dest;
 	uint32_t      head_pba;
 	uint32_t      seek_pba;
 	uint32_t      pause_pba;
@@ -154,6 +158,7 @@ typedef struct {
 	uint8_t       cmd_recv_wait;
 	uint8_t       cmd_recv_pending;
 	uint8_t       int_pending;
+	uint8_t       subcode_int_pending;
 	uint8_t       toc_valid;
 	uint8_t       first_cmd_received;
 	uint8_t       seeking;

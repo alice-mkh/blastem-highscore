@@ -9,7 +9,7 @@ typedef struct {
 	m68k_context    *m68k;
 	system_media    *media;
 	genesis_context *genesis;
-	uint16_t        gate_array[0x100];
+	uint16_t        gate_array[0xC0];
 	uint16_t        *rom;     //unaltered ROM, needed for mirrored locations
 	uint16_t        *rom_mut; //ROM with low 16-bit of HINT vector modified by register write
 	uint16_t        *prog_ram;

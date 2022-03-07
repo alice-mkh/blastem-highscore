@@ -90,6 +90,12 @@ typedef enum {
 	TRACK_DATA
 } track_type;
 
+enum {
+	SUBCODES_NONE,
+	SUBCODES_RAW,
+	SUBCODES_COOKED
+};
+
 typedef struct {
 	FILE       *f;
 	uint32_t   file_offset;
@@ -99,6 +105,7 @@ typedef struct {
 	uint32_t   end_lba;
 	uint16_t   sector_bytes;
 	uint8_t    need_swap;
+	uint8_t    has_subcodes;
 	track_type type;
 } track_info;
 
@@ -112,8 +119,10 @@ struct system_media {
 	char         *extension;
 	system_media *chain;
 	track_info   *tracks;
+	uint8_t      *tmp_buffer;
 	seek_fun     seek;
 	read_fun     read;
+	read_fun     read_subcodes;
 	uint32_t     num_tracks;
 	uint32_t     cur_track;
 	uint32_t     size;

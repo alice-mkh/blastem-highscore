@@ -107,6 +107,16 @@ static uint8_t bin_seek(system_media *media, uint32_t sector)
 			if (track) {
 				lba -= media->tracks[track - 1].end_lba;
 			}
+			if (media->tracks[track].has_subcodes) {
+				if (!media->tmp_buffer) {
+					media->tmp_buffer = calloc(1, 96);
+				}
+				fseek(media->tracks[track].f, media->tracks[track].file_offset + (lba + 1) * media->tracks[track].sector_bytes - 96, SEEK_SET);
+				int bytes = fread(media->tmp_buffer, 1, 96, media->tracks[track].f);
+				if (bytes != 96) {
+					fprintf(stderr, "Only read %d subcode bytes\n", bytes);
+				}
+			}
 			fseek(media->tracks[track].f, media->tracks[track].file_offset + lba * media->tracks[track].sector_bytes, SEEK_SET);
 		}
 	}
@@ -151,6 +161,16 @@ static uint8_t bin_read(system_media *media, uint32_t offset)
 		}
 		return fgetc(media->tracks[media->cur_track].f);
 	}
+}
+
+static uint8_t bin_subcode_read(system_media *media, uint32_t offset)
+{
+	if (media->in_fake_pregap || !media->tracks[media->cur_track].has_subcodes) {
+		//TODO: Fake PQ subcodes
+		return 0;
+	}
+	//TODO: Translate "cooked" subcodes back to raw format
+	return media->tmp_buffer[offset];
 }
 
 uint8_t parse_cue(system_media *media)
@@ -318,10 +338,11 @@ uint8_t parse_cue(system_media *media)
 			tracks[0].fake_pregap = 2 * 75;
 		}
 
-		fseek(tracks[0].f, tracks[0].sector_bytes == 2352 ? 16 : 0, SEEK_SET);
+		fseek(tracks[0].f, tracks[0].sector_bytes >= 2352 ? 16 : 0, SEEK_SET);
 		media->size = fread(media->buffer, 1, 2048, tracks[0].f);
 		media->seek = bin_seek;
 		media->read = bin_read;
+		media->read_subcodes = bin_subcode_read;
 	}
 	uint8_t valid = media->num_tracks > 0 && media->tracks[0].f != NULL;
 	media->type = valid ? MEDIA_CDROM : MEDIA_CART;
@@ -379,8 +400,10 @@ uint8_t parse_toc(system_media *media)
 						//TODO: record whether subcode is in raw format or not
 						if (startswith(cmd, "RW_RAW")) {
 							tracks[track].sector_bytes += 96;
+							tracks[track].has_subcodes = SUBCODES_RAW;
 						} else if (startswith(cmd, "RW")) {
 							tracks[track].sector_bytes += 96;
+							tracks[track].has_subcodes = SUBCODES_COOKED;
 						}
 					}
 				}
@@ -485,6 +508,7 @@ uint8_t parse_toc(system_media *media)
 		media->size = fread(media->buffer, 1, 2048, tracks[0].f);
 		media->seek = bin_seek;
 		media->read = bin_read;
+		media->read_subcodes = bin_subcode_read;
 	}
 	uint8_t valid = media->num_tracks > 0 && media->tracks[0].f != NULL;
 	media->type = valid ? MEDIA_CDROM : MEDIA_CART;
@@ -508,11 +532,13 @@ uint32_t make_iso_media(system_media *media, const char *filename)
 		.start_lba = 0,
 		.end_lba = file_size(f),
 		.sector_bytes = 2048,
+		.has_subcodes = SUBCODES_NONE,
 		.need_swap = 0,
 		.type = TRACK_DATA
 	};
 	media->type = MEDIA_CDROM;
 	media->seek = bin_seek;
 	media->read = bin_read;
+	media->read_subcodes = bin_subcode_read;
 	return media->size;
 }

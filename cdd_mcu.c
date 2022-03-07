@@ -7,6 +7,7 @@
 #define SECTOR_CLOCKS (CD_BLOCK_CLKS/75)
 #define NIBBLE_CLOCKS (CDD_MCU_DIVIDER * 77)
 #define BYTE_CLOCKS (SECTOR_CLOCKS/2352) // 96
+#define SUBCODE_CLOCKS (SECTOR_CLOCKS/98)
 #define PROCESSING_DELAY 54000 //approximate, based on Wondermega M1 measurements
 
 //lead in start max diameter 46 mm
@@ -38,20 +39,26 @@ static uint32_t mclks_to_cd_block(uint32_t cycles)
 void cdd_mcu_init(cdd_mcu *context, system_media *media)
 {
 	context->next_int_cycle = CYCLE_NEVER;
-	context->last_subcode_cycle = CYCLE_NEVER;
+	context->next_subcode_int_cycle = CYCLE_NEVER;
+	context->last_sector_cycle = CYCLE_NEVER;
 	context->last_nibble_cycle = CYCLE_NEVER;
 	context->next_byte_cycle = 0;
+	context->next_subcode_cycle = CYCLE_NEVER;
 	context->requested_format = SF_NOTREADY;
 	context->media = media;
 	context->current_status_nibble = -1;
 	context->current_cmd_nibble = -1;
 	context->current_sector_byte = -1;
+	context->current_subcode_byte = -1;
+	context->current_subcode_dest = 0;
 }
 
 enum {
 	GAO_CDD_CTRL,
 	GAO_CDD_STATUS,
-	GAO_CDD_CMD = GAO_CDD_STATUS+5
+	GAO_CDD_CMD = GAO_CDD_STATUS+5,
+	GAO_SUBCODE_ADDR = (0x68-0x36)/2,
+	GAO_SUBCODE_START = (0x100-0x36)/2
 };
 //GAO_CDD_CTRL
 #define BIT_MUTE 0x100
@@ -376,7 +383,7 @@ static void run_command(cdd_mcu *context)
 			context->error_status = DS_CMD_ERROR;
 			break;
 		}
-		if (context->requested_format == SF_TOCT || context->requested_format == SF_TOCN) {
+		if (context->requested_format == SF_TOCT || context->requested_format == SF_TOCN || context->requested_format == SF_TOCO) {
 			context->requested_format = SF_ABSOLUTE;
 		}
 		if (!context->toc_valid) {
@@ -541,12 +548,12 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 		gate_array[GAO_CDD_CTRL] |= BIT_MUTE;
 		return;
 	}
-	uint32_t next_subcode = context->last_subcode_cycle + SECTOR_CLOCKS;
+	uint32_t next_subcode = context->last_sector_cycle + SECTOR_CLOCKS;
 	uint32_t next_nibble;
 	if (context->current_status_nibble > 0) {
 		next_nibble = context->last_nibble_cycle + NIBBLE_CLOCKS;
 	} else if (!context->current_status_nibble) {
-		next_nibble = context->last_subcode_cycle + PROCESSING_DELAY;
+		next_nibble = context->last_sector_cycle + PROCESSING_DELAY;
 	} else {
 		next_nibble = CYCLE_NEVER;
 	}
@@ -555,14 +562,22 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 	for (; context->cycle < cd_cycle; context->cycle += CDD_MCU_DIVIDER)
 	{
 		if (context->cycle >= next_subcode) {
-			context->last_subcode_cycle = context->cycle;
+			context->last_sector_cycle = context->cycle;
 			next_subcode = context->cycle + SECTOR_CLOCKS;
 			update_status(context, gate_array);
 			next_nibble = context->cycle + PROCESSING_DELAY;
 			context->current_status_nibble = 0;
 			gate_array[GAO_CDD_STATUS] |= BIT_DRS;
+			if (context->next_subcode_int_cycle != CYCLE_NEVER) {
+				context->subcode_int_pending = 1;
+			}
 			if ((context->status == DS_PLAY || context->status == DS_PAUSE) && context->head_pba >= LEADIN_SECTORS) {
 				context->current_sector_byte = 0;
+				context->current_subcode_byte = 0;
+				context->next_subcode_cycle = context->cycle;
+				context->next_subcode_int_cycle = cd_block_to_mclks(next_subcode);
+			} else {
+				context->next_subcode_int_cycle = CYCLE_NEVER;
 			}
 		}
 		if (context->cycle >= next_nibble) {
@@ -618,13 +633,43 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 				cdd_fader_data(fader, 0);
 				if (context->current_sector_byte >= 0) {
 					next_subcode += BYTE_CLOCKS;
-					context->last_subcode_cycle += BYTE_CLOCKS;
+					context->last_sector_cycle += BYTE_CLOCKS;
 				}
 			}
 			if (context->current_sector_byte == 2352) {
 				context->current_sector_byte = -1;
 			}
 			context->next_byte_cycle += BYTE_CLOCKS;
+		}
+		if (context->cycle >= context->next_subcode_cycle) {
+			uint8_t byte;
+			if (!context->current_subcode_byte) {
+				byte = 0x9F;
+				//This probably happens after the second sync symbol, but doing it here simplifies things a little
+				context->current_subcode_dest &= 0x7E;
+				gate_array[GAO_SUBCODE_ADDR] = (context->current_subcode_dest - 96) & 0x7E;
+			} else if (context->current_subcode_byte == 1) {
+				byte = 0xFD;
+			} else {
+				byte = context->media->read_subcodes(context->media, context->current_subcode_byte - 2);
+			}
+			int offset = GAO_SUBCODE_START + (context->current_subcode_dest >> 1);
+			if (context->current_subcode_dest & 1) {
+				gate_array[offset] &= 0xFF00;
+				gate_array[offset] |= byte;
+			} else {
+				gate_array[offset] &= 0x00FF;
+				gate_array[offset] |= byte << 8;
+			}
+			context->current_subcode_byte++;
+			if (context->current_subcode_byte == 98) {
+				context->current_subcode_byte = 0;
+			} else if (context->current_subcode_byte == 32) {
+				gate_array[GAO_SUBCODE_ADDR] |= 0x80;
+			}
+			context->current_subcode_dest++;
+			context->current_subcode_dest &= 0x7F;
+			context->next_subcode_cycle += SUBCODE_CLOCKS;
 		}
 	}
 }
@@ -643,13 +688,13 @@ void cdd_mcu_start_cmd_recv(cdd_mcu *context, uint16_t *gate_array)
 
 void cdd_hock_enabled(cdd_mcu *context)
 {
-	context->last_subcode_cycle = context->cycle;
+	context->last_sector_cycle = context->cycle;
 	context->next_int_cycle = cd_block_to_mclks(context->cycle + SECTOR_CLOCKS + PROCESSING_DELAY + 7 * NIBBLE_CLOCKS);
 }
 
 void cdd_hock_disabled(cdd_mcu *context)
 {
-	context->last_subcode_cycle = CYCLE_NEVER;
+	context->last_sector_cycle = CYCLE_NEVER;
 	context->next_int_cycle = CYCLE_NEVER;
 	context->last_nibble_cycle = CYCLE_NEVER;
 	context->current_status_nibble = -1;
@@ -667,11 +712,11 @@ void cdd_mcu_adjust_cycle(cdd_mcu *context, uint32_t deduction)
 	if (context->next_int_cycle != CYCLE_NEVER) {
 		context->next_int_cycle -= deduction;
 	}
-	if (context->last_subcode_cycle != CYCLE_NEVER) {
-		if (context->last_subcode_cycle > cd_deduction) {
-			context->last_subcode_cycle -= cd_deduction;
+	if (context->last_sector_cycle != CYCLE_NEVER) {
+		if (context->last_sector_cycle > cd_deduction) {
+			context->last_sector_cycle -= cd_deduction;
 		} else {
-			context->last_subcode_cycle = 0;
+			context->last_sector_cycle = 0;
 		}
 	}
 	if (context->last_nibble_cycle != CYCLE_NEVER) {
@@ -682,4 +727,7 @@ void cdd_mcu_adjust_cycle(cdd_mcu *context, uint32_t deduction)
 		}
 	}
 	context->next_byte_cycle -= cd_deduction;
+	if (context->next_subcode_cycle != CYCLE_NEVER) {
+		context->next_subcode_cycle -= cd_deduction;
+	}
 }

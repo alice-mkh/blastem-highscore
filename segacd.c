@@ -55,6 +55,8 @@ enum {
 	GA_FONT_DATA1,
 	GA_FONT_DATA2,
 	GA_FONT_DATA3,
+	GA_SUBCODE_START = 0x80,
+	GA_SUBCODE_MIRROR = 0xC0,
 
 	GA_HINT_VECTOR = GA_CDC_REG_DATA
 };
@@ -387,48 +389,57 @@ static void calculate_target_cycle(m68k_context * context)
 	context->int_cycle = CYCLE_NEVER;
 	uint8_t mask = context->status & 0x7;
 	uint32_t cdc_cycle = CYCLE_NEVER;
-	if (mask < 5) {
-		if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN5) {
-			cdc_cycle = lc8951_next_interrupt(&cd->cdc);
-			//CDC interrupts only generated on falling edge of !INT signal
-			if (cd->cdc_int_ack) {
-				if (cdc_cycle > cd->cdc.cycle) {
-					cd->cdc_int_ack = 0;
-				} else {
-					cdc_cycle = CYCLE_NEVER;
-				}
-			}
-			if (cdc_cycle < context->int_cycle) {
-				context->int_cycle = cdc_cycle;
-				context->int_num = 5;
+	if (mask < 6) {
+		if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN6) {
+			uint32_t subcode_cycle = cd->cdd.subcode_int_pending ? context->current_cycle : cd->cdd.next_subcode_int_cycle;
+			if (subcode_cycle != CYCLE_NEVER) {
+				context->int_cycle = subcode_cycle;
+				context->int_num = 6;
 			}
 		}
-		if (mask < 4) {
-			if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN4) {
-				uint32_t cdd_cycle = cd->cdd.int_pending ? context->current_cycle : cd->cdd.next_int_cycle;
-				if (cdd_cycle < context->int_cycle) {
-					context->int_cycle = cdd_cycle;
-					context->int_num = 4;
+		if (mask < 5) {
+			if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN5) {
+				cdc_cycle = lc8951_next_interrupt(&cd->cdc);
+				//CDC interrupts only generated on falling edge of !INT signal
+				if (cd->cdc_int_ack) {
+					if (cdc_cycle > cd->cdc.cycle) {
+						cd->cdc_int_ack = 0;
+					} else {
+						cdc_cycle = CYCLE_NEVER;
+					}
+				}
+				if (cdc_cycle < context->int_cycle) {
+					context->int_cycle = cdc_cycle;
+					context->int_num = 5;
 				}
 			}
-			if (mask < 3) {
-				uint32_t next_timer;
-				if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN3) {
-					uint32_t next_timer_cycle = next_timer_int(cd);
-					if (next_timer_cycle < context->int_cycle) {
-						context->int_cycle = next_timer_cycle;
-						context->int_num = 3;
+			if (mask < 4) {
+				if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN4) {
+					uint32_t cdd_cycle = cd->cdd.int_pending ? context->current_cycle : cd->cdd.next_int_cycle;
+					if (cdd_cycle < context->int_cycle) {
+						context->int_cycle = cdd_cycle;
+						context->int_num = 4;
 					}
 				}
-				if (mask < 2) {
-					if (cd->int2_cycle < context->int_cycle && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN2)) {
-						context->int_cycle = cd->int2_cycle;
-						context->int_num = 2;
+				if (mask < 3) {
+					uint32_t next_timer;
+					if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN3) {
+						uint32_t next_timer_cycle = next_timer_int(cd);
+						if (next_timer_cycle < context->int_cycle) {
+							context->int_cycle = next_timer_cycle;
+							context->int_num = 3;
+						}
 					}
-					if (mask < 1) {
-						if (cd->graphics_int_cycle < context->int_cycle && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN1)) {
-							context->int_cycle = cd->graphics_int_cycle;
-							context->int_num = 1;
+					if (mask < 2) {
+						if (cd->int2_cycle < context->int_cycle && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN2)) {
+							context->int_cycle = cd->int2_cycle;
+							context->int_num = 2;
+						}
+						if (mask < 1) {
+							if (cd->graphics_int_cycle < context->int_cycle && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN1)) {
+								context->int_cycle = cd->graphics_int_cycle;
+								context->int_num = 1;
+							}
 						}
 					}
 				}
@@ -521,6 +532,7 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 			value |= pixel << (i * 4);
 		}
 		return value;
+	}
 	case GA_STAMP_SIZE:
 	case GA_IMAGE_BUFFER_LINES:
 		//these two have bits that change based on graphics operations
@@ -529,8 +541,10 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 	case GA_TRACE_VECTOR_BASE:
 		//write only
 		return 0xFFFF;
-	}
 	default:
+		if (reg >= GA_SUBCODE_MIRROR) {
+			return cd->gate_array[GA_SUBCODE_START + (reg & 0x3F)];
+		}
 		return cd->gate_array[reg];
 	}
 }
@@ -655,6 +669,10 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		calculate_target_cycle(m68k);
 		break;
 	case GA_INT_MASK:
+		if (!(cd->gate_array[reg] & BIT_MASK_IEN6)) {
+			//subcode interrupts can't be made pending when they are disabled in this reg
+			cd->cdd.subcode_int_pending = 0;
+		}
 		cd->gate_array[reg] = value & (BIT_MASK_IEN6|BIT_MASK_IEN5|BIT_MASK_IEN4|BIT_MASK_IEN3|BIT_MASK_IEN2|BIT_MASK_IEN1);
 		calculate_target_cycle(m68k);
 		break;
@@ -902,6 +920,9 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 		break;
 	case 5:
 		cd->cdc_int_ack = 1;
+		break;
+	case 6:
+		cd->cdd.subcode_int_pending = 0;
 		break;
 	}
 	context->int_ack = 0;
