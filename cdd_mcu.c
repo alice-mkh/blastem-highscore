@@ -151,10 +151,7 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 			}
 		}
 		if (context->head_pba >= LEADIN_SECTORS) {
-			uint8_t track = context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
-			if (!context->seeking && context->media->tracks[track].type == TRACK_AUDIO) {
-				gate_array[GAO_CDD_CTRL] &= ~BIT_MUTE;
-			}
+			context->media->seek(context->media, context->head_pba - LEADIN_SECTORS);
 		}
 		break;
 	case DS_TOC_READ:
