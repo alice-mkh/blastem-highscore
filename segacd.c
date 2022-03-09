@@ -571,19 +571,30 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		break;
 	case GA_MEM_MODE: {
 		uint16_t changed = value ^ cd->gate_array[reg];
+		uint8_t old_main_has_word2m = cd->main_has_word2m;
+		if (value & BIT_RET) {
+			cd->main_has_word2m = 1;
+		}
+		uint8_t old_bank_toggle = cd->bank_toggle;
+		cd->bank_toggle = value & BIT_RET;
 		genesis_context *gen = cd->genesis;
+		cd->gate_array[reg] &= 0xFFC0;
 		if (changed & BIT_MEM_MODE) {
 			//FIXME: ram banks are supposed to be interleaved when in 2M mode
-			cd->gate_array[reg] &= ~BIT_DMNA;
+			cd->main_swap_request = old_bank_toggle != cd->bank_toggle;
 			if (value & BIT_MEM_MODE) {
 				//switch to 1M mode
 				gen->m68k->mem_pointers[cd->memptr_start_index + 1] = (value & BIT_RET) ? cd->word_ram + 0x10000 : cd->word_ram;
 				gen->m68k->mem_pointers[cd->memptr_start_index + 2] = NULL;
 				m68k->mem_pointers[0] = NULL;
-				m68k->mem_pointers[1] = (value & BIT_RET) ? cd->word_ram : cd->word_ram + 0x10000;
+				m68k->mem_pointers[1] = cd->bank_toggle ? cd->word_ram : cd->word_ram + 0x10000;
+				cd->gate_array[reg] |= value & (MASK_PRIORITY|BIT_RET|BIT_MEM_MODE);
+				if (cd->main_swap_request) {
+					cd->gate_array[reg] |= BIT_DMNA;
+				}
 			} else {
 				//switch to 2M mode
-				if (value & BIT_RET) {
+				if (cd->main_has_word2m) {
 					//Main CPU will have word ram
 					gen->m68k->mem_pointers[cd->memptr_start_index + 1] = cd->word_ram;
 					gen->m68k->mem_pointers[cd->memptr_start_index + 2] = cd->word_ram + 0x10000;
@@ -596,31 +607,36 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 					m68k->mem_pointers[0] = cd->word_ram;
 					m68k->mem_pointers[1] = NULL;
 				}
+				cd->gate_array[reg] |= value & (MASK_PRIORITY|BIT_MEM_MODE);
+				cd->gate_array[reg] |= cd->main_has_word2m ? BIT_RET : BIT_DMNA;
 			}
 			m68k_invalidate_code_range(gen->m68k, cd->base + 0x200000, cd->base + 0x240000);
 			m68k_invalidate_code_range(m68k, 0x080000, 0x0E0000);
-		} else if (changed & BIT_RET) {
-			if (value & BIT_MEM_MODE) {
-				cd->gate_array[reg] &= ~BIT_DMNA;
-				//swapping banks in 1M mode
+		} else if (value & BIT_MEM_MODE) {
+			//1M mode
+			if (old_bank_toggle != cd->bank_toggle) {
 				gen->m68k->mem_pointers[cd->memptr_start_index + 1] = (value & BIT_RET) ? cd->word_ram + 0x10000 : cd->word_ram;
 				m68k->mem_pointers[1] = (value & BIT_RET) ? cd->word_ram : cd->word_ram + 0x10000;
 				m68k_invalidate_code_range(gen->m68k, cd->base + 0x200000, cd->base + 0x240000);
 				m68k_invalidate_code_range(m68k, 0x080000, 0x0E0000);
-			} else if (value & BIT_RET) {
-				cd->gate_array[reg] &= ~BIT_DMNA;
-				//giving word ram to main CPU in 2M mode
+				cd->main_swap_request = 0;
+			}
+			cd->gate_array[reg] |= value & (MASK_PRIORITY|BIT_RET|BIT_MEM_MODE);
+			if (cd->main_swap_request) {
+				cd->gate_array[reg] |= BIT_DMNA;
+			}
+		} else {
+			//2M mode
+			if (old_main_has_word2m != cd->main_has_word2m) {
 				gen->m68k->mem_pointers[cd->memptr_start_index + 1] = cd->word_ram;
 				gen->m68k->mem_pointers[cd->memptr_start_index + 2] = cd->word_ram + 0x10000;
 				m68k->mem_pointers[0] = NULL;
 				m68k_invalidate_code_range(gen->m68k, cd->base + 0x200000, cd->base + 0x240000);
 				m68k_invalidate_code_range(m68k, 0x080000, 0x0E0000);
-			} else {
-				value |= BIT_RET;
 			}
+			cd->gate_array[reg] |= value & MASK_PRIORITY;
+			cd->gate_array[reg] |= cd->main_has_word2m ? BIT_RET : BIT_DMNA;
 		}
-		cd->gate_array[reg] &= 0xFFC2;
-		cd->gate_array[reg] |= value & (BIT_RET|BIT_MEM_MODE|MASK_PRIORITY);
 		break;
 	}
 	case GA_CDC_CTRL:
@@ -765,6 +781,7 @@ static void *sub_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	uint16_t value16;
 	switch (address >> 1)
 	{
+	case GA_MEM_MODE:
 	case GA_CDC_HOST_DATA:
 	case GA_CDC_DMA_ADDR:
 	case GA_STOP_WATCH:
@@ -1123,6 +1140,9 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 			//1M mode
 			if (!(value & BIT_DMNA)) {
 				cd->gate_array[reg] |= BIT_DMNA;
+				cd->main_swap_request = 1;
+			} else {
+				cd->main_has_word2m = 0;
 			}
 		} else {
 			//2M mode
@@ -1132,6 +1152,7 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 				m68k->mem_pointers[cd->memptr_start_index + 2] = NULL;
 				cd->m68k->mem_pointers[0] = cd->word_ram;
 				cd->gate_array[reg] &= ~BIT_RET;
+				cd->main_has_word2m = 0;
 
 				m68k_invalidate_code_range(m68k, cd->base + 0x200000, cd->base + 0x240000);
 				m68k_invalidate_code_range(cd->m68k, 0x080000, 0x0C0000);
@@ -1257,6 +1278,7 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	cd->memptr_start_index = 0;
 	cd->gate_array[1] = 1;
 	cd->gate_array[GA_CDD_CTRL] = BIT_MUTE; //Data/mute flag is set on start
+	cd->main_has_word2m = 1;
 	lc8951_init(&cd->cdc, handle_cdc_byte, cd);
 	if (media->chain && media->type != MEDIA_CDROM) {
 		media = media->chain;
