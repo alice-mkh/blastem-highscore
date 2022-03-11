@@ -185,8 +185,13 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		}
 		break;
 	}
+	uint8_t force_not_ready = 0;
+	if (context->seeking && context->head_pba - prev_pba != 1) {
+		//BIOS depends on getting a not ready status during seeking to clear certain state
+		force_not_ready = context->status_buffer.format != SF_NOTREADY;
+	}
 	if (context->first_cmd_received) {
-		switch (context->requested_format)
+		switch (force_not_ready ? SF_NOTREADY : context->requested_format)
 		{
 		case SF_ABSOLUTE:
 			if (context->toc_valid && prev_pba >= LEADIN_SECTORS) {
