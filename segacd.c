@@ -5,6 +5,7 @@
 #include "util.h"
 #include "debug.h"
 #include "gdb_remote.h"
+#include "blastem.h"
 
 #define SCD_MCLKS 50000000
 #define SCD_PERIPH_RESET_CLKS (SCD_MCLKS / 10)
@@ -1268,7 +1269,28 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 
 	segacd_context *cd = calloc(sizeof(segacd_context), 1);
 	uint32_t firmware_size;
-	cd->rom = (uint16_t *)read_bundled_file("cdbios.bin", &firmware_size);
+	uint8_t region = force_region;
+	if (!region) {
+		char * def_region = tern_find_path_default(config, "system\0default_region\0", (tern_val){.ptrval = "U"}, TVAL_PTR).ptrval;
+		if (!info->regions || (info->regions & translate_region_char(toupper(*def_region)))) {
+			region = translate_region_char(toupper(*def_region));
+		} else {
+			region = info->regions;
+		}
+	}
+	const char *key;
+	if (region & REGION_E) {
+		key = "system\0scd_bios_eu\0";
+	} else if (region & REGION_J) {
+		key = "system\0scd_bios_jp\0";
+	} else {
+		key = "system\0scd_bios_us\0";
+	}
+	char *bios_path = tern_find_path_default(config, key, (tern_val){.ptrval = "cdbios.bin"}, TVAL_PTR).ptrval;
+	cd->rom = (uint16_t *)read_bundled_file(bios_path, &firmware_size);
+	if (!cd->rom) {
+		fatal_error("Failed to load Sega CD BIOS from %s\n", bios_path);
+	}
 	uint32_t adjusted_size = nearest_pow2(firmware_size);
 	if (adjusted_size != firmware_size) {
 		cd->rom = realloc(cd->rom, adjusted_size);
