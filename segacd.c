@@ -879,7 +879,6 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 	case DST_SUB_CPU:
 		cd->cdc_dst_low = 0;
 		cd->gate_array[GA_CDC_CTRL] |= BIT_DSR;
-		printf("DSR set at %u, (transfer_end %u, dbcl %X, dbch %X)\n", cd->cdc.cycle, cd->cdc.transfer_end, cd->cdc.regs[2], cd->cdc.regs[3]);
 		break;
 	case DST_PCM_RAM:
 		dma_addr &= (1 << 13) - 1;
@@ -1064,7 +1063,6 @@ static uint16_t main_gate_read16(uint32_t address, void *vcontext)
 		uint16_t dst = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
 		if (dst == DST_MAIN_CPU) {
 			if (cd->gate_array[GA_CDC_CTRL] & BIT_DSR) {
-				printf("DSR cleared at %u (%u)\n", scd_cycle, cd->cdc.cycle);
 				cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
 				lc8951_resume_transfer(&cd->cdc, scd_cycle);
 			} else {

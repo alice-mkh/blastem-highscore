@@ -355,7 +355,6 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 static void run_command(cdd_mcu *context)
 {
 	uint8_t check = checksum((uint8_t*)&context->cmd_buffer);
-	printf("cmd %X, checksum: %X, calc: %X\n", context->cmd_buffer.cmd_type, context->cmd_buffer.checksum, check);
 	if (check != context->cmd_buffer.checksum) {
 		context->error_status = DS_SUM_ERROR;
 		return;

@@ -101,7 +101,6 @@ static uint8_t bin_seek(system_media *media, uint32_t sector)
 		}
 	}
 	if (track < media->num_tracks) {
-		fprintf(stderr, "bin_seek to sector %u, adjusted lba %u, track %u\n", sector, lba, track);
 		media->cur_track = track;
 		if (!media->in_fake_pregap) {
 			if (track) {

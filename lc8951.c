@@ -213,7 +213,6 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 				uint16_t block_start = (context->regs[PTL] | (context->regs[PTH] << 8)) & (sizeof(context->buffer)-1);
 				for (int reg = HEAD0; reg < PTL; reg++)
 				{
-					printf("Setting HEAD%d to buffer[%X]\n", reg - HEAD0, block_start);
 					context->regs[reg] =context->buffer[block_start++];
 					block_start &= (sizeof(context->buffer)-1);
 				}
@@ -255,7 +254,6 @@ void lc8951_resume_transfer(lc8951 *context, uint32_t cycle)
 				context->cycle -= step_diff * context->clock_step;
 			}
 			context->transfer_end = context->cycle + transfer_size * context->clock_step;
-			printf("RESUME: size %u, cycle %u, end %u\n", transfer_size, context->cycle, context->transfer_end);
 			if (step_diff) {
 				lc8951_run(context, cycle);
 			}
