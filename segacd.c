@@ -250,7 +250,7 @@ static void *unmapped_word_write8(uint32_t address, void *vcontext, uint8_t valu
 	return vcontext;
 }
 
-static uint16_t cell_image_read16(uint32_t address, void *vcontext)
+static uint32_t cell_image_translate_address(uint32_t address)
 {
 	uint32_t word_of_cell = address & 2;
 	if (address < 0x10000) {
@@ -275,6 +275,12 @@ static uint16_t cell_image_read16(uint32_t address, void *vcontext)
 		address &= 0x1E000;
 		address |= (line_of_column << 6) | (column >> 5) | word_of_cell;
 	}
+	return address;
+}
+
+static uint16_t cell_image_read16(uint32_t address, void *vcontext)
+{
+	address = cell_image_translate_address(address);
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
@@ -295,11 +301,32 @@ static uint8_t cell_image_read8(uint32_t address, void *vcontext)
 
 static void *cell_image_write16(uint32_t address, void *vcontext, uint16_t value)
 {
+	address = cell_image_translate_address(address);
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	segacd_context *cd = gen->expansion;
+	if (m68k->mem_pointers[cd->memptr_start_index + 1]) {
+		m68k->mem_pointers[cd->memptr_start_index + 1][address>>1] = value;
+	}
 	return vcontext;
 }
 
 static void *cell_image_write8(uint32_t address, void *vcontext, uint8_t value)
 {
+	uint32_t byte = address & 1;
+	address = cell_image_translate_address(address);
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	segacd_context *cd = gen->expansion;
+	if (m68k->mem_pointers[cd->memptr_start_index + 1]) {
+		if (byte) {
+			m68k->mem_pointers[cd->memptr_start_index + 1][address>>1] &= 0xFF00;
+			m68k->mem_pointers[cd->memptr_start_index + 1][address>>1] |= value;
+		} else {
+			m68k->mem_pointers[cd->memptr_start_index + 1][address>>1] &= 0x00FF;
+			m68k->mem_pointers[cd->memptr_start_index + 1][address>>1] |= value << 8;
+		}
+	}
 	return vcontext;
 }
 
