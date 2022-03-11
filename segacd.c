@@ -581,7 +581,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cd->gate_array[reg] &= 0xFFC0;
 		if (changed & BIT_MEM_MODE) {
 			//FIXME: ram banks are supposed to be interleaved when in 2M mode
-			cd->main_swap_request = old_bank_toggle != cd->bank_toggle;
+			cd->main_swap_request = cd->bank_toggle && !old_bank_toggle;
 			if (value & BIT_MEM_MODE) {
 				//switch to 1M mode
 				gen->m68k->mem_pointers[cd->memptr_start_index + 1] = (value & BIT_RET) ? cd->word_ram + 0x10000 : cd->word_ram;
