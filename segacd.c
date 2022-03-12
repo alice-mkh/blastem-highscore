@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h
 #include "cd_graphics.h"
 #include "genesis.h"
 #include "util.h"
