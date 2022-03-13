@@ -332,11 +332,19 @@ static void *cell_image_write8(uint32_t address, void *vcontext, uint8_t value)
 	return vcontext;
 }
 
+static void cdd_run(segacd_context *cd, uint32_t cycle)
+{
+	cdd_mcu_run(&cd->cdd, cycle, cd->gate_array + GA_CDD_CTRL, &cd->cdc, &cd->fader);
+	lc8951_run(&cd->cdc, cycle);
+}
+
 static uint8_t pcm_read8(uint32_t address, void *vcontext)
 {
 	m68k_context *m68k = vcontext;
 	segacd_context *cd = m68k->system;
 	if (address & 1) {
+		//need to run CD drive because there may be a PCM DMA underway
+		cdd_run(cd, m68k->current_cycle);
 		rf5c164_run(&cd->pcm, m68k->current_cycle);
 		return rf5c164_read(&cd->pcm, address >> 1);
 	} else {
@@ -354,6 +362,8 @@ static void *pcm_write8(uint32_t address, void *vcontext, uint8_t value)
 	m68k_context *m68k = vcontext;
 	segacd_context *cd = m68k->system;
 	if (address & 1) {
+		//need to run CD drive because there may be a PCM DMA underway
+		cdd_run(cd, m68k->current_cycle);
 		rf5c164_run(&cd->pcm, m68k->current_cycle);
 		rf5c164_write(&cd->pcm, address >> 1, value);
 	}
@@ -390,12 +400,6 @@ static void timers_run(segacd_context *cd, uint32_t cycle)
 			cd->timer_pending = 1;
 		}
 	}
-}
-
-static void cdd_run(segacd_context *cd, uint32_t cycle)
-{
-	cdd_mcu_run(&cd->cdd, cycle, cd->gate_array + GA_CDD_CTRL, &cd->cdc, &cd->fader);
-	lc8951_run(&cd->cdc, cycle);
 }
 
 static uint32_t next_timer_int(segacd_context *cd)
