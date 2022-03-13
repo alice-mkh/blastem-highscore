@@ -147,6 +147,8 @@ void rf5c164_run(rf5c164* pcm, uint32_t cycle)
 		CHECK;
 	case 10:
 		//refresh?
+		//does refresh happen at the same rate when sounding disabled? warning in sega docs suggests maybe not
+		write_if_not_sounding(pcm);
 		CHECK;
 	case 11:
 		write_always(pcm);

@@ -365,6 +365,12 @@ static void *pcm_write8(uint32_t address, void *vcontext, uint8_t value)
 		//need to run CD drive because there may be a PCM DMA underway
 		cdd_run(cd, m68k->current_cycle);
 		rf5c164_run(&cd->pcm, m68k->current_cycle);
+		while ((cd->pcm.flags & 0x81) == 1) {
+			//not sounding, but pending write
+			//DMA write conflict presumably adds wait states
+			m68k->current_cycle += 4;
+			rf5c164_run(&cd->pcm, m68k->current_cycle);
+		}
 		rf5c164_write(&cd->pcm, address >> 1, value);
 	}
 	return vcontext;
@@ -889,6 +895,11 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 	case DST_PCM_RAM:
 		dma_addr &= (1 << 13) - 1;
 		rf5c164_run(&cd->pcm, cd->cdc.cycle);
+		while ((cd->pcm.flags & 0x81) == 1) {
+			//not sounding, but pending write
+			//DMA write conflict with CPU
+			rf5c164_run(&cd->pcm, cd->pcm.cycle + 4);
+		}
 		rf5c164_write(&cd->pcm, 0x1000 | (dma_addr >> 1), value);
 		dma_addr += 2;
 		cd->cdc_dst_low = dma_addr & 7;
