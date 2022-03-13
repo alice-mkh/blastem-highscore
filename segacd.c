@@ -920,7 +920,9 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 			m68k_invalidate_code_range(cd->m68k, 0x0C0000 + dma_addr - 1, 0x0C0000 + dma_addr + 1);
 		} else {
 			//2M mode, check if Sub CPU has access
-			if (!(cd->gate_array[GA_MEM_MODE] & BIT_RET)) {
+			if (cd->main_has_word2m) {
+				return 0;
+			} else {
 				cd_graphics_run(cd, cd->cdc.cycle);
 				dma_addr &= (1 << 18) - 1;
 				cd->word_ram[dma_addr >> 1] = cd->gate_array[GA_CDC_HOST_DATA];
@@ -1195,6 +1197,11 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 				cd->m68k->mem_pointers[0] = cd->word_ram;
 				cd->gate_array[reg] &= ~BIT_RET;
 				cd->main_has_word2m = 0;
+
+				uint16_t dst = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
+				if (dst == DST_WORD_RAM) {
+					lc8951_resume_transfer(&cd->cdc, cd->cdc.cycle);
+				}
 
 				m68k_invalidate_code_range(m68k, cd->base + 0x200000, cd->base + 0x240000);
 				m68k_invalidate_code_range(cd->m68k, 0x080000, 0x0C0000);
