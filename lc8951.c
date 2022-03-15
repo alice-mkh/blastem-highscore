@@ -54,11 +54,20 @@ enum {
 #define BIT_STEN   0x01
 
 //CTRL0
-#define BIT_DECEN 0x80
-#define BIT_WRRQ  0x04
+#define BIT_DECEN  0x80
+#define BIT_WRRQ   0x04
+
+//CTRL1
+#define BIT_SYIEN  0x80
+#define BIT_SYDEN  0x40
 
 //STAT0
-#define BIT_CRCOK 0x80
+#define BIT_CRCOK  0x80
+#define BIT_ILSYNC 0x40
+#define BIT_NOSYNC 0x20
+#define BIT_LBLK   0x10
+#define BIT_SBLK   0x04
+
 
 //STAT3
 #define BIT_VALST 0x80
@@ -265,8 +274,41 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 {
 	lc8951_run(context, cycle);
 	uint16_t current_write_addr = context->regs[WAL] | (context->regs[WAH] << 8);
-	if (sector_offset == 12) {
+
+	context->sector_counter++;
+	uint8_t sync_detected = 0, sync_ignored = 0;
+	if (byte == 0) {
+		if (context->sync_counter == 11 && ((sector_offset & 3) == 3)) {
+			if (context->ctrl1 & BIT_SYDEN) {
+				sync_detected = 1;
+			} else {
+				sync_ignored = 1;
+			}
+			context->sync_counter = 0;
+		} else {
+			context->sync_counter = 1;
+		}
+	} else if (byte == 0xFF && context->sync_counter) {
+		context->sync_counter++;
+	} else {
+		context->sync_counter = 0;
+	}
+
+	uint8_t sync_inserted = 0;
+	if (context->ctrl1 & BIT_SYIEN && context->sector_counter == 2352) {
+		sync_inserted = 1;
+	}
+
+	if (sync_detected || sync_inserted) {
 		//we've recevied the sync pattern for the next block
+		context->regs[STAT0] &= ~(BIT_ILSYNC | BIT_NOSYNC | BIT_LBLK | BIT_SBLK);
+		if (sync_inserted && !(sync_detected || sync_ignored)) {
+			context->regs[STAT0] |= BIT_NOSYNC;
+		}
+		if (sync_detected && context->sector_counter != 2352) {
+			context->regs[STAT0] |= BIT_ILSYNC;
+		}
+		context->sector_counter = 0;
 
 		//header/status regs no longer considered "valid"
 		context->regs[STAT3] |= BIT_VALST;
@@ -274,7 +316,7 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 		context->regs[IFSTAT] |= BIT_DECI;
 		if (context->ctrl0 & BIT_DECEN) {
 			if (context->ctrl0 & BIT_WRRQ) {
-				uint16_t block_start = current_write_addr - 2352;
+				uint16_t block_start = current_write_addr + 1 - 2352;
 				context->regs[PTL] = block_start;
 				context->regs[PTH] = block_start >> 8;
 			}
@@ -282,8 +324,15 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 			//TODO: Datasheet has some hints about how long decoding takes in the form of how long DECI is asserted
 			context->decode_end = context->cycle + 2352 * context->clock_step * 4;
 		}
+	} else {
+		if (sync_ignored) {
+			context->regs[STAT0] |= BIT_SBLK;
+		}
+		if (context->sector_counter == 2352) {
+			context->regs[STAT0] |= BIT_LBLK;
+		}
 	}
-	if (sector_offset >= 12 && sector_offset < 16) {
+	if (context->sector_counter < 4) {
 		//TODO: Handle SHDREN = 1
 		if ((context->ctrl0 & (BIT_DECEN|BIT_WRRQ)) == (BIT_DECEN)) {
 			//monitor only mode

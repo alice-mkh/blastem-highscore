@@ -543,6 +543,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 		for (; context->cycle < cd_cycle; context->cycle += CDD_MCU_DIVIDER) {
 			if (context->cycle >= context->next_byte_cycle) {
 				cdd_fader_data(fader, 0);
+				lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), 0, 0);
 				context->next_byte_cycle += BYTE_CLOCKS;
 			}
 		}
@@ -631,6 +632,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 				lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), context->current_sector_byte++, byte);
 				cdd_fader_data(fader, gate_array[GAO_CDD_CTRL] & BIT_MUTE ? 0 : byte);
 			} else {
+				lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), 0, 0);
 				cdd_fader_data(fader, 0);
 				if (context->current_sector_byte >= 0) {
 					next_subcode += BYTE_CLOCKS;
