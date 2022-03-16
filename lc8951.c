@@ -276,6 +276,7 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 	uint16_t current_write_addr = context->regs[WAL] | (context->regs[WAH] << 8);
 
 	context->sector_counter++;
+	context->sector_counter &= 0xFFF;
 	uint8_t sync_detected = 0, sync_ignored = 0;
 	if (byte == 0) {
 		if (context->sync_counter == 11 && ((sector_offset & 3) == 3)) {
@@ -321,8 +322,8 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 				context->regs[PTH] = block_start >> 8;
 			}
 			printf("Decoding block starting at %X (WRRQ: %d)\n", context->regs[PTL] | (context->regs[PTH] << 8), !!(context->ctrl0 & BIT_WRRQ));
-			//TODO: Datasheet has some hints about how long decoding takes in the form of how long DECI is asserted
-			context->decode_end = context->cycle + 2352 * context->clock_step * 4;
+			//Based on measurements of a Wondermega M1 (LC8951) with SYDEN, SYIEN and DECEN only
+			context->decode_end = context->cycle + 22030 * context->clock_step;
 		}
 	} else {
 		if (sync_ignored) {
@@ -355,11 +356,11 @@ uint32_t lc8951_next_interrupt(lc8951 *context)
 		return context->cycle;
 	}
 	uint32_t deci_cycle = CYCLE_NEVER;
-	if (context->ifctrl & BIT_DECI) {
+	if (context->ifctrl & BIT_DECIEN) {
 		deci_cycle = context->decode_end;
 	}
 	uint32_t dtei_cycle = CYCLE_NEVER;
-	if (context->ifctrl & BIT_DTEI) {
+	if (context->ifctrl & BIT_DTEIEN) {
 		dtei_cycle = context->transfer_end;
 	}
 	return deci_cycle < dtei_cycle ? deci_cycle : dtei_cycle;

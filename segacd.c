@@ -502,6 +502,11 @@ static void calculate_target_cycle(m68k_context * context)
 		uint32_t before = context->target_cycle - 2 * cd->cdc.clock_step;
 		if (before > context->current_cycle) {
 			context->target_cycle = context->sync_cycle = before;
+		} else {
+			before = context->target_cycle - cd->cdc.clock_step;
+			if (before > context->current_cycle) {
+				context->target_cycle = context->sync_cycle = before;
+			}
 		}
 	}
 }
