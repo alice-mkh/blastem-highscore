@@ -785,32 +785,23 @@ int run_debugger_command(m68k_context *context, uint32_t address, char *input_bu
 		case 'b':
 			if (input_buf[1] == 't') {
 				uint32_t stack = context->aregs[7];
-				if (stack >= 0xE00000) {
-					stack &= 0xFFFF;
-					uint8_t non_adr_count = 0;
-					do {
-						uint32_t bt_address = system->work_ram[stack/2] << 16 | system->work_ram[stack/2+1];
-						bt_address = get_instruction_start(context->options, bt_address - 2);
-						if (bt_address) {
-							stack += 4;
-							non_adr_count = 0;
-							uint16_t *bt_pc = NULL;
-							if (bt_address < 0x400000) {
-								bt_pc = system->cart + bt_address/2;
-							} else if(bt_address > 0xE00000) {
-								bt_pc = system->work_ram + (bt_address & 0xFFFF)/2;
-							}
-							m68k_decode(bt_pc, &inst, bt_address);
-							m68k_disasm(&inst, input_buf);
-							printf("%X: %s\n", bt_address, input_buf);
-						} else {
-							//non-return address value on stack can be word wide
-							stack += 2;
-							non_adr_count++;
-						}
-						stack &= 0xFFFF;
-					} while (stack && non_adr_count < 6);
-				}
+				uint8_t non_adr_count = 0;
+				do {
+					uint32_t bt_address = m68k_instruction_fetch(stack, context);
+					bt_address = get_instruction_start(context->options, bt_address - 2);
+					if (bt_address) {
+						stack += 4;
+						non_adr_count = 0;
+						m68k_decode(m68k_instruction_fetch, context, &inst, bt_address);
+						m68k_disasm(&inst, input_buf);
+						printf("%X: %s\n", bt_address, input_buf);
+					} else {
+						//non-return address value on stack can be word wide
+						stack += 2;
+						non_adr_count++;
+					}
+					//TODO: Make sure we don't wander into an invalid memory region
+				} while (stack && non_adr_count < 6);
 			} else {
 				param = find_param(input_buf);
 				if (!param) {
@@ -1126,12 +1117,7 @@ void debugger(m68k_context * context, uint32_t address)
 		root->branch_t = root->branch_f = 0;
 	}
 
-	uint16_t * pc = get_native_pointer(address, (void **)context->mem_pointers, &context->options->gen);
-	if (!pc) {
-		fatal_error("Entered 68K debugger at address %X\n", address);
-	}
-	uint16_t * after_pc = m68k_decode(pc, &inst, address);
-	uint32_t after = address + (after_pc-pc)*2;
+	uint32_t after = m68k_decode(m68k_instruction_fetch, context, &inst, address);
 	int debugging = 1;
 	//Check if this is a user set breakpoint, or just a temporary one
 	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address);

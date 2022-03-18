@@ -186,12 +186,7 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 		}
 		m68kinst inst;
 		genesis_context *gen = context->system;
-		uint16_t * pc_ptr = get_native_pointer(pc, (void **)context->mem_pointers, &context->options->gen);
-		if (!pc_ptr) {
-			fatal_error("Entered gdb remote debugger stub at address %X\n", pc);
-		}
-		uint16_t * after_pc = m68k_decode(pc_ptr, &inst, pc & 0xFFFFFF);
-		uint32_t after = pc + (after_pc-pc_ptr)*2;
+		uint32_t after = m68k_decode(m68k_instruction_fetch, context, &inst, pc & 0xFFFFFF);
 
 		if (inst.op == M68K_RTS) {
 			after = (read_dma_value(context->aregs[7]/2) << 16) | read_dma_value(context->aregs[7]/2 + 1);
@@ -414,12 +409,7 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 			case 'S': {
 				m68kinst inst;
 				genesis_context *gen = context->system;
-				uint16_t * pc_ptr = get_native_pointer(pc, (void **)context->mem_pointers, &context->options->gen);
-				if (!pc_ptr) {
-					fatal_error("Entered gdb remote debugger stub at address %X\n", pc);
-				}
-				uint16_t * after_pc = m68k_decode(pc_ptr, &inst, pc & 0xFFFFFF);
-				uint32_t after = pc + (after_pc-pc_ptr)*2;
+				uint32_t after = m68k_decode(m68k_instruction_fetch, context, &inst, pc & 0xFFFFFF);
 
 				if (inst.op == M68K_RTS) {
 					after = (read_dma_value(context->aregs[7]/2) << 16) | read_dma_value(context->aregs[7]/2 + 1);

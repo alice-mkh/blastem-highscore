@@ -92,6 +92,7 @@ void log_address(cpu_options *opts, uint32_t address, char * format);
 
 void retranslate_calc(cpu_options *opts);
 void patch_for_retranslate(cpu_options *opts, code_ptr native_address, code_ptr handler);
+void defer_translation(cpu_options *opts, uint32_t address, code_ptr handler);
 
 code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t num_chunks, ftype fun_type, code_ptr *after_inc);
 void * get_native_pointer(uint32_t address, void ** mem_pointers, cpu_options * opts);

@@ -768,6 +768,7 @@ uint8_t m68k_is_terminal(m68kinst * inst)
 {
 	return inst->op == M68K_RTS || inst->op == M68K_RTE || inst->op == M68K_RTR || inst->op == M68K_JMP
 		|| inst->op == M68K_TRAP || inst->op == M68K_ILLEGAL || inst->op == M68K_INVALID
+		|| inst->op == M68K_F_LINE_TRAP || inst->op == M68K_A_LINE_TRAP
 		|| (inst->op == M68K_BCC && inst->extra.cond == COND_TRUE);
 }
 
@@ -1006,6 +1007,12 @@ static void translate_m68k(m68k_context *context, m68kinst * inst)
 	}
 }
 
+uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext)
+{
+	m68k_context *context = vcontext;
+	return read_word(address, (void **)context->mem_pointers, &context->options->gen, context);
+}
+
 void translate_m68k_stream(uint32_t address, m68k_context * context)
 {
 	m68kinst instbuf;
@@ -1014,32 +1021,36 @@ void translate_m68k_stream(uint32_t address, m68k_context * context)
 	if(get_native_address(opts, address)) {
 		return;
 	}
-	uint16_t *encoded, *next;
+	memmap_chunk const *starting_chunk = NULL;
+	uint32_t next_address;
 	do {
 		if (opts->address_log) {
 			fprintf(opts->address_log, "%X\n", address);
 			fflush(opts->address_log);
 		}
 		do {
-			encoded = get_native_pointer(address, (void **)context->mem_pointers, &opts->gen);
-			if (!encoded) {
-				code_ptr start = code->cur;
-				translate_out_of_bounds(opts, address);
-				code_ptr after = code->cur;
-				map_native_address(context, address, start, 2, after-start);
-				break;
-			}
 			code_ptr existing = get_native_address(opts, address);
 			if (existing) {
 				jmp(code, existing);
 				break;
 			}
-			next = m68k_decode(encoded, &instbuf, address);
-			if (instbuf.op == M68K_INVALID) {
-				instbuf.src.params.immed = *encoded;
+			memmap_chunk const *chunk = find_map_chunk(address, &opts->gen, 0, NULL);
+			if (!starting_chunk) {
+				starting_chunk = chunk;
+			} else if (starting_chunk != chunk) {
+				if (chunk->flags & MMAP_CODE) {
+					code_ptr start = code->cur;
+					defer_translation(&opts->gen, address, opts->retrans_stub);
+					code_ptr after = code->cur;
+					map_native_address(context, address, start, 2, after-start);
+					break;
+				} else {
+					starting_chunk = chunk;
+				}
 			}
-			uint16_t m68k_size = (next-encoded)*2;
-			address += m68k_size;
+			next_address = m68k_decode(m68k_instruction_fetch, context, &instbuf, address);
+			uint16_t m68k_size = next_address - address;
+			address = next_address;
 			//char disbuf[1024];
 			//m68k_disasm(&instbuf, disbuf);
 			//printf("%X: %s\n", instbuf.address, disbuf);
@@ -1066,9 +1077,8 @@ void * m68k_retranslate_inst(uint32_t address, m68k_context * context)
 	code_ptr orig_start = get_native_address(context->options, address);
 	uint32_t orig = address;
 	code_info orig_code = {orig_start, orig_start + orig_size + 5, 0};
-	uint16_t *after, *inst = get_native_pointer(address, (void **)context->mem_pointers, &opts->gen);
 	m68kinst instbuf;
-	after = m68k_decode(inst, &instbuf, orig);
+	uint32_t after_address = m68k_decode(m68k_instruction_fetch, context, &instbuf, orig);
 	if (orig_size != MAX_NATIVE_SIZE) {
 		deferred_addr * orig_deferred = opts->gen.deferred;
 
@@ -1103,13 +1113,13 @@ void * m68k_retranslate_inst(uint32_t address, m68k_context * context)
 			}
 		}*/
 
-		map_native_address(context, instbuf.address, native_start, (after-inst)*2, MAX_NATIVE_SIZE);
+		map_native_address(context, instbuf.address, native_start, after_address - orig, MAX_NATIVE_SIZE);
 
 		jmp(&orig_code, native_start);
 		if (!m68k_is_terminal(&instbuf)) {
 			code_ptr native_end = code->cur;
 			code->cur = native_start + MAX_NATIVE_SIZE;
-			code_ptr rest = get_native_address_trans(context, orig + (after-inst)*2);
+			code_ptr rest = get_native_address_trans(context, after_address);
 			code_info tmp_code = {
 				.cur = native_end,
 				.last = native_start + MAX_NATIVE_SIZE,
@@ -1128,7 +1138,7 @@ void * m68k_retranslate_inst(uint32_t address, m68k_context * context)
 		orig_code = *code;
 		*code = tmp;
 		if (!m68k_is_terminal(&instbuf)) {
-			jmp(&orig_code, get_native_address_trans(context, orig + (after-inst)*2));
+			jmp(&orig_code, get_native_address_trans(context, after_address));
 		}
 		m68k_handle_deferred(context);
 		return orig_start;

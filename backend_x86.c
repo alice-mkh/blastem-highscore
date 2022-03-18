@@ -64,6 +64,12 @@ void patch_for_retranslate(cpu_options *opts, code_ptr native_address, code_ptr 
 	jmp(&tmp, handler);
 }
 
+void defer_translation(cpu_options *opts, uint32_t address, code_ptr handler)
+{
+	mov_ir(&opts->code, address, opts->scratch1, SZ_D);
+	jmp(&opts->code, handler);
+}
+
 void check_cycles(cpu_options * opts)
 {
 	code_info *code = &opts->code;

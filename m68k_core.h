@@ -121,6 +121,7 @@ void m68k_print_regs(m68k_context * context);
 void m68k_invalidate_code_range(m68k_context *context, uint32_t start, uint32_t end);
 void m68k_serialize(m68k_context *context, uint32_t pc, serialize_buffer *buf);
 void m68k_deserialize(deserialize_buffer *buf, void *vcontext);
+uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext);
 
 #endif //M68K_CORE_H_
 
