@@ -146,6 +146,21 @@ char * strip_ws(char * text)
 	return ret;
 }
 
+typedef struct {
+	uint32_t address_off;
+	uint32_t address_end;
+	uint16_t *buffer;
+} rom_def;
+
+uint16_t fetch(uint32_t address, void *data)
+{
+	rom_def *rom = data;
+	if (address >= rom->address_off && address < rom->address_end) {
+		return rom->buffer[((address & 0xFFFFFF) - rom->address_off) >> 1];
+	}
+	return 0;
+}
+
 int main(int argc, char ** argv)
 {
 	long filesize;
@@ -407,6 +422,12 @@ int main(int argc, char ** argv)
 				def = defer(int_4, def);
 				def = defer(int_6, def);
 			}
+			named_labels = weak_label(named_labels, "illegal_inst", filebuf[0x10/2] << 16 | filebuf[0x12/2]);
+			named_labels = weak_label(named_labels, "div_zero", filebuf[0x14/2] << 16 | filebuf[0x16/2]);
+			named_labels = weak_label(named_labels, "chk_exception", filebuf[0x18/2] << 16 | filebuf[0x1A/2]);
+			named_labels = weak_label(named_labels, "trapv", filebuf[0x1C/2] << 16 | filebuf[0x1E/2]);
+			named_labels = weak_label(named_labels, "line_a_trap", filebuf[0x28/2] << 16 | filebuf[0x2A/2]);
+			named_labels = weak_label(named_labels, "line_f_trap", filebuf[0x2C/2] << 16 | filebuf[0x2E/2]);
 		}
 	}
 	if (do_cd_labels) {
@@ -565,24 +586,29 @@ int main(int argc, char ** argv)
 			named_labels = weak_label(named_labels, "CDD_CTRL_BYTE", 0xFFFF8037);
 		}
 	}
-	uint16_t *encoded, *next;
 	uint32_t size, tmp_addr;
 	uint32_t address;
+	rom_def rom = {
+		.address_off = address_off,
+		.address_end = address_end,
+		.buffer = filebuf
+	};
+	uint8_t valid_address;
 	while(def) {
 		do {
-			encoded = NULL;
+			valid_address = 0;
 			address = def->address;
 			if (!is_visited(address)) {
 				address &= 0xFFFFFF;
-				if (address < address_end) {
-					encoded = filebuf + ((address & 0xFFFFFF) - address_off)/2;
+				if (address < address_end && address >= address_off) {
+					valid_address = 1;
 				}
 			}
 			tmpd = def;
 			def = def->next;
 			free(tmpd);
-		} while(def && encoded == NULL);
-		if (!encoded) {
+		} while(def && !valid_address);
+		if (!valid_address) {
 			break;
 		}
 		for(;;) {
@@ -590,9 +616,7 @@ int main(int argc, char ** argv)
 				break;
 			}
 			visit(address);
-			next = m68k_decode(encoded, &instbuf, address);
-			address += (next-encoded)*2;
-			encoded = next;
+			address = m68k_decode(fetch, &rom, &instbuf, address);
 			//m68k_disasm(&instbuf, disbuf);
 			//printf("%X: %s\n", instbuf.address, disbuf);
 			check_reference(&instbuf, &(instbuf.src));
@@ -603,7 +627,6 @@ int main(int argc, char ** argv)
 			if (instbuf.op == M68K_BCC || instbuf.op == M68K_DBCC || instbuf.op == M68K_BSR) {
 				if (instbuf.op == M68K_BCC && instbuf.extra.cond == COND_TRUE) {
 					address = instbuf.address + 2 + instbuf.src.params.immed;
-					encoded = filebuf + (address - address_off)/2;
 					reference(address);
 					if (is_visited(address)) {
 						break;
@@ -616,13 +639,11 @@ int main(int argc, char ** argv)
 			} else if(instbuf.op == M68K_JMP) {
 				if (instbuf.src.addr_mode == MODE_ABSOLUTE || instbuf.src.addr_mode == MODE_ABSOLUTE_SHORT) {
 					address = instbuf.src.params.immed;
-					encoded = filebuf + (address - address_off)/2;
 					if (is_visited(address)) {
 						break;
 					}
 				} else if (instbuf.src.addr_mode == MODE_PC_DISPLACE) {
 					address = instbuf.src.params.regs.displacement + instbuf.address + 2;
-					encoded = filebuf + (address - address_off)/2;
 					if (is_visited(address)) {
 						break;
 					}
@@ -673,8 +694,7 @@ int main(int argc, char ** argv)
 	}
 	for (address = address_off; address < address_end; address+=2) {
 		if (is_visited(address)) {
-			encoded = filebuf + (address-address_off)/2;
-			m68k_decode(encoded, &instbuf, address);
+			m68k_decode(fetch, &rom, &instbuf, address);
 			if (labels) {
 				m68k_disasm_labels(&instbuf, disbuf, label_fun, named_labels);
 				char keybuf[MAX_INT_KEY_SIZE];
