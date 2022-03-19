@@ -551,14 +551,16 @@ static void calculate_target_cycle(m68k_context * context)
 		return;
 	}
 	context->target_cycle = context->sync_cycle < context->int_cycle ? context->sync_cycle : context->int_cycle;
-	if (context->target_cycle == cdc_cycle && context->int_num == 5) {
+	if (context->int_cycle == cdc_cycle && context->int_num == 5) {
 		uint32_t before = context->target_cycle - 2 * cd->cdc.clock_step;
-		if (before > context->current_cycle) {
-			context->target_cycle = context->sync_cycle = before;
-		} else {
-			before = context->target_cycle - cd->cdc.clock_step;
+		if (before < context->target_cycle) {
 			if (before > context->current_cycle) {
 				context->target_cycle = context->sync_cycle = before;
+			} else {
+				before = context->target_cycle - cd->cdc.clock_step;
+				if (before > context->current_cycle) {
+					context->target_cycle = context->sync_cycle = before;
+				}
 			}
 		}
 	}
