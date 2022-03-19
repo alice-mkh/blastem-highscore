@@ -166,7 +166,12 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 			and_ir(code, memmap[chunk].mask, adr_reg, opts->address_size);
 		}
 		code_ptr after_normal = NULL;
+		uint8_t need_addr_pop = 0;
 		if (size == SZ_B && memmap[chunk].shift != 0) {
+			if (is_write && (memmap[chunk].flags & MMAP_CODE)) {
+				push_r(code, adr_reg);
+				need_addr_pop = 1;
+			}
 			btr_ir(code, 0, adr_reg, opts->address_size);
 			code_ptr normal = code->cur+1;
 			jcc(code, CC_NC, normal);
@@ -181,8 +186,16 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 			*normal = code->cur - (normal + 1);
 		}
 		if (memmap[chunk].shift > 0) {
+			if (!need_addr_pop && is_write && (memmap[chunk].flags & MMAP_CODE)) {
+				push_r(code, adr_reg);
+				need_addr_pop = 1;
+			}
 			shl_ir(code, memmap[chunk].shift, adr_reg, opts->address_size);
 		} else if (memmap[chunk].shift < 0) {
+			if (!need_addr_pop && is_write && (memmap[chunk].flags & MMAP_CODE)) {
+				push_r(code, adr_reg);
+				need_addr_pop = 1;
+			}
 			shr_ir(code, -memmap[chunk].shift, adr_reg, opts->address_size);
 		}
 		if (after_normal) {
@@ -232,15 +245,13 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 				if (opts->address_size != SZ_D) {
 					movzx_rr(code, adr_reg, adr_reg, opts->address_size, SZ_D);
 				}
-				if (is_write && (memmap[chunk].flags & MMAP_CODE)) {
+				if (!need_addr_pop && is_write && (memmap[chunk].flags & MMAP_CODE)) {
 					push_r(code, adr_reg);
+					need_addr_pop = 1;
 				}
 				add_rdispr(code, opts->context_reg, opts->mem_ptr_off + sizeof(void*) * memmap[chunk].ptr_index, adr_reg, SZ_PTR);
 				if (is_write) {
 					mov_rrind(code, opts->scratch1, opts->scratch2, size);
-					if (memmap[chunk].flags & MMAP_CODE) {
-						pop_r(code, adr_reg);
-					}
 				} else {
 					mov_rindr(code, opts->scratch1, opts->scratch1, size);
 				}
@@ -283,7 +294,7 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 						add_rdispr(code, RSP, 0, opts->scratch2, SZ_PTR);
 						mov_rrind(code, opts->scratch1, opts->scratch2, tmp_size);
 						if (is_write && (memmap[chunk].flags & MMAP_CODE)) {
-							pop_r(code, opts->scratch2);
+							need_addr_pop = 1;
 						} else {
 							add_ir(code, sizeof(void*), RSP, SZ_PTR);
 							code->stack_off -= sizeof(void *);
@@ -305,6 +316,9 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 				}
 			}
 			if (is_write && (memmap[chunk].flags & MMAP_CODE)) {
+				if (need_addr_pop) {
+					pop_r(code, adr_reg);
+				}
 				mov_rr(code, opts->scratch2, opts->scratch1, opts->address_size);
 				shr_ir(code, opts->ram_flags_shift, opts->scratch1, opts->address_size);
 				bt_rrdisp(code, opts->scratch1, opts->context_reg, ram_flags_off, opts->address_size);

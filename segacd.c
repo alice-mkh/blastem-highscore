@@ -157,6 +157,7 @@ static void *word_ram_2M_write8(uint32_t address, void *vcontext, uint8_t value)
 	m68k_context *m68k = vcontext;
 	segacd_context *cd = m68k->system;
 	if (!(cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE)) {
+		//TODO: Confirm this first write goes through (seemed like it in initial testing)
 		if (address & 1) {
 			address >>= 1;
 			cd->word_ram[address] &= 0xFF00;
@@ -166,6 +167,7 @@ static void *word_ram_2M_write8(uint32_t address, void *vcontext, uint8_t value)
 			cd->word_ram[address] &= 0x00FF;
 			cd->word_ram[address] |= value << 8;
 		}
+		m68k_invalidate_code_range(cd->genesis->m68k, cd->base + 0x200000 + (address & ~1), cd->base + 0x200000 + (address & ~1) + 1);
 		cd->sub_paused_wordram = 1;
 		m68k->sync_cycle = m68k->target_cycle = m68k->current_cycle;
 		m68k->should_return = 1;
@@ -207,6 +209,7 @@ static void *word_ram_2M_write16(uint32_t address, void *vcontext, uint16_t valu
 
 static uint16_t word_ram_1M_read16(uint32_t address, void *vcontext)
 {
+	//TODO: check behavior for these on hardware
 	return 0;
 }
 
@@ -300,7 +303,7 @@ static void *unmapped_word_write8(uint32_t address, void *vcontext, uint8_t valu
 			cd->word_ram[address + cd->bank_toggle] &= 0xFF;
 			cd->word_ram[address + cd->bank_toggle] |= value << 8;
 		}
-		m68k_invalidate_code_range(m68k, cd->base + 0x200000 + (address & ~1), cd->base + 0x200000 + address + 1);
+		m68k_invalidate_code_range(m68k, cd->base + 0x200000 + (address & ~1), cd->base + 0x200000 + (address & ~1) + 1);
 	}
 	return vcontext;
 }
@@ -362,6 +365,7 @@ static void *cell_image_write16(uint32_t address, void *vcontext, uint16_t value
 	if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
 		address = cell_image_translate_address(address);
 		cd->word_ram[address + cd->bank_toggle] = value;
+		m68k_invalidate_code_range(m68k, cd->base + 0x200000 + address, cd->base + 0x200000 + address + 1);
 	}
 	return vcontext;
 }
@@ -381,6 +385,7 @@ static void *cell_image_write8(uint32_t address, void *vcontext, uint8_t value)
 			cd->word_ram[address + cd->bank_toggle] &= 0x00FF;
 			cd->word_ram[address + cd->bank_toggle] |= value << 8;
 		}
+		m68k_invalidate_code_range(m68k, cd->base + 0x200000 + address, cd->base + 0x200000 + address + 1);
 	}
 	return vcontext;
 }
