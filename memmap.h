@@ -29,6 +29,7 @@ typedef struct {
 	uint32_t     end;
 	uint32_t     mask;
 	uint32_t     aux_mask;
+	int32_t      shift;
 	uint16_t     ptr_index;
 	uint16_t     flags;
 	void *       buffer;

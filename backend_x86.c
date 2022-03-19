@@ -165,6 +165,29 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 		if (memmap[chunk].mask != opts->address_mask) {
 			and_ir(code, memmap[chunk].mask, adr_reg, opts->address_size);
 		}
+		code_ptr after_normal = NULL;
+		if (size == SZ_B && memmap[chunk].shift != 0) {
+			btr_ir(code, 0, adr_reg, opts->address_size);
+			code_ptr normal = code->cur+1;
+			jcc(code, CC_NC, normal);
+			if (memmap[chunk].shift > 0) {
+				shl_ir(code, memmap[chunk].shift, adr_reg, opts->address_size);
+			} else {
+				shr_ir(code, -memmap[chunk].shift, adr_reg, opts->address_size);
+			}
+			or_ir(code, 1, adr_reg, opts->address_size);
+			after_normal = code->cur + 1;
+			jmp(code, after_normal);
+			*normal = code->cur - (normal + 1);
+		}
+		if (memmap[chunk].shift > 0) {
+			shl_ir(code, memmap[chunk].shift, adr_reg, opts->address_size);
+		} else if (memmap[chunk].shift < 0) {
+			shr_ir(code, -memmap[chunk].shift, adr_reg, opts->address_size);
+		}
+		if (after_normal) {
+			*after_normal = code->cur - (after_normal + 1);
+		}
 		void * cfun;
 		switch (fun_type)
 		{

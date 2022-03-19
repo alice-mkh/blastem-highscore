@@ -47,6 +47,7 @@ typedef struct {
 	uint8_t         main_has_word2m;
 	uint8_t         main_swap_request;
 	uint8_t         bank_toggle;
+	uint8_t         sub_paused_wordram;
 } segacd_context;
 
 segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8_t force_region, rom_info *info);

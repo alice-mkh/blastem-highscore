@@ -131,12 +131,11 @@ static void *prog_ram_wp_write8(uint32_t address, void *vcontext, uint8_t value)
 static uint16_t word_ram_2M_read16(uint32_t address, void *vcontext)
 {
 	m68k_context *m68k = vcontext;
-	//TODO: fixme for interleaving
 	uint16_t* bank = m68k->mem_pointers[1];
 	if (!bank) {
 		return 0xFFFF;
 	}
-	uint16_t raw = bank[address >> 2];
+	uint16_t raw = bank[address >> 1 & ~1];
 	if (address & 2) {
 		return (raw & 0xF) | (raw << 4 & 0xF00);
 	} else {
@@ -157,30 +156,45 @@ static void *word_ram_2M_write8(uint32_t address, void *vcontext, uint8_t value)
 {
 	m68k_context *m68k = vcontext;
 	segacd_context *cd = m68k->system;
-	value &= 0xF;
-	uint16_t priority = cd->gate_array[GA_MEM_MODE] & MASK_PRIORITY;
+	if (!(cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE)) {
+		if (address & 1) {
+			address >>= 1;
+			cd->word_ram[address] &= 0xFF00;
+			cd->word_ram[address] |= value;
+		} else {
+		address >>= 1;
+			cd->word_ram[address] &= 0x00FF;
+			cd->word_ram[address] |= value << 8;
+		}
+		cd->sub_paused_wordram = 1;
+		m68k->sync_cycle = m68k->target_cycle = m68k->current_cycle;
+		m68k->should_return = 1;
+	} else {
+		value &= 0xF;
+		uint16_t priority = cd->gate_array[GA_MEM_MODE] & MASK_PRIORITY;
 
-	if (priority == BIT_OVERWRITE && !value) {
-		return vcontext;
-	}
-	if (priority == BIT_UNDERWRITE) {
-		if (!value) {
+		if (priority == BIT_OVERWRITE && !value) {
 			return vcontext;
 		}
-		uint8_t old = word_ram_2M_read8(address, vcontext);
-		if (old) {
+		if (priority == BIT_UNDERWRITE) {
+			if (!value) {
+				return vcontext;
+			}
+			uint8_t old = word_ram_2M_read8(address, vcontext);
+			if (old) {
+				return vcontext;
+			}
+		}
+		uint16_t* bank = m68k->mem_pointers[1];
+		if (!bank) {
 			return vcontext;
 		}
+		uint16_t raw = bank[address >> 1 & ~1];
+		uint16_t shift = ((address & 3) * 4);
+		raw &= ~(0xF000 >> shift);
+		raw |= value << (12 - shift);
+		bank[address >> 1 & ~1] = raw;
 	}
-	uint16_t* bank = m68k->mem_pointers[1];
-	if (!bank) {
-		return vcontext;
-	}
-	uint16_t raw = bank[address >> 2];
-	uint16_t shift = ((address & 3) * 4);
-	raw &= ~(0xF000 >> shift);
-	raw |= value << (12 - shift);
-	bank[address >> 2] = raw;
 	return vcontext;
 }
 
@@ -234,21 +248,60 @@ static void *unmapped_prog_write8(uint32_t address, void *vcontext, uint8_t valu
 
 static uint16_t unmapped_word_read16(uint32_t address, void *vcontext)
 {
-	return 0xFFFF;
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	segacd_context *cd = gen->expansion;
+	if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
+		return cd->word_ram[address + cd->bank_toggle];
+	} else {
+		return 0xFFFF;
+	}
 }
 
 static uint8_t unmapped_word_read8(uint32_t address, void *vcontext)
 {
-	return 0xFF;
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	segacd_context *cd = gen->expansion;
+	if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
+		if (address & 1) {
+			return cd->word_ram[(address & ~1) + cd->bank_toggle];
+		} else {
+			return cd->word_ram[address + cd->bank_toggle] >> 8;
+		}
+	} else {
+		return 0xFF;
+	}
 }
 
 static void *unmapped_word_write16(uint32_t address, void *vcontext, uint16_t value)
 {
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	segacd_context *cd = gen->expansion;
+	if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
+		cd->word_ram[address + cd->bank_toggle] = value;
+		m68k_invalidate_code_range(m68k, cd->base + address, address + 1);
+	}
 	return vcontext;
 }
 
 static void *unmapped_word_write8(uint32_t address, void *vcontext, uint8_t value)
 {
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	segacd_context *cd = gen->expansion;
+	if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
+		if (address & 1) {
+			uint32_t offset = (address & ~1) + cd->bank_toggle;
+			cd->word_ram[offset] &= 0xFF00;
+			cd->word_ram[offset] |= value;
+		} else {
+			cd->word_ram[address + cd->bank_toggle] &= 0xFF;
+			cd->word_ram[address + cd->bank_toggle] |= value << 8;
+		}
+		m68k_invalidate_code_range(m68k, cd->base + (address & ~1), address + 1);
+	}
 	return vcontext;
 }
 
@@ -286,10 +339,10 @@ static uint16_t cell_image_read16(uint32_t address, void *vcontext)
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
-	if (!m68k->mem_pointers[cd->memptr_start_index + 1]) {
+	if (!(cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE)) {
 		return 0xFFFF;
 	}
-	return m68k->mem_pointers[cd->memptr_start_index + 1][address>>1];
+	return cd->word_ram[address + cd->bank_toggle];
 }
 
 static uint8_t cell_image_read8(uint32_t address, void *vcontext)
@@ -303,12 +356,12 @@ static uint8_t cell_image_read8(uint32_t address, void *vcontext)
 
 static void *cell_image_write16(uint32_t address, void *vcontext, uint16_t value)
 {
-	address = cell_image_translate_address(address);
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
-	if (m68k->mem_pointers[cd->memptr_start_index + 1]) {
-		m68k->mem_pointers[cd->memptr_start_index + 1][address>>1] = value;
+	if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
+		address = cell_image_translate_address(address);
+		cd->word_ram[address + cd->bank_toggle] = value;
 	}
 	return vcontext;
 }
@@ -320,13 +373,13 @@ static void *cell_image_write8(uint32_t address, void *vcontext, uint8_t value)
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
-	if (m68k->mem_pointers[cd->memptr_start_index + 1]) {
+	if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
 		if (byte) {
-			m68k->mem_pointers[cd->memptr_start_index + 1][address>>1] &= 0xFF00;
-			m68k->mem_pointers[cd->memptr_start_index + 1][address>>1] |= value;
+			cd->word_ram[address + cd->bank_toggle] &= 0xFF00;
+			cd->word_ram[address + cd->bank_toggle] |= value;
 		} else {
-			m68k->mem_pointers[cd->memptr_start_index + 1][address>>1] &= 0x00FF;
-			m68k->mem_pointers[cd->memptr_start_index + 1][address>>1] |= value << 8;
+			cd->word_ram[address + cd->bank_toggle] &= 0x00FF;
+			cd->word_ram[address + cd->bank_toggle] |= value << 8;
 		}
 	}
 	return vcontext;
@@ -624,14 +677,13 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		genesis_context *gen = cd->genesis;
 		cd->gate_array[reg] &= 0xFFC0;
 		if (changed & BIT_MEM_MODE) {
-			//FIXME: ram banks are supposed to be interleaved when in 2M mode
 			cd->main_swap_request = cd->bank_toggle && !old_bank_toggle;
 			if (value & BIT_MEM_MODE) {
 				//switch to 1M mode
-				gen->m68k->mem_pointers[cd->memptr_start_index + 1] = (value & BIT_RET) ? cd->word_ram + 0x10000 : cd->word_ram;
+				gen->m68k->mem_pointers[cd->memptr_start_index + 1] = NULL; //(value & BIT_RET) ? cd->word_ram + 0x10000 : cd->word_ram;
 				gen->m68k->mem_pointers[cd->memptr_start_index + 2] = NULL;
 				m68k->mem_pointers[0] = NULL;
-				m68k->mem_pointers[1] = cd->bank_toggle ? cd->word_ram : cd->word_ram + 0x10000;
+				m68k->mem_pointers[1] = cd->bank_toggle ? cd->word_ram : cd->word_ram + 1;
 				cd->gate_array[reg] |= value & (MASK_PRIORITY|BIT_RET|BIT_MEM_MODE);
 				if (cd->main_swap_request) {
 					cd->gate_array[reg] |= BIT_DMNA;
@@ -659,8 +711,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		} else if (value & BIT_MEM_MODE) {
 			//1M mode
 			if (old_bank_toggle != cd->bank_toggle) {
-				gen->m68k->mem_pointers[cd->memptr_start_index + 1] = (value & BIT_RET) ? cd->word_ram + 0x10000 : cd->word_ram;
-				m68k->mem_pointers[1] = (value & BIT_RET) ? cd->word_ram : cd->word_ram + 0x10000;
+				m68k->mem_pointers[1] = (value & BIT_RET) ? cd->word_ram : cd->word_ram + 1;
 				m68k_invalidate_code_range(gen->m68k, cd->base + 0x200000, cd->base + 0x240000);
 				m68k_invalidate_code_range(m68k, 0x080000, 0x0E0000);
 				cd->main_swap_request = 0;
@@ -920,8 +971,8 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 	case DST_WORD_RAM:
 		if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
 			//1M mode, write to bank assigned to Sub CPU
-			dma_addr &= (1 << 17) - 1;
-			cd->m68k->mem_pointers[1][dma_addr >> 1] = cd->gate_array[GA_CDC_HOST_DATA];
+			dma_addr &= (1 << 17) - 2;
+			cd->m68k->mem_pointers[1][dma_addr] = cd->gate_array[GA_CDC_HOST_DATA];
 			m68k_invalidate_code_range(cd->m68k, 0x0C0000 + dma_addr - 1, 0x0C0000 + dma_addr + 1);
 		} else {
 			//2M mode, check if Sub CPU has access
@@ -1001,7 +1052,7 @@ void scd_run(segacd_context *cd, uint32_t cycle)
 {
 	uint8_t m68k_run = !can_main_access_prog(cd);
 	while (cycle > cd->m68k->current_cycle) {
-		if (m68k_run) {
+		if (m68k_run && !cd->sub_paused_wordram) {
 			uint32_t start = cd->m68k->current_cycle;
 			cd->m68k->sync_cycle = cd->enter_debugger ? cd->m68k->current_cycle + 1 : cycle;
 			if (cd->need_reset) {
@@ -1202,6 +1253,9 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 				cd->m68k->mem_pointers[0] = cd->word_ram;
 				cd->gate_array[reg] &= ~BIT_RET;
 				cd->main_has_word2m = 0;
+				if (cd->sub_paused_wordram) {
+					cd->sub_paused_wordram = 0;
+				}
 
 				uint16_t dst = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
 				if (dst == DST_WORD_RAM) {
@@ -1289,7 +1343,7 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 		{0x080000, 0x0C0000, 0x03FFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE | MMAP_PTR_IDX | MMAP_FUNC_NULL, .ptr_index = 0,
 			.read_16 = word_ram_2M_read16, .write_16 = word_ram_2M_write16, .read_8 = word_ram_2M_read8, .write_8 = word_ram_2M_write8},
 		{0x0C0000, 0x0E0000, 0x01FFFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_CODE | MMAP_PTR_IDX | MMAP_FUNC_NULL, .ptr_index = 1,
-			.read_16 = word_ram_1M_read16, .write_16 = word_ram_1M_write16, .read_8 = word_ram_1M_read8, .write_8 = word_ram_1M_write8},
+			.read_16 = word_ram_1M_read16, .write_16 = word_ram_1M_write16, .read_8 = word_ram_1M_read8, .write_8 = word_ram_1M_write8, .shift = 1},
 		{0xFE0000, 0xFF0000, 0x003FFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_ONLY_ODD},
 		{0xFF0000, 0xFF8000, 0x003FFF, .read_16 = pcm_read16, .write_16 = pcm_write16, .read_8 = pcm_read8, .write_8 = pcm_write8},
 		{0xFF8000, 0xFF8200, 0x0001FF, .read_16 = sub_gate_read16, .write_16 = sub_gate_write16, .read_8 = sub_gate_read8, .write_8 = sub_gate_write8}

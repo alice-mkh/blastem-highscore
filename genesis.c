@@ -1799,11 +1799,11 @@ static void *tmss_even_write_8(uint32_t address, void *context, uint8_t value)
 static genesis_context *shared_init(uint32_t system_opts, rom_info *rom, uint8_t force_region)
 {
 	static memmap_chunk z80_map[] = {
-		{ 0x0000, 0x4000,  0x1FFF, 0, 0, MMAP_READ | MMAP_WRITE | MMAP_CODE, NULL, NULL, NULL, NULL,              NULL },
-		{ 0x8000, 0x10000, 0x7FFF, 0, 0, 0,                                  NULL, NULL, NULL, z80_read_bank,     z80_write_bank},
-		{ 0x4000, 0x6000,  0x0003, 0, 0, 0,                                  NULL, NULL, NULL, z80_read_ym,       z80_write_ym},
-		{ 0x6000, 0x6100,  0xFFFF, 0, 0, 0,                                  NULL, NULL, NULL, NULL,              z80_write_bank_reg},
-		{ 0x7F00, 0x8000,  0x00FF, 0, 0, 0,                                  NULL, NULL, NULL, z80_vdp_port_read, z80_vdp_port_write}
+		{ 0x0000, 0x4000,  0x1FFF, .flags = MMAP_READ | MMAP_WRITE | MMAP_CODE},
+		{ 0x8000, 0x10000, 0x7FFF, .read_8 = z80_read_bank, .write_8 = z80_write_bank},
+		{ 0x4000, 0x6000,  0x0003, .read_8 = z80_read_ym, .write_8 = z80_write_ym},
+		{ 0x6000, 0x6100,  0xFFFF, .write_8 = z80_write_bank_reg},
+		{ 0x7F00, 0x8000,  0x00FF, .read_8 = z80_vdp_port_read, .write_8 = z80_vdp_port_write}
 	};
 
 	char *m68k_divider = tern_find_path(config, "clocks\0m68k_divider\0", TVAL_PTR).ptrval;
@@ -1926,17 +1926,13 @@ static genesis_context *shared_init(uint32_t system_opts, rom_info *rom, uint8_t
 }
 
 static memmap_chunk base_map[] = {
-	{0xE00000, 0x1000000, 0xFFFF,   0, 0, MMAP_READ | MMAP_WRITE | MMAP_CODE, NULL,
-			   NULL,          NULL,         NULL,            NULL},
-	{0xC00000, 0xE00000,  0x1FFFFF, 0, 0, 0,                                  NULL,
-			   (read_16_fun)vdp_port_read,  (write_16_fun)vdp_port_write,
-			   (read_8_fun)vdp_port_read_b, (write_8_fun)vdp_port_write_b},
-	{0xA00000, 0xA12000,  0x1FFFF,  0, 0, 0,                                  NULL,
-			   (read_16_fun)io_read_w,      (write_16_fun)io_write_w,
-			   (read_8_fun)io_read,         (write_8_fun)io_write},
-	{0x000000, 0xFFFFFF, 0xFFFFFF, 0, 0, 0,                                   NULL,
-			   (read_16_fun)unused_read,    (write_16_fun)unused_write,
-			   (read_8_fun)unused_read_b,   (write_8_fun)unused_write_b}
+	{0xE00000, 0x1000000, 0xFFFF, .flags = MMAP_READ | MMAP_WRITE | MMAP_CODE},
+	{0xC00000, 0xE00000,  0x1FFFFF, .read_16 = (read_16_fun)vdp_port_read,  .write_16 =(write_16_fun)vdp_port_write,
+			   .read_8 = (read_8_fun)vdp_port_read_b, .write_8 = (write_8_fun)vdp_port_write_b},
+	{0xA00000, 0xA12000,  0x1FFFF,  .read_16 = (read_16_fun)io_read_w, .write_16 = (write_16_fun)io_write_w,
+			   .read_8 = (read_8_fun)io_read, .write_8 = (write_8_fun)io_write},
+	{0x000000, 0xFFFFFF, 0xFFFFFF, .read_16 = (read_16_fun)unused_read, .write_16 = unused_write,
+			   .read_8 = (read_8_fun)unused_read_b, .write_8 = (write_8_fun)unused_write_b}
 };
 const size_t base_chunks = sizeof(base_map)/sizeof(*base_map);
 
