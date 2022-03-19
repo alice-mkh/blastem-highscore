@@ -740,6 +740,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		//cd->gate_array[reg] &= 0xC000;
 		//apparently this clears EDT, should it also clear DSR?
 		cd->gate_array[reg] = value & 0x0700;
+		cd->gate_array[GA_CDC_DMA_ADDR] = 0;
 		cd->cdc_dst_low = 0;
 		break;
 	case GA_CDC_REG_DATA:
@@ -747,6 +748,10 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		printf("CDC write %X: %X @ %u\n", cd->cdc.ar, value, m68k->current_cycle);
 		lc8951_reg_write(&cd->cdc, value);
 		calculate_target_cycle(m68k);
+		break;
+	case GA_CDC_HOST_DATA:
+		//writes to this register have the same side effects as reads
+		sub_gate_read16(address, vcontext);
 		break;
 	case GA_CDC_DMA_ADDR:
 		cdd_run(cd, m68k->current_cycle);
@@ -914,6 +919,12 @@ static void *sub_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	return sub_gate_write16(address, vcontext, value16);
 }
 
+static uint8_t can_main_access_prog(segacd_context *cd)
+{
+	//TODO: use actual busack
+	return cd->busreq || !cd->reset;
+}
+
 static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 {
 	segacd_context *cd = vsys;
@@ -962,6 +973,9 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		cd->gate_array[GA_CDC_DMA_ADDR] = dma_addr >> 3;
 		break;
 	case DST_PROG_RAM:
+		if (can_main_access_prog(cd)) {
+			return 0;
+		}
 		cd->prog_ram[dma_addr >> 1] = cd->gate_array[GA_CDC_HOST_DATA];
 		m68k_invalidate_code_range(cd->m68k, dma_addr - 1, dma_addr + 1);
 		dma_addr++;
@@ -971,9 +985,10 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 	case DST_WORD_RAM:
 		if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
 			//1M mode, write to bank assigned to Sub CPU
-			dma_addr &= (1 << 17) - 2;
-			cd->m68k->mem_pointers[1][dma_addr] = cd->gate_array[GA_CDC_HOST_DATA];
-			m68k_invalidate_code_range(cd->m68k, 0x0C0000 + dma_addr - 1, 0x0C0000 + dma_addr + 1);
+
+			uint32_t masked = dma_addr & (1 << 17) - 2;
+			cd->m68k->mem_pointers[1][masked] = cd->gate_array[GA_CDC_HOST_DATA];
+			m68k_invalidate_code_range(cd->m68k, 0x0C0000 + masked - 1, 0x0C0000 + masked + 1);
 		} else {
 			//2M mode, check if Sub CPU has access
 			if (cd->main_has_word2m) {
@@ -993,12 +1008,6 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		printf("Invalid CDC transfer destination %d\n", dest);
 	}
 	return 1;
-}
-
-static uint8_t can_main_access_prog(segacd_context *cd)
-{
-	//TODO: use actual busack
-	return cd->busreq || !cd->reset;
 }
 
 static void scd_peripherals_run(segacd_context *cd, uint32_t cycle)
@@ -1225,8 +1234,10 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 			m68k->mem_pointers[cd->memptr_start_index] = NULL;
 			m68k_invalidate_code_range(m68k, cd->base + 0x220000, cd->base + 0x240000);
 			m68k_invalidate_code_range(cd->m68k, bank * 0x20000, (bank + 1) * 0x20000);
-			if (!new_access) {
-				dump_prog_ram(cd);
+			dump_prog_ram(cd);
+			uint16_t dst = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
+			if (dst == DST_PROG_RAM) {
+				lc8951_resume_transfer(&cd->cdc, cd->cdc.cycle);
 			}
 		}
 		break;
@@ -1275,6 +1286,10 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	}
 	case GA_HINT_VECTOR:
 		cd->rom_mut[0x72/2] = value;
+		break;
+	case GA_CDC_HOST_DATA:
+		//writes to this register have the same side effects as reads
+		main_gate_read16(address, vcontext);
 		break;
 	case GA_COMM_FLAG:
 		//Main CPU can only write the upper byte;
