@@ -281,7 +281,7 @@ static void *unmapped_word_write16(uint32_t address, void *vcontext, uint16_t va
 	segacd_context *cd = gen->expansion;
 	if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
 		cd->word_ram[address + cd->bank_toggle] = value;
-		m68k_invalidate_code_range(m68k, cd->base + address, address + 1);
+		m68k_invalidate_code_range(m68k, cd->base + 0x200000 + address, cd->base + 0x200000 + address + 1);
 	}
 	return vcontext;
 }
@@ -300,7 +300,7 @@ static void *unmapped_word_write8(uint32_t address, void *vcontext, uint8_t valu
 			cd->word_ram[address + cd->bank_toggle] &= 0xFF;
 			cd->word_ram[address + cd->bank_toggle] |= value << 8;
 		}
-		m68k_invalidate_code_range(m68k, cd->base + (address & ~1), address + 1);
+		m68k_invalidate_code_range(m68k, cd->base + 0x200000 + (address & ~1), cd->base + 0x200000 + address + 1);
 	}
 	return vcontext;
 }
