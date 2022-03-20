@@ -569,7 +569,6 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			update_status(context, gate_array);
 			next_nibble = context->cycle + PROCESSING_DELAY;
 			context->current_status_nibble = 0;
-			gate_array[GAO_CDD_STATUS] |= BIT_DRS;
 			if (context->next_subcode_int_cycle != CYCLE_NEVER) {
 				context->subcode_int_pending = 1;
 			}
@@ -585,17 +584,18 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 		if (context->cycle >= next_nibble) {
 			if (context->current_status_nibble == sizeof(cdd_status)) {
 				context->current_status_nibble = -1;
-				gate_array[GAO_CDD_STATUS] &= ~BIT_DRS;
+				gate_array[GAO_CDD_CTRL] &= ~BIT_DRS;
 				if (context->cmd_recv_pending) {
 					context->cmd_recv_pending = 0;
 					context->current_cmd_nibble = 0;
-					gate_array[GAO_CDD_STATUS] |= BIT_DTS;
+					gate_array[GAO_CDD_CTRL] |= BIT_DTS;
 					next_cmd_nibble = context->cycle + NIBBLE_CLOCKS;
 				} else {
 					context->cmd_recv_wait = 1;
 				}
 				next_nibble = CYCLE_NEVER;
 			} else {
+				gate_array[GAO_CDD_CTRL] |= BIT_DRS;
 				uint8_t value = ((uint8_t *)&context->status_buffer)[context->current_status_nibble];
 				int ga_index = GAO_CDD_STATUS + (context->current_status_nibble >> 1);
 				if (context->current_status_nibble & 1) {
@@ -615,7 +615,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			if (context->current_cmd_nibble == sizeof(cdd_cmd)) {
 				next_cmd_nibble = CYCLE_NEVER;
 				context->current_cmd_nibble = -1;
-				gate_array[GAO_CDD_STATUS] &= ~BIT_DTS;
+				gate_array[GAO_CDD_CTRL] &= ~BIT_DTS;
 				run_command(context);
 			} else {
 				int ga_index = GAO_CDD_CMD + (context->current_cmd_nibble >> 1);
@@ -679,9 +679,12 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 
 void cdd_mcu_start_cmd_recv(cdd_mcu *context, uint16_t *gate_array)
 {
+	if (gate_array[GAO_CDD_CTRL] & BIT_DTS) {
+		return;
+	}
 	if (context->cmd_recv_wait) {
 		context->current_cmd_nibble = 0;
-		gate_array[GAO_CDD_STATUS] |= BIT_DTS;
+		gate_array[GAO_CDD_CTRL] |= BIT_DTS;
 		context->last_nibble_cycle = context->cycle;
 		context->cmd_recv_wait = 0;
 	} else {
