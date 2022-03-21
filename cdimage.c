@@ -416,7 +416,7 @@ uint8_t parse_toc(system_media *media)
 					if (tracks[track].f) {
 						warning("TOC file has more than one file for track %d, only one is supported\n", track + 1);
 					} else {
-						cmd += 8;
+						cmd += is_datafile ? 8 : 4;
 						char *fname_start = strchr(cmd, '"');
 						if (fname_start) {
 							++fname_start;
