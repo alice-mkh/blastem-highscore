@@ -4,7 +4,8 @@
 #define SCD_MCLKS 50000000
 #define CD_BLOCK_CLKS 16934400
 #define CDD_MCU_DIVIDER 8
-#define SECTOR_CLOCKS (CD_BLOCK_CLKS/75)
+#define SECTORS_PER_SECOND 75
+#define SECTOR_CLOCKS (CD_BLOCK_CLKS/SECTORS_PER_SECOND)
 #define NIBBLE_CLOCKS (CDD_MCU_DIVIDER * 77)
 #define BYTE_CLOCKS (SECTOR_CLOCKS/2352) // 96
 #define SUBCODE_CLOCKS (SECTOR_CLOCKS/98)
@@ -76,6 +77,14 @@ static uint8_t checksum(uint8_t *vbuffer)
 	}
 	return (~sum) & 0xF;
 }
+
+#define MIN_CIRCUMFERENCE 144.51f
+#define MAX_CIRCUMFERENCE 364.42f
+#define SECTOR_LENGTH 17.3333f
+// max diameter for program area 116 mm
+// circumference ~ 364.42 mm
+// ~ 21 sectors per physical track at edge
+// ~8 sectors per physical track at start of lead-in
 #define COARSE_SEEK 2200 //made up numbers
 #define FINE_SEEK 10
 static void handle_seek(cdd_mcu *context)
@@ -87,21 +96,42 @@ static void handle_seek(cdd_mcu *context)
 			if (context->status == DS_PAUSE) {
 				context->pause_pba = context->head_pba;
 			}
-		} else if (context->seek_pba > context->head_pba) {
-			if (context->seek_pba - context->head_pba >= COARSE_SEEK || context->head_pba < LEADIN_SECTORS) {
-				context->head_pba += COARSE_SEEK;
-			} else if (context->seek_pba - context->head_pba >= FINE_SEEK) {
-				context->head_pba += FINE_SEEK;
-			} else {
-				context->head_pba++;
-			}
 		} else {
-			if (context->head_pba - context->seek_pba >= COARSE_SEEK) {
-				context->head_pba -= COARSE_SEEK;
-			} else if (context->head_pba >= FINE_SEEK) {
-				context->head_pba -= FINE_SEEK;
+			//TODO: better estimate of sectors per track at current head location
+			float circumference = (MAX_CIRCUMFERENCE-MIN_CIRCUMFERENCE) * ((float)context->head_pba) / (74 * 60 * SECTORS_PER_SECOND) + MIN_CIRCUMFERENCE;
+			float sectors_per_track = circumference / SECTOR_LENGTH;
+			uint32_t max_seek = sectors_per_track * 190;
+			uint32_t min_seek = sectors_per_track;
+
+
+			if (context->seek_pba > context->head_pba) {
+				uint32_t seek_amount;
+				for (seek_amount = max_seek; seek_amount >= min_seek; seek_amount >>= 1)
+				{
+					if (context->seek_pba - context->head_pba >= seek_amount) {
+						break;
+					}
+				}
+				if (seek_amount >= min_seek) {
+					context->head_pba += seek_amount;
+				} else {
+					context->head_pba++;
+				}
 			} else {
-				context->head_pba = 0;
+				uint32_t seek_amount;
+				for (seek_amount = max_seek; seek_amount >= min_seek; seek_amount >>= 1)
+				{
+					if (context->head_pba - context->seek_pba >= seek_amount) {
+						break;
+					}
+				}
+				if (seek_amount >= min_seek) {
+					context->head_pba -= seek_amount;
+				} else if (context->head_pba >= min_seek){
+					context->head_pba -= min_seek;
+				} else {
+					context->head_pba = 0;
+				}
 			}
 		}
 	}
@@ -406,7 +436,7 @@ static void run_command(cdd_mcu *context)
 			context->error_status = DS_CMD_ERROR;
 			break;
 		}
-		context->seek_pba = lba + LEADIN_SECTORS - 4;
+		context->seek_pba = lba + LEADIN_SECTORS - 3;
 		context->seeking = 1;
 		context->status = context->cmd_buffer.cmd_type == CMD_READ ? DS_PLAY : DS_PAUSE;
 		break;
