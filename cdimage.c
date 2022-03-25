@@ -124,10 +124,10 @@ static uint8_t bin_seek(system_media *media, uint32_t sector)
 
 static uint8_t fake_read(uint32_t sector, uint32_t offset)
 {
-	if (!offset || (offset >= 16)) {
+	if (!offset || offset == 11 || (offset >= 16)) {
 		return 0;
 		//TODO: error detection and correction bytes
-	} else if (offset < 12) {
+	} else if (offset < 11) {
 		return 0xFF;
 	} else if (offset == 12) {
 		uint32_t minute = (sector / 75) / 60;

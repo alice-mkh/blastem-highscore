@@ -602,7 +602,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			if (context->next_subcode_int_cycle != CYCLE_NEVER) {
 				context->subcode_int_pending = 1;
 			}
-			if ((context->status == DS_PLAY || context->status == DS_PAUSE) && context->head_pba >= LEADIN_SECTORS) {
+			if ((context->status == DS_PLAY || context->status == DS_PAUSE) && context->head_pba >= LEADIN_SECTORS && !context->seeking) {
 				context->current_sector_byte = 0;
 				context->current_subcode_byte = 0;
 				context->next_subcode_cycle = context->cycle;

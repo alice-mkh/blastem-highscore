@@ -56,6 +56,8 @@ enum {
 //CTRL0
 #define BIT_DECEN  0x80
 #define BIT_WRRQ   0x04
+#define BIT_ORQ    0x02
+#define BIT_PRQ    0x01
 
 //CTRL1
 #define BIT_SYIEN  0x80
@@ -67,10 +69,11 @@ enum {
 #define BIT_NOSYNC 0x20
 #define BIT_LBLK   0x10
 #define BIT_SBLK   0x04
-
+#define BIT_UCEBLK 0x01
 
 //STAT3
 #define BIT_VALST 0x80
+#define BIT_WLONG 0x40
 
 //datasheet timing info
 //3 cycles for memory operation
@@ -227,7 +230,26 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 				}
 			}
 			printf("Decode done %X:%X:%X mode %X\n", context->regs[HEAD0], context->regs[HEAD1], context->regs[HEAD2], context->regs[HEAD3]);
-			context->regs[STAT0] |= BIT_CRCOK;
+			// This check is a hack until I properly implement error detection
+			if (context->regs[HEAD0] < 0x74 && (context->regs[HEAD0] & 0xF) < 0xA
+				&& context->regs[HEAD1] < 0x60 && (context->regs[HEAD1] & 0xF) < 0xA
+				&& context->regs[HEAD2] < 0x75 && (context->regs[HEAD2] & 0xF) < 0xA
+				&& context->regs[HEAD3] < 3 && !(context->regs[STAT0] & (BIT_NOSYNC|BIT_ILSYNC))
+			) {
+
+				if (context->ctrl0 & (BIT_ORQ|BIT_PRQ)) {
+					context->regs[STAT0] |= BIT_CRCOK;
+				}
+				context->regs[STAT1] = 0;
+				context->regs[STAT2] = 0x90;
+			} else {
+				if (context->ctrl0 & (BIT_ORQ|BIT_PRQ)) {
+					context->regs[STAT0] |= BIT_UCEBLK;
+				}
+				context->regs[STAT1] = 0xFF;
+				context->regs[STAT2] = 0xF2;
+			}
+			context->regs[STAT3] |= BIT_WLONG;
 		}
 		if (context->transfer_end != CYCLE_NEVER) {
 			if (context->byte_handler(context->handler_data, context->buffer[context->dac & (sizeof(context->buffer)-1)])) {
@@ -275,8 +297,6 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 	lc8951_run(context, cycle);
 	uint16_t current_write_addr = context->regs[WAL] | (context->regs[WAH] << 8);
 
-	context->sector_counter++;
-	context->sector_counter &= 0xFFF;
 	uint8_t sync_detected = 0, sync_ignored = 0;
 	if (byte == 0) {
 		if (context->sync_counter == 11 && ((sector_offset & 3) == 3)) {
@@ -296,8 +316,17 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 	}
 
 	uint8_t sync_inserted = 0;
-	if (context->ctrl1 & BIT_SYIEN && context->sector_counter == 2352) {
+	if (context->ctrl1 & BIT_SYIEN && context->sector_counter == 2351) {
 		sync_inserted = 1;
+	}
+
+
+	if (context->sector_counter < 4) {
+		//TODO: Handle SHDREN = 1
+		if ((context->ctrl0 & (BIT_DECEN|BIT_WRRQ)) == (BIT_DECEN)) {
+			//monitor only mode
+			context->regs[HEAD0 + context->sector_counter] = byte;
+		}
 	}
 
 	if (sync_detected || sync_inserted) {
@@ -306,7 +335,7 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 		if (sync_inserted && !(sync_detected || sync_ignored)) {
 			context->regs[STAT0] |= BIT_NOSYNC;
 		}
-		if (sync_detected && context->sector_counter != 2352) {
+		if (sync_detected && context->sector_counter != 2351) {
 			context->regs[STAT0] |= BIT_ILSYNC;
 		}
 		context->sector_counter = 0;
@@ -315,6 +344,9 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 		context->regs[STAT3] |= BIT_VALST;
 		//!DECI is set inactive at the same time as !VALST
 		context->regs[IFSTAT] |= BIT_DECI;
+		//clear error detection status bits
+		context->regs[STAT0] &= ~(BIT_CRCOK|BIT_UCEBLK);
+		context->regs[STAT3] &= ~BIT_WLONG;
 		if (context->ctrl0 & BIT_DECEN) {
 			if (context->ctrl0 & BIT_WRRQ) {
 				uint16_t block_start = current_write_addr + 1 - 2352;
@@ -326,18 +358,13 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 			context->decode_end = context->cycle + 22030 * context->clock_step;
 		}
 	} else {
+		context->sector_counter++;
+		context->sector_counter &= 0xFFF;
 		if (sync_ignored) {
 			context->regs[STAT0] |= BIT_SBLK;
 		}
 		if (context->sector_counter == 2352) {
 			context->regs[STAT0] |= BIT_LBLK;
-		}
-	}
-	if (context->sector_counter < 4) {
-		//TODO: Handle SHDREN = 1
-		if ((context->ctrl0 & (BIT_DECEN|BIT_WRRQ)) == (BIT_DECEN)) {
-			//monitor only mode
-			context->regs[HEAD0 + sector_offset - 12] = byte;
 		}
 	}
 	if ((context->ctrl0 & (BIT_DECEN|BIT_WRRQ)) == (BIT_DECEN|BIT_WRRQ)) {
