@@ -17,8 +17,8 @@ typedef struct {
 	uint16_t        ram[64*1024];
 	uint16_t        ram_bank;
 	uint16_t        pending_address;
-	int16_t         left;
-	int16_t         right;
+	int32_t         left;
+	int32_t         right;
 	rf5c164_channel channels[8];
 	uint8_t         pending_byte;
 	uint8_t         channel_enable;

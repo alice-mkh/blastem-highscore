@@ -139,7 +139,6 @@ void rf5c164_run(rf5c164* pcm, uint32_t cycle)
 			int16_t left = (sample * (pcm->channels[pcm->cur_channel].regs[PAN] >> 4)) >> 5;
 			int16_t right = (sample * (pcm->channels[pcm->cur_channel].regs[PAN] & 0xF)) >> 5;
 			//printf("chan %d, raw %X, sample %d, left %d, right %d, ptr %X (raw %X)\n", pcm->cur_channel, pcm->channels[pcm->cur_channel].sample, sample, left, right, pcm->channels[pcm->cur_channel].cur_ptr >> 11, pcm->channels[pcm->cur_channel].cur_ptr);
-			//TODO: saturating add
 			pcm->left += left;
 			pcm->right += right;
 		}
@@ -155,6 +154,16 @@ void rf5c164_run(rf5c164* pcm, uint32_t cycle)
 		pcm->cur_channel++;
 		pcm->cur_channel &= 7;
 		if (!pcm->cur_channel) {
+			if (pcm->left > INT16_MAX) {
+				pcm->left = INT16_MAX;
+			} else if (pcm->left < INT16_MIN) {
+				pcm->left = INT16_MIN;
+			}
+			if (pcm->right > INT16_MAX) {
+				pcm->right = INT16_MAX;
+			} else if (pcm->right < INT16_MIN) {
+				pcm->right = INT16_MIN;
+			}
 			render_put_stereo_sample(pcm->audio, pcm->left, pcm->right);
 			pcm->left = pcm->right = 0;
 		}
@@ -185,7 +194,7 @@ void rf5c164_write(rf5c164* pcm, uint16_t address, uint8_t value)
 		for (int i = 0; i < 8; i++)
 		{
 			int mask = 1 << i;
-			if (changed & mask & value) {
+			if ((changed & mask) && !(mask & value)) {
 				pcm->channels[i].state = START;
 			}
 		}
