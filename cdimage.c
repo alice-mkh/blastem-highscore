@@ -318,10 +318,23 @@ uint8_t parse_cue(system_media *media)
 		}
 	} while (line);
 	if (media->num_tracks > 0 && media->tracks[0].f) {
-		//end of last track is implicitly defined by file size
-		if (tracks[media->num_tracks-1].f) {
-			uint32_t start_lba =tracks[media->num_tracks-1].pregap_lba ? tracks[media->num_tracks-1].pregap_lba : tracks[media->num_tracks-1].start_lba;
-			tracks[media->num_tracks-1].end_lba = start_lba + (file_size(tracks[media->num_tracks-1].f) - tracks[media->num_tracks-1].file_offset)/ tracks[media->num_tracks-1].sector_bytes;
+		//end of last track in a file is implictly based on the size
+		f = tracks[0].f;
+		uint32_t offset = 0;
+		for (int track = 0; track < media->num_tracks; track++) {
+			if (track == media->num_tracks - 1 && tracks[track].f) {
+				uint32_t start_lba =tracks[track].fake_pregap ? tracks[track].start_lba : tracks[track].pregap_lba;
+				tracks[track].end_lba = start_lba + (file_size(tracks[track].f) - tracks[track].file_offset)/ tracks[track].sector_bytes;
+			} else if (tracks[track].f != f) {
+				uint32_t start_lba =tracks[track-1].fake_pregap ? tracks[track-1].start_lba : tracks[track-1].pregap_lba;
+				tracks[track-1].end_lba = start_lba + (file_size(tracks[track-1].f) - tracks[track-1].file_offset)/ tracks[track-1].sector_bytes;
+				offset = tracks[track-1].end_lba;
+			}
+			if (!tracks[track].fake_pregap) {
+				tracks[track].pregap_lba += offset;
+			}
+			tracks[track].start_lba += offset;
+			tracks[track].end_lba += offset;
 		}
 		//replace cue sheet with first sector
 		free(media->buffer);
