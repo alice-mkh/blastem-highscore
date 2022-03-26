@@ -741,15 +741,29 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		}
 		break;
 	}
-	case GA_CDC_CTRL:
+	case GA_CDC_CTRL: {
 		cdd_run(cd, m68k->current_cycle);
 		lc8951_ar_write(&cd->cdc, value);
 		//cd->gate_array[reg] &= 0xC000;
+		uint16_t old_dest = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
 		//apparently this clears EDT, should it also clear DSR?
 		cd->gate_array[reg] = value & 0x0700;
+		uint16_t dest = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
+		if (dest != old_dest) {
+			if (dest == DST_PCM_RAM) {
+				lc8951_set_dma_multiple(&cd->cdc, 21);
+			} else {
+				lc8951_set_dma_multiple(&cd->cdc, 6);
+			}
+			if ((old_dest < DST_MAIN_CPU || old_dest == 6) && dest >= DST_MAIN_CPU && dest != 6) {
+				lc8951_resume_transfer(&cd->cdc, m68k->current_cycle);
+			}
+			calculate_target_cycle(m68k);
+		}
 		cd->gate_array[GA_CDC_DMA_ADDR] = 0;
 		cd->cdc_dst_low = 0;
 		break;
+	}
 	case GA_CDC_REG_DATA:
 		cdd_run(cd, m68k->current_cycle);
 		printf("CDC write %X: %X @ %u\n", cd->cdc.ar, value, m68k->current_cycle);
@@ -1012,6 +1026,7 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		cd->gate_array[GA_CDC_DMA_ADDR] = dma_addr >> 3;
 		break;
 	default:
+		return 0;
 		printf("Invalid CDC transfer destination %d\n", dest);
 	}
 	return 1;

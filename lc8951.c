@@ -85,11 +85,22 @@ void lc8951_init(lc8951 *context, lcd8951_byte_recv_fun byte_handler, void *hand
 	//unclear if the difference is in the lc8951 or gate array
 	context->regs[IFSTAT] = 0xFF;
 	context->ar_mask = 0x1F;
-	context->clock_step = (2 + 2) * 6; // external divider, internal divider + DMA period
+	context->clock_step = (2 + 2); // external divider, internal divider
+	context->cycles_per_byte = context->clock_step * 6;
 	context->byte_handler = byte_handler;
 	context->handler_data = handler_data;
 	context->decode_end = CYCLE_NEVER;
 	context->transfer_end = CYCLE_NEVER;
+	context->next_byte_cycle = CYCLE_NEVER;
+}
+
+void lc8951_set_dma_multiple(lc8951 *context, uint32_t multiple)
+{
+	context->cycles_per_byte = context->clock_step * multiple;
+	if (context->transfer_end != CYCLE_NEVER) {
+		uint16_t transfer_size = context->regs[DBCL] | (context->regs[DBCH] << 8);
+		context->transfer_end = context->next_byte_cycle + transfer_size * context->cycles_per_byte;
+	}
 }
 
 void lc8951_reg_write(lc8951 *context, uint8_t value)
@@ -130,7 +141,8 @@ void lc8951_reg_write(lc8951 *context, uint8_t value)
 		if (context->ifctrl & BIT_DOUTEN) {
 			context->regs[IFSTAT] &= ~BIT_DTBSY;
 			uint16_t transfer_size = context->regs[DBCL] | (context->regs[DBCH] << 8);
-			context->transfer_end = context->cycle + transfer_size * context->clock_step;
+			context->transfer_end = context->cycle + transfer_size * context->cycles_per_byte;
+			context->next_byte_cycle = context->cycle;
 			printf("DTTRG: size %u, cycle %u, end %u\n", transfer_size, context->cycle, context->transfer_end);
 		}
 		break;
@@ -251,8 +263,9 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 			}
 			context->regs[STAT3] |= BIT_WLONG;
 		}
-		if (context->transfer_end != CYCLE_NEVER) {
+		if (context->cycle >= context->next_byte_cycle) {
 			if (context->byte_handler(context->handler_data, context->buffer[context->dac & (sizeof(context->buffer)-1)])) {
+				context->next_byte_cycle += context->cycles_per_byte;
 				context->dac++;
 				context->regs[DBCL]--;
 				if (context->regs[DBCL] == 0xFF) {
@@ -264,10 +277,12 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 							printf("Expected transfer end at %u but ended at %u\n", context->transfer_end, context->cycle);
 						}
 						context->transfer_end = CYCLE_NEVER;
+						context->next_byte_cycle = CYCLE_NEVER;
 					}
 				}
 			} else {
 				// pause transfer
+				context->next_byte_cycle = CYCLE_NEVER;
 				context->transfer_end = CYCLE_NEVER;
 			}
 		}
@@ -284,7 +299,8 @@ void lc8951_resume_transfer(lc8951 *context, uint32_t cycle)
 			if (step_diff) {
 				context->cycle -= step_diff * context->clock_step;
 			}
-			context->transfer_end = context->cycle + transfer_size * context->clock_step;
+			context->transfer_end = context->cycle + transfer_size * context->cycles_per_byte;
+			context->next_byte_cycle = context->cycle;
 			if (step_diff) {
 				lc8951_run(context, cycle);
 			}

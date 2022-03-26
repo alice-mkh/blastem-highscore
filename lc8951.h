@@ -10,8 +10,10 @@ typedef struct {
 	void     *handler_data;
 	uint32_t cycle;
 	uint32_t clock_step;
+	uint32_t cycles_per_byte;
 	uint32_t decode_end;
 	uint32_t transfer_end;
+	uint32_t next_byte_cycle;
 	uint16_t sector_counter;
 
 	uint8_t  buffer[0x4000];
@@ -31,6 +33,7 @@ typedef struct {
 } lc8951;
 
 void lc8951_init(lc8951 *context, lcd8951_byte_recv_fun byte_handler, void *handler_data);
+void lc8951_set_dma_multiple(lc8951 *context, uint32_t multiple);
 void lc8951_run(lc8951 *context, uint32_t cycle);
 void lc8951_reg_write(lc8951 *context, uint8_t value);
 uint8_t lc8951_reg_read(lc8951 *context);
