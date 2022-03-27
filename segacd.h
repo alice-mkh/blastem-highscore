@@ -20,6 +20,7 @@ typedef struct {
 	uint32_t        int2_cycle;
 	uint32_t        graphics_int_cycle;
 	uint32_t        periph_reset_cycle;
+	uint32_t        last_refresh_cycle;
 	uint32_t        graphics_cycle;
 	uint32_t        base;
 	uint32_t        graphics_x;

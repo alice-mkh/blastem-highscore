@@ -992,6 +992,8 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		dma_addr += 2;
 		cd->cdc_dst_low = dma_addr & 7;
 		cd->gate_array[GA_CDC_DMA_ADDR] = dma_addr >> 3;
+		//TODO: determine actual main CPU penalty
+		cd->m68k->current_cycle += 2 * cd->m68k->options->gen.bus_cycles;
 		break;
 	case DST_PROG_RAM:
 		if (can_main_access_prog(cd)) {
@@ -1002,6 +1004,8 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		dma_addr++;
 		cd->cdc_dst_low = dma_addr & 7;
 		cd->gate_array[GA_CDC_DMA_ADDR] = dma_addr >> 3;
+		//TODO: determine actual main CPU penalty
+		cd->m68k->current_cycle += 2 * cd->m68k->options->gen.bus_cycles;
 		break;
 	case DST_WORD_RAM:
 		if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
@@ -1040,9 +1044,18 @@ static void scd_peripherals_run(segacd_context *cd, uint32_t cycle)
 	rf5c164_run(&cd->pcm, cycle);
 }
 
+//TODO: do some logic analyzer captuers to get actual values
+#define REFRESH_INTERVAL 256
+#define REFRESH_DELAY 4
+
 static m68k_context *sync_components(m68k_context * context, uint32_t address)
 {
 	segacd_context *cd = context->system;
+
+	uint32_t num_refresh = (context->current_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
+	cd->last_refresh_cycle = cd->last_refresh_cycle + num_refresh * REFRESH_INTERVAL;
+	context->current_cycle += num_refresh * REFRESH_DELAY;
+
 	scd_peripherals_run(cd, context->current_cycle);
 	if (address && cd->enter_debugger) {
 		genesis_context *gen = cd->genesis;
@@ -1085,6 +1098,7 @@ void scd_run(segacd_context *cd, uint32_t cycle)
 	while (cycle > cd->m68k->current_cycle) {
 		if (m68k_run && !cd->sub_paused_wordram) {
 			uint32_t start = cd->m68k->current_cycle;
+
 			cd->m68k->sync_cycle = cd->enter_debugger ? cd->m68k->current_cycle + 1 : cycle;
 			if (cd->need_reset) {
 				cd->need_reset = 0;
@@ -1095,6 +1109,7 @@ void scd_run(segacd_context *cd, uint32_t cycle)
 			}
 		} else {
 			cd->m68k->current_cycle = cycle;
+			cd->last_refresh_cycle = cycle;
 		}
 		scd_peripherals_run(cd, cd->m68k->current_cycle);
 	}
@@ -1130,6 +1145,11 @@ void scd_adjust_cycle(segacd_context *cd, uint32_t deduction)
 		} else {
 			cd->graphics_int_cycle = 0;
 		}
+	}
+	if (deduction >= cd->last_refresh_cycle) {
+		cd->last_refresh_cycle -= deduction;
+	} else {
+		cd->last_refresh_cycle = 0;
 	}
 	cd->pcm.cycle -= deduction;
 }
