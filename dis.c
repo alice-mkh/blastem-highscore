@@ -341,7 +341,7 @@ int main(int argc, char ** argv)
 				do_cd_labels = 1;
 			} else {
 				uint32_t sub_start =filebuf[0x40/2] << 16 | filebuf[0x42/2];
-				uint32_t sub_end =filebuf[0x44/2] << 16 | filebuf[0x46/2];
+				uint32_t sub_end = sub_start + (filebuf[0x44/2] << 16 | filebuf[0x46/2]);
 				if (sub_start > (boot_size - 0x20)) {
 					fprintf(stderr, "System Program start offset is %X, but image is only %X bytes\n", sub_start, (uint32_t)boot_size);
 					return 1;
