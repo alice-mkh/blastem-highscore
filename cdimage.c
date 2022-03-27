@@ -55,12 +55,15 @@ static char* next_blank(char *cur)
 static uint32_t timecode_to_lba(char *timecode)
 {
 	char *end;
-	int seconds = 0, frames = 0;
-	int minutes = strtol(timecode, &end, 10);
-	if (end) {
+	int seconds = 0, minutes = 0;
+	int frames = strtol(timecode, &end, 10);
+	if (end && *end == ':') {
 		timecode = end + 1;
-		seconds = strtol(timecode, &end, 10);
-		if (end) {
+		seconds = frames;
+		frames = strtol(timecode, &end, 10);
+		if (end && *end == ':') {
+			minutes = seconds;
+			seconds = frames;
 			timecode = end + 1;
 			frames = strtol(timecode, NULL, 10);
 		}
@@ -471,7 +474,7 @@ uint8_t parse_toc(system_media *media)
 									if (isdigit(*cmd)) {
 										uint32_t start = timecode_to_lba(cmd);
 										tracks[track].file_offset += start * tracks[track].sector_bytes;
-										cmd = next_blank(cmd);
+										cmd = cmd_start_sameline(cmd);
 									}
 								}
 								if (isdigit(*cmd)) {
