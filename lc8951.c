@@ -419,5 +419,8 @@ void lc8951_adjust_cycles(lc8951 *context, uint32_t deduction)
 	if (context->transfer_end != CYCLE_NEVER) {
 		context->transfer_end -= deduction;
 	}
+	if (context->next_byte_cycle != CYCLE_NEVER) {
+		context->next_byte_cycle -= deduction;
+	}
 	printf("cycle is now %u, decode_end %u, transfer_end %u\n", context->cycle, context->decode_end, context->transfer_end);
 }
