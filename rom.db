@@ -1421,3 +1421,26 @@ T-122026 {
 		2 gamepad3.2
 	}
 }
+T-172116 {
+	name Triple Play: Gold Edition
+	SRAM {
+		size 32768
+		bus odd
+	}
+	map {
+		0 {
+			device ROM
+			last 1FFFFF
+		}
+		200000 {
+			device SRAM
+			last 2FFFFF
+			mask FFFF
+		}
+		300000 {
+			device ROM
+			last 3FFFFF
+			offset 300000
+		}
+	}
+}

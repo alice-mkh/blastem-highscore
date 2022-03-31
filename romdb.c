@@ -695,8 +695,12 @@ void map_iter_fun(char *key, tern_val val, uint8_t valtype, void *data)
 	map->start = start;
 	map->end = end + 1;
 	if (!strcmp(dtype, "ROM")) {
+		uint32_t expanded_size = nearest_pow2(state->rom_size);
+		if (offset >= expanded_size) {
+			fatal_error("offset of %X is invalid for ROM size of %X in map entry %d with addess %s\n", offset, state->rom_size, state->index, key);
+		}
 		map->buffer = state->rom + offset;
-		map->mask = calc_mask(state->rom_size - offset, start, end);
+		map->mask = calc_mask(nearest_pow2(state->rom_size) - offset, start, end);
 		if (strcmp(tern_find_ptr_default(node, "writeable", "no"), "yes")) {
 			map->flags = MMAP_READ;
 		} else {
@@ -956,6 +960,16 @@ rom_info configure_rom(tern_node *rom_db, void *vrom, uint32_t rom_size, void *l
 {
 	uint8_t product_id[GAME_ID_LEN+1];
 	uint8_t *rom = vrom;
+	uint32_t expanded_size = nearest_pow2(rom_size);
+	if (expanded_size > rom_size) {
+		//generally carts with odd-sized ROMs have 2 power of 2 sized ROMs with the larger one first
+		//TODO: Handle cases in which the 2nd ROM/part is a maller power of 2 than just half the first one
+		uint32_t mirror_start = expanded_size >> 1;
+		uint32_t mirror_size = expanded_size >> 2;
+		if (mirror_start + mirror_size >= rom_size) {
+			memcpy(rom + mirror_start + mirror_size, rom + mirror_start, mirror_size);
+		}
+	}
 	product_id[GAME_ID_LEN] = 0;
 	for (int i = 0; i < GAME_ID_LEN; i++)
 	{

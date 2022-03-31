@@ -1943,9 +1943,9 @@ genesis_context *alloc_config_genesis(void *rom, uint32_t rom_size, void *lock_o
 	rom = info.rom;
 	rom_size = info.rom_size;
 #ifndef BLASTEM_BIG_ENDIAN
-	byteswap_rom(rom_size, rom);
+	byteswap_rom(nearest_pow2(rom_size), rom);
 	if (lock_on) {
-		byteswap_rom(lock_on_size, lock_on);
+		byteswap_rom(nearest_pow2(lock_on_size), lock_on);
 	}
 #endif
 	char *m68k_divider = tern_find_path(config, "clocks\0m68k_divider\0", TVAL_PTR).ptrval;
