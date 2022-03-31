@@ -1035,6 +1035,13 @@ void translate_m68k_stream(uint32_t address, m68k_context * context)
 				break;
 			}
 			memmap_chunk const *chunk = find_map_chunk(address, &opts->gen, 0, NULL);
+			if (!(chunk->flags & MMAP_READ)) {
+				code_ptr start = code->cur;
+				defer_translation(&opts->gen, address, opts->retrans_stub);
+				code_ptr after = code->cur;
+				map_native_address(context, address, start, 2, after-start);
+				break;
+			}
 			if (!starting_chunk) {
 				starting_chunk = chunk;
 			} else if (starting_chunk != chunk) {
