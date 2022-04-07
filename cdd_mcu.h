@@ -149,6 +149,7 @@ typedef struct {
 	uint32_t      head_pba;
 	uint32_t      seek_pba;
 	uint32_t      pause_pba;
+	uint32_t      coarse_seek;
 	cdd_status    status_buffer;
 	cdd_cmd       cmd_buffer;
 	status_format requested_format;

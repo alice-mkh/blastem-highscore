@@ -85,25 +85,27 @@ static uint8_t checksum(uint8_t *vbuffer)
 // circumference ~ 364.42 mm
 // ~ 21 sectors per physical track at edge
 // ~8 sectors per physical track at start of lead-in
-#define COARSE_SEEK 2200 //made up numbers
-#define FINE_SEEK 10
+#define COARSE_SEEK_TRACKS 57 //estimate based on seek test
 static void handle_seek(cdd_mcu *context)
 {
-	//TODO: more realistic seeking behavior
+	uint32_t old_coarse = context->coarse_seek;
 	if (context->seeking) {
 		if (context->seek_pba == context->head_pba) {
 			context->seeking = 0;
+			context->coarse_seek = 0;
 			if (context->status == DS_PAUSE) {
 				context->pause_pba = context->head_pba;
 			}
 		} else {
 			//TODO: better estimate of sectors per track at current head location
+			//TODO: drive will periodically lose tracking when seeking which slows
+			//things down from this ideal speed I'm curently estimating
 			float circumference = (MAX_CIRCUMFERENCE-MIN_CIRCUMFERENCE) * ((float)context->head_pba) / (74 * 60 * SECTORS_PER_SECOND) + MIN_CIRCUMFERENCE;
 			float sectors_per_track = circumference / SECTOR_LENGTH;
-			uint32_t max_seek = sectors_per_track * 190;
+			uint32_t max_seek = sectors_per_track * COARSE_SEEK_TRACKS;
 			uint32_t min_seek = sectors_per_track;
 
-
+			uint32_t old_pba = context->head_pba;
 			if (context->seek_pba > context->head_pba) {
 				uint32_t seek_amount;
 				for (seek_amount = max_seek; seek_amount >= min_seek; seek_amount >>= 1)
@@ -133,7 +135,14 @@ static void handle_seek(cdd_mcu *context)
 					context->head_pba = 0;
 				}
 			}
+			if (context->head_pba != old_pba + 1) {
+				context->coarse_seek++;
+			} else {
+				context->coarse_seek = 0;
+			}
 		}
+	}
+	if (old_coarse && !context->coarse_seek) {
 	}
 }
 
@@ -173,8 +182,13 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		handle_seek(context);
 		if (!context->seeking) {
 			context->head_pba++;
-			if (context->head_pba > context->pause_pba + FINE_SEEK) {
-				context->head_pba = context->pause_pba - FINE_SEEK;
+			//TODO: better estimate of sectors per track at current head location
+			float circumference = (MAX_CIRCUMFERENCE-MIN_CIRCUMFERENCE) * ((float)context->head_pba) / (74 * 60 * SECTORS_PER_SECOND) + MIN_CIRCUMFERENCE;
+			float sectors_per_track = circumference / SECTOR_LENGTH;
+			//TODO: check the exact behavior during pause on hardware
+			uint32_t diff = sectors_per_track * 0.5f + 0.5f;
+			if (context->head_pba > context->pause_pba + diff) {
+				context->head_pba = context->pause_pba - diff;
 				if (context->head_pba < LEADIN_SECTORS) {
 					context->head_pba = LEADIN_SECTORS;
 				}
@@ -216,7 +230,8 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		break;
 	}
 	uint8_t force_not_ready = 0;
-	if (context->seeking && context->head_pba - prev_pba != 1) {
+	if (context->coarse_seek  && !(context->coarse_seek % 15)) {
+		//TODO: adjust seeking for focus error when these bad statuses happen
 		//BIOS depends on getting a not ready status during seeking to clear certain state
 		force_not_ready = context->status_buffer.format != SF_NOTREADY;
 	}
@@ -586,6 +601,9 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 		next_nibble = context->last_nibble_cycle + NIBBLE_CLOCKS;
 	} else if (!context->current_status_nibble) {
 		next_nibble = context->last_sector_cycle + PROCESSING_DELAY;
+		if (context->coarse_seek % 3) {
+			next_nibble += SECTOR_CLOCKS * (3 - (context->coarse_seek % 3));
+		}
 	} else {
 		next_nibble = CYCLE_NEVER;
 	}
@@ -594,10 +612,14 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 	for (; context->cycle < cd_cycle; context->cycle += CDD_MCU_DIVIDER)
 	{
 		if (context->cycle >= next_subcode) {
+			uint32_t old_coarse = context->coarse_seek;
 			context->last_sector_cycle = context->cycle;
 			next_subcode = context->cycle + SECTOR_CLOCKS;
 			update_status(context, gate_array);
 			next_nibble = context->cycle + PROCESSING_DELAY;
+			if (context->coarse_seek % 3) {
+				next_nibble += SECTOR_CLOCKS * (3 - (context->coarse_seek % 3));
+			}
 			context->current_status_nibble = 0;
 			if (context->next_subcode_int_cycle != CYCLE_NEVER) {
 				context->subcode_int_pending = 1;
@@ -609,6 +631,12 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 				context->next_subcode_int_cycle = cd_block_to_mclks(next_subcode);
 			} else {
 				context->next_subcode_int_cycle = CYCLE_NEVER;
+			}
+			if (old_coarse != context->coarse_seek) {
+				context->next_int_cycle = cd_block_to_mclks(context->cycle + PROCESSING_DELAY + 7 * NIBBLE_CLOCKS);
+				if (context->coarse_seek % 3) {
+					context->next_int_cycle += cd_block_to_mclks(SECTOR_CLOCKS * (3 - (context->coarse_seek % 3)));
+				}
 			}
 		}
 		if (context->cycle >= next_nibble) {
@@ -634,8 +662,14 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 					gate_array[ga_index] = (value << 8) | (gate_array[ga_index]  & 0x00FF);
 				}
 				if (context->current_status_nibble == 7) {
-					context->int_pending = 1;
-					context->next_int_cycle = cd_block_to_mclks(context->cycle + SECTOR_CLOCKS);
+					if (!(context->coarse_seek % 3)) {
+						context->int_pending = 1;
+						if (context->coarse_seek) {
+							context->next_int_cycle = cd_block_to_mclks(context->cycle + 3 * SECTOR_CLOCKS);
+						} else {
+							context->next_int_cycle = cd_block_to_mclks(context->cycle + SECTOR_CLOCKS);
+						}
+					}
 				}
 				context->current_status_nibble++;
 				context->last_nibble_cycle = context->cycle;
@@ -726,6 +760,9 @@ void cdd_hock_enabled(cdd_mcu *context)
 {
 	context->last_sector_cycle = context->cycle;
 	context->next_int_cycle = cd_block_to_mclks(context->cycle + SECTOR_CLOCKS + PROCESSING_DELAY + 7 * NIBBLE_CLOCKS);
+	if (context->coarse_seek % 3) {
+		context->next_int_cycle += cd_block_to_mclks(SECTOR_CLOCKS * (3 - (context->coarse_seek % 3)));
+	}
 }
 
 void cdd_hock_disabled(cdd_mcu *context)
