@@ -249,13 +249,13 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 				&& context->regs[HEAD3] < 3 && !(context->regs[STAT0] & (BIT_NOSYNC|BIT_ILSYNC))
 			) {
 
-				if (context->ctrl0 & (BIT_ORQ|BIT_PRQ)) {
+				if (context->ctrl0 & (BIT_WRRQ|BIT_ORQ|BIT_PRQ)) {
 					context->regs[STAT0] |= BIT_CRCOK;
 				}
 				context->regs[STAT1] = 0;
-				context->regs[STAT2] = 0x90;
+				context->regs[STAT2] = 0x10;
 			} else {
-				if (context->ctrl0 & (BIT_ORQ|BIT_PRQ)) {
+				if (context->ctrl0 & (BIT_WRRQ|BIT_ORQ|BIT_PRQ)) {
 					context->regs[STAT0] |= BIT_UCEBLK;
 				}
 				context->regs[STAT1] = 0xFF;
