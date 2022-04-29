@@ -62,10 +62,6 @@ void free_rom_info(rom_info *info)
 		}
 	}
 	free(info->map);
-	free(info->port1_override);
-	free(info->port2_override);
-	free(info->ext_override);
-	free(info->mouse_mode);
 }
 
 void cart_serialize(system_header *sys, serialize_buffer *buf)
