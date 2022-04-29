@@ -72,20 +72,24 @@ void view_play(struct nk_context *context)
 	
 }
 
+static char *browser_cur_path;
+static const char *browser_label;
+static const char *browser_setting_path;
+static const char **browser_ext_list;
+static uint32_t browser_num_exts;
 void view_file_browser(struct nk_context *context, uint8_t normal_open)
 {
-	static char *current_path;
 	static dir_entry *entries;
 	static size_t num_entries;
 	static int32_t selected_entry = -1;
-	static char **ext_list;
+	static const char **ext_list;
 	static uint32_t num_exts;
 	static uint8_t got_ext_list;
-	if (!current_path) {
-		get_initial_browse_path(&current_path);
+	if (!browser_cur_path) {
+		get_initial_browse_path(&browser_cur_path);
 	}
 	if (!entries) {
-		entries = get_dir_list(current_path, &num_entries);
+		entries = get_dir_list(browser_cur_path, &num_entries);
 		if (entries) {
 			sort_dir_list(entries, num_entries);
 		}
@@ -99,16 +103,21 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 			num_entries = 1;
 		}
 	}
-	if (!got_ext_list) {
-		ext_list = get_extension_list(config, &num_exts);
-		got_ext_list = 1;
+	if (!browser_ext_list) {
+		if (!got_ext_list) {
+			ext_list = (const char **)get_extension_list(config, &num_exts);
+			got_ext_list = 1;
+		}
+		browser_ext_list = ext_list;
+		browser_num_exts = num_exts;
 	}
 	uint32_t width = render_width();
 	uint32_t height = render_height();
 	if (nk_begin(context, "Load ROM", nk_rect(0, 0, width, height), 0)) {
 		nk_layout_row_static(context, height - context->style.font->height * 3, width - 60, 1);
 		int32_t old_selected = selected_entry;
-		char *title = alloc_concat("Select ROM: ", current_path);
+		const char *parts[] = {browser_label, ": ", browser_cur_path};
+		char *title = alloc_concat_m(3, parts);
 		if (nk_group_begin(context, title, NK_WINDOW_BORDER | NK_WINDOW_TITLE)) {
 			nk_layout_row_static(context, context->style.font->height - 2, width-100, 1);
 			for (int32_t i = 0; i < num_entries; i++)
@@ -116,7 +125,7 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 				if (entries[i].name[0] == '.' && entries[i].name[1] != '.') {
 					continue;
 				}
-				if (num_exts && !entries[i].is_dir && !path_matches_extensions(entries[i].name, ext_list, num_exts)) {
+				if (browser_num_exts && !entries[i].is_dir && !path_matches_extensions(entries[i].name, browser_ext_list, browser_num_exts)) {
 					continue;
 				}
 				int selected = i == selected_entry;
@@ -132,16 +141,17 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 		free(title);
 		nk_layout_row_static(context, context->style.font->height * 1.75, width > 600 ? 300 : width / 2, 2);
 		if (nk_button_label(context, "Back")) {
+			browser_ext_list = NULL;
 			pop_view();
 		}
 		if (nk_button_label(context, "Open") || (old_selected >= 0 && selected_entry < 0)) {
 			if (selected_entry < 0) {
 				selected_entry = old_selected;
 			}
-			char *full_path = path_append(current_path, entries[selected_entry].name);
+			char *full_path = path_append(browser_cur_path, entries[selected_entry].name);
 			if (entries[selected_entry].is_dir) {
-				free(current_path);
-				current_path = full_path;
+				free(browser_cur_path);
+				browser_cur_path = full_path;
 				free_dir_list(entries, num_entries);
 				entries = NULL;
 			} else {
@@ -153,12 +163,21 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 						init_system_with_media(full_path, SYSTEM_UNKNOWN);
 						free(full_path);
 					}
+					
+					clear_view_stack();
+					show_play_view();
+				} else if (browser_setting_path) {
+					config = tern_insert_path(config, browser_setting_path, (tern_val){.ptrval = full_path}, TVAL_PTR);
+					config_dirty = 1;
+					browser_ext_list = NULL;
+					pop_view();
 				} else {
 					lockon_media(full_path);
 					free(full_path);
+					
+					clear_view_stack();
+					show_play_view();
 				}
-				clear_view_stack();
-				show_play_view();
 			}
 			selected_entry = -1;
 		}
@@ -168,10 +187,17 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 
 void view_load(struct nk_context *context)
 {
+	browser_label = "Select ROM";
 	view_file_browser(context, 1);
 }
 
 void view_lock_on(struct nk_context *context)
+{
+	browser_label = "Select ROM";
+	view_file_browser(context, 0);
+}
+
+void view_file_settings(struct nk_context *context)
 {
 	view_file_browser(context, 0);
 }
@@ -1594,6 +1620,36 @@ void settings_string(struct nk_context *context, char *label, char *path, char *
 	free(buffer);
 }
 
+void settings_path(struct nk_context *context, char *label, char *path, char *def, const char **exts, uint32_t num_exts)
+{
+	nk_label(context, label, NK_TEXT_LEFT);
+	char *curstr = tern_find_path_default(config, path, (tern_val){.ptrval = def}, TVAL_PTR).ptrval;
+	uint32_t len = strlen(curstr);
+	uint32_t buffer_len = len > 100 ? len + 1 : 101;
+	char *buffer = malloc(buffer_len);
+	memcpy(buffer, curstr, len);
+	memset(buffer+len, 0, buffer_len-len);
+	nk_edit_string(context, NK_EDIT_SIMPLE, buffer, &len, buffer_len-1, nk_filter_default);
+	buffer[len] = 0;
+	if (strcmp(buffer, curstr)) {
+		config_dirty = 1;
+		config = tern_insert_path(config, path, (tern_val){.ptrval = strdup(buffer)}, TVAL_PTR);
+	}
+	
+	nk_spacing(context, 1);
+	if (nk_button_label(context, "Browse")) {
+		browser_label = label;
+		browser_setting_path = path;
+		browser_ext_list = exts;
+		browser_num_exts = num_exts;
+		if (is_absolute_path(buffer)) {
+			browser_cur_path = path_dirname(buffer);
+		}
+		push_view(view_file_settings);
+	}
+	free(buffer);
+}
+
 void settings_int_property(struct nk_context *context, char *label, char *name, char *path, int def, int min, int max)
 {
 	char *curstr = tern_find_path(config, path, TVAL_PTR).ptrval;
@@ -2051,6 +2107,23 @@ void view_confirm_reset(struct nk_context *context)
 	}
 }
 
+void view_bios_settings(struct nk_context *context)
+{
+	if (nk_begin(context, "Firmware", nk_rect(0, 0, render_width(), render_height()), 0)) {
+		uint32_t desired_width = context->style.font->height * 10;
+		nk_layout_row_static(context, context->style.font->height, desired_width, 2);
+		static const char* exts[] = {"md", "bin", "smd"};
+		settings_path(context, "TMSS ROM", "ui\0save_path\0", "tmss.md", exts, 3);
+		settings_path(context, "US CD BIOS", "system\0scd_bios_us\0", "cdbios.md", exts, 3);
+		settings_path(context, "JP CD BIOS", "system\0scd_bios_jp\0", "cdbios.md", exts, 3);
+		settings_path(context, "EU CD BIOS", "system\0scd_bios_eu\0", "cdbios.md", exts, 3);
+		if (nk_button_label(context, "Back")) {
+			pop_view();
+		}
+		nk_end(context);
+	}
+}
+
 void view_back(struct nk_context *context)
 {
 	pop_view();
@@ -2066,6 +2139,7 @@ void view_settings(struct nk_context *context)
 		{"Video", view_video_settings},
 		{"Audio", view_audio_settings},
 		{"System", view_system_settings},
+		{"Firmware", view_bios_settings},
 		{"Reset to Defaults", view_confirm_reset},
 		{"Back", view_back}
 	};

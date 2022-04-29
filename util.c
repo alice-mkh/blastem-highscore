@@ -353,7 +353,7 @@ char *path_extension(char const *path)
 	return strdup(lastdot+1);
 }
 
-uint8_t path_matches_extensions(char *path, char **ext_list, uint32_t num_exts)
+uint8_t path_matches_extensions(char *path, const char **ext_list, uint32_t num_exts)
 {
 	char *ext = path_extension(path);
 	if (!ext) {
