@@ -776,30 +776,35 @@ void map_iter_fun(char *key, tern_val val, uint8_t valtype, void *data)
 		process_sram_def(key, state);
 		map->buffer = state->info->save_buffer + offset;
 		map->flags = MMAP_READ | MMAP_WRITE;
+		uint32_t save_size_mask = state->info->save_size;
 		if (state->info->save_type == RAM_FLAG_ODD) {
 			map->flags |= MMAP_ONLY_ODD;
+			save_size_mask *= 2;
 		} else if(state->info->save_type == RAM_FLAG_EVEN) {
 			map->flags |= MMAP_ONLY_EVEN;
+			save_size_mask *= 2;
 		} else {
 			map->flags |= MMAP_CODE;
 		}
-		map->mask = calc_mask(state->info->save_size, start, end);
+		map->mask = calc_mask(save_size_mask, start, end);
 	} else if (!strcmp(dtype, "RAM")) {
 		uint32_t size = strtol(tern_find_ptr_default(node, "size", "0"), NULL, 16);
 		if (!size || size > map->end - map->start) {
 			size = map->end - map->start;
 		}
 		map->buffer = calloc(size, 1);
-		map->mask = calc_mask(size, start, end);
 		map->flags = MMAP_READ | MMAP_WRITE;
 		char *bus = tern_find_ptr_default(node, "bus", "both");
 		if (!strcmp(bus, "odd")) {
 			map->flags |= MMAP_ONLY_ODD;
+			size *= 2;
 		} else if (!strcmp(bus, "even")) {
 			map->flags |= MMAP_ONLY_EVEN;
+			size *= 2;
 		} else {
 			map->flags |= MMAP_CODE;
 		}
+		map->mask = calc_mask(size, start, end);
 	} else if (!strcmp(dtype, "NOR")) {
 		process_nor_def(key, state);
 
