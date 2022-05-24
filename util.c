@@ -56,6 +56,26 @@ char * alloc_concat_m(int num_parts, char const ** parts)
 	return ret;
 }
 
+char * alloc_join(int num_parts, char const **parts, char sep)
+{
+	int total = num_parts ? num_parts - 1 : 0;
+	for (int i = 0; i < num_parts; i++) {
+		total += strlen(parts[i]);
+	}
+	char * ret = malloc(total + 1);
+	char *cur = ret;
+	for (int i = 0; i < num_parts; i++) {
+		size_t s = strlen(parts[i]);
+		if (i) {
+			*(cur++) = sep;
+		}
+		memcpy(cur, parts[i], s);
+		cur += s;
+	}
+	*cur = 0;
+	return ret;
+}
+
 typedef struct {
 	uint32_t start;
 	uint32_t end;

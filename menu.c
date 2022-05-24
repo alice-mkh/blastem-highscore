@@ -150,7 +150,7 @@ void * menu_write_w(uint32_t address, void * context, uint16_t value)
 			for (size_t i = 0; dst && i < num_entries; i++)
 			{
 				if (num_exts && !entries[i].is_dir) {
-					if (!path_matches_extensions(entries[i].name, ext_list, num_exts)) {
+					if (!path_matches_extensions(entries[i].name, (const char **)ext_list, num_exts)) {
 						continue;
 					}
 				}

@@ -250,6 +250,88 @@ tern_node *load_overrideable_config(char *name, char *bundled_name, uint8_t *use
 	return ret;
 }
 
+static tern_node *dupe_tree(tern_node *head)
+{
+	if (!head) {
+		return head;
+	}
+	tern_node *out = calloc(1, sizeof(tern_node));
+	out->left = dupe_tree(head->left);
+	out->right = dupe_tree(head->right);
+	out->el = head->el;
+	out->valtype = head->valtype;
+	if (out->el) {
+		out->straight.next = dupe_tree(head->straight.next);
+	} else if (out->valtype == TVAL_NODE) {
+		out->straight.value.ptrval = dupe_tree(head->straight.value.ptrval);
+	} else if (out->valtype == TVAL_PTR) {
+		out->straight.value.ptrval = strdup(head->straight.value.ptrval);
+	} else {
+		out->straight.value = head->straight.value;
+	}
+	return out;
+}
+
+static void migrate_pads(char *key, tern_val val, uint8_t valtype, void *data)
+{
+	tern_node **pads = data;
+	if (valtype != TVAL_NODE) {
+		return;
+	}
+	tern_node *existing = tern_find_node(*pads, key);
+	if (existing) {
+		return;
+	}
+	*pads = tern_insert_node(*pads, key, dupe_tree(val.ptrval));
+}
+
+#define CONFIG_VERSION 1
+static tern_node *migrate_config(tern_node *config, int from_version)
+{
+	tern_node *def_config = parse_bundled_config("default.cfg");
+	switch(from_version)
+	{
+	case 0: {
+		//Add CD image formats to ui.extensions
+		uint32_t num_exts;
+		char **ext_list = get_extension_list(config, &num_exts);
+		char *old = num_exts ? ext_list[0] : NULL;
+		uint32_t new_size = num_exts + 2;
+		uint8_t need_cue = 1, need_iso = 1;
+		for (uint32_t i = 0; i < num_exts; i++)
+		{
+			if (!strcmp(ext_list[i], "cue")) {
+				need_cue = 0;
+				new_size--;
+			} else if (!strcmp(ext_list[i], "iso")) {
+				need_iso = 0;
+				new_size--;
+			}
+		}
+		if (new_size != num_exts) {
+			ext_list = realloc(ext_list, sizeof(char*) * new_size);
+			if (need_cue) {
+				ext_list[num_exts++] = "cue";
+			}
+			if (need_iso) {
+				ext_list[num_exts++] = "iso";
+			}
+		}
+		char *combined = alloc_join(new_size, (char const **)ext_list, ' ');
+		config = tern_insert_path(config, "ui\0extensions\0", (tern_val){.ptrval = combined}, TVAL_PTR);
+		//Copy default pad configs if missing
+		tern_node *pads = tern_find_path(config, "bindings\0pads\0", TVAL_NODE).ptrval;
+		tern_node *def_pads = tern_find_path(def_config, "bindings\0pads\0", TVAL_NODE).ptrval;
+		tern_foreach(def_pads, migrate_pads, &pads);
+		config = tern_insert_path(config, "bindings\0pads\0", (tern_val){.ptrval = pads}, TVAL_NODE);
+		break;
+	}
+	}
+	char buffer[16];
+	sprintf(buffer, "%d", CONFIG_VERSION);
+	return tern_insert_ptr(config, "version", strdup(buffer));
+}
+
 static uint8_t app_config_in_config_dir;
 tern_node *load_config()
 {
@@ -261,6 +343,10 @@ tern_node *load_config()
 		} else {
 			fatal_error("Failed to find a config file in the BlastEm executable directory and the config directory path could not be determined\n");
 		}
+	}
+	int config_version = atoi(tern_find_ptr_default(ret, "version", "0"));
+	if (config_version < CONFIG_VERSION) {
+		migrate_config(ret, config_version);
 	}
 	return ret;
 }
@@ -315,7 +401,7 @@ void delete_custom_config(void)
 
 char **get_extension_list(tern_node *config, uint32_t *num_exts_out)
 {
-	char *ext_filter = strdup(tern_find_path_default(config, "ui\0extensions\0", (tern_val){.ptrval = "bin gen md smd sms gg"}, TVAL_PTR).ptrval);
+	char *ext_filter = strdup(tern_find_path_default(config, "ui\0extensions\0", (tern_val){.ptrval = "bin gen md smd sms gg cue iso"}, TVAL_PTR).ptrval);
 	uint32_t num_exts = 0, ext_storage = 5;
 	char **ext_list = malloc(sizeof(char *) * ext_storage);
 	char *cur_filter = ext_filter;

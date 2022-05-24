@@ -22,6 +22,8 @@ typedef struct {
 char * alloc_concat(char const * first, char const * second);
 //Allocates a new string containing the concatenation of the strings pointed to by parts
 char * alloc_concat_m(int num_parts, char const ** parts);
+//Allocates a new string containing the concatenation of the strings pointed to by parts separated by sep
+char * alloc_join(int num_parts, char const **parts, char sep);
 //Returns a newly allocated string in which all variables in based are replaced with values from vars or the environment
 char *replace_vars(char *base, tern_node *vars, uint8_t allow_env);
 //Byteswaps a ROM image in memory
