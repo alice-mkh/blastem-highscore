@@ -1426,7 +1426,21 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 		key = "system\0scd_bios_us\0";
 	}
 	char *bios_path = tern_find_path_default(config, key, (tern_val){.ptrval = "cdbios.bin"}, TVAL_PTR).ptrval;
-	cd->rom = (uint16_t *)read_bundled_file(bios_path, &firmware_size);
+	if (is_absolute_path(bios_path)) {
+		FILE *f = fopen(bios_path, "rb");
+		if (f) {
+			long to_read = file_size(f);
+			cd->rom = malloc(to_read);
+			firmware_size = fread(cd->rom, 1, to_read, f);
+			if (!firmware_size) {
+				free(cd->rom);
+				cd->rom = NULL;
+			}
+			fclose(f);
+		}
+	} else {
+		cd->rom = (uint16_t *)read_bundled_file(bios_path, &firmware_size);
+	}
 	if (!cd->rom) {
 		fatal_error("Failed to load Sega CD BIOS from %s\n", bios_path);
 	}
