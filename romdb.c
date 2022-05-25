@@ -472,12 +472,38 @@ rom_info configure_rom_heuristics(uint8_t *rom, uint32_t rom_size, memmap_chunk 
 	info.wants_cd = 0;
 	for (uint32_t offset = 0x190; offset < rom_size && offset < 0x1A0; offset++)
 	{
-		if (rom[offset] == 'F') {
-			// probably a codemasters game with a garbage header
+		uint8_t invalid = 0;
+		switch(rom[offset])
+		{
+		case 'J':
+		case '6':
+		case '0':
+		case 'A':
+		case '4':
+		case 'G':
+		case 'L':
+		case 'M':
+		case 'B':
+		case 'K':
+		case 'R':
+		case 'D':
+			//valid device letter
+			//TODO: do something with these
 			break;
-		}
-		if (rom[offset] == 'C') {
+		case 'F':
+		case 'T':
+		case 'P':
+			//unreleased peripheral, probably garbage
+			invalid = 1;
+			break;
+		case 'C':
 			info.wants_cd = 1;
+			break;
+		default:
+			invalid = 1;
+		}
+		if (invalid) {
+			info.wants_cd = 0;
 			break;
 		}
 	}
