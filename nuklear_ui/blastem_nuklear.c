@@ -465,37 +465,37 @@ static char *get_key_name(int32_t keycode)
 
 void view_key_bindings(struct nk_context *context)
 {
-	const char *controller1_binds[] = {
+	static const char *controller1_binds[] = {
 		"gamepads.1.up", "gamepads.1.down", "gamepads.1.left", "gamepads.1.right",
 		"gamepads.1.a", "gamepads.1.b", "gamepads.1.c",
 		"gamepads.1.x", "gamepads.1.y", "gamepads.1.z",
 		"gamepads.1.start", "gamepads.1.mode"
 	};
-	const char *controller2_binds[] = {
+	static const char *controller2_binds[] = {
 		"gamepads.2.up", "gamepads.2.down", "gamepads.2.left", "gamepads.2.right",
 		"gamepads.2.a", "gamepads.2.b", "gamepads.2.c",
 		"gamepads.2.x", "gamepads.2.y", "gamepads.2.z",
 		"gamepads.2.start", "gamepads.2.mode"
 	};
-	const char *general_binds[] = {
-		"ui.exit", "ui.save_state", "ui.toggle_fullscreen", "ui.soft_reset", "ui.reload",
-		"ui.screenshot", "ui.vgm_log", "ui.sms_pause", "ui.toggle_keyboard_cpatured", "ui.release_mouse"
+	static const char *general_binds[] = {
+		"ui.exit", "ui.save_state", "ui.load_state", "ui.toggle_fullscreen", "ui.soft_reset", "ui.reload",
+		"ui.screenshot", "ui.vgm_log", "ui.sms_pause", "ui.toggle_keyboard_captured", "ui.release_mouse"
 	};
-	const char *general_names[] = {
-		"Show Menu", "Quick Save", "Toggle Fullscreen", "Soft Reset", "Reload Media",
+	static const char *general_names[] = {
+		"Show Menu", "Quick Save", "Quick Load", "Toggle Fullscreen", "Soft Reset", "Reload Media",
 		"Internal Screenshot", "Toggle VGM Log", "SMS Pause", "Capture Keyboard", "Release Mouse"
 	};
-	const char *speed_binds[] = {
+	static const char *speed_binds[] = {
 		"ui.next_speed", "ui.prev_speed",
 		"ui.set_speed.0", "ui.set_speed.1", "ui.set_speed.2" ,"ui.set_speed.3", "ui.set_speed.4",
 		"ui.set_speed.5", "ui.set_speed.6", "ui.set_speed.7" ,"ui.set_speed.8", "ui.set_speed.9",
 	};
-	const char *speed_names[] = {
+	static const char *speed_names[] = {
 		"Next", "Previous",
 		"Default Speed", "Set Speed 1", "Set Speed 2", "Set Speed 3", "Set Speed 4",
 		"Set Speed 5", "Set Speed 6", "Set Speed 7", "Set Speed 8", "Set Speed 9"
 	};
-	const char *debug_binds[] = {
+	static const char *debug_binds[] = {
 		"ui.enter_debugger", "ui.plane_debug", "ui.vram_debug", "ui.cram_debug",
 		"ui.compositing_debug", "ui.vdp_debug_mode"
 	};
@@ -633,6 +633,7 @@ const char *translate_binding_option(const char *option)
 		conf_names = tern_insert_ptr(conf_names, "ui.vgm_log", "Toggle VGM Log");
 		conf_names = tern_insert_ptr(conf_names, "ui.exit", "Show Menu");
 		conf_names = tern_insert_ptr(conf_names, "ui.save_state", "Quick Save");
+		conf_names = tern_insert_ptr(conf_names, "ui.load_state", "Quick Load");
 		conf_names = tern_insert_ptr(conf_names, "ui.set_speed.0", "Set Speed 0");
 		conf_names = tern_insert_ptr(conf_names, "ui.set_speed.1", "Set Speed 1");
 		conf_names = tern_insert_ptr(conf_names, "ui.set_speed.2", "Set Speed 2");
@@ -696,6 +697,7 @@ static void view_button_binding(struct nk_context *context)
 	};
 	static const char *emu_control[] = {
 		"ui.save_state",
+		"ui.load_state",
 		"ui.exit",
 		"ui.toggle_fullscreen",
 		"ui.screenshot",

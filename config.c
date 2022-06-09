@@ -285,7 +285,7 @@ static void migrate_pads(char *key, tern_val val, uint8_t valtype, void *data)
 	*pads = tern_insert_node(*pads, key, dupe_tree(val.ptrval));
 }
 
-#define CONFIG_VERSION 1
+#define CONFIG_VERSION 2
 static tern_node *migrate_config(tern_node *config, int from_version)
 {
 	tern_node *def_config = parse_bundled_config("default.cfg");
@@ -324,6 +324,13 @@ static tern_node *migrate_config(tern_node *config, int from_version)
 		tern_node *def_pads = tern_find_path(def_config, "bindings\0pads\0", TVAL_NODE).ptrval;
 		tern_foreach(def_pads, migrate_pads, &pads);
 		config = tern_insert_path(config, "bindings\0pads\0", (tern_val){.ptrval = pads}, TVAL_NODE);
+		break;
+	}
+	case 1: {
+		char *l_bind = tern_find_path(config, "bindings\0keys\0l\0", TVAL_PTR).ptrval;
+		if (!l_bind) {
+			config = tern_insert_path(config, "bindings\0keys\0l\0", (tern_val){.ptrval = strdup("ui.load_state")}, TVAL_PTR);
+		}
 		break;
 	}
 	}

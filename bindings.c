@@ -26,6 +26,7 @@ typedef enum {
 	UI_DEBUG_MODE_INC,
 	UI_ENTER_DEBUGGER,
 	UI_SAVE_STATE,
+	UI_LOAD_STATE,
 	UI_SET_SPEED,
 	UI_NEXT_SPEED,
 	UI_PREV_SPEED,
@@ -323,6 +324,11 @@ void handle_binding_up(keybinding * binding)
 		case UI_SAVE_STATE:
 			if (allow_content_binds) {
 				current_system->save_state = QUICK_SAVE_SLOT+1;
+			}
+			break;
+		case UI_LOAD_STATE:
+			if (allow_content_binds) {
+				current_system->load_state(current_system, QUICK_SAVE_SLOT);
 			}
 			break;
 		case UI_NEXT_SPEED:
@@ -630,6 +636,8 @@ int parse_binding_target(int device_num, char * target, tern_node * padbuttons, 
 			*subtype_a = UI_ENTER_DEBUGGER;
 		} else if(!strcmp(target + 3, "save_state")) {
 			*subtype_a = UI_SAVE_STATE;
+		} else if(!strcmp(target + 3, "load_state")) {
+			*subtype_a = UI_LOAD_STATE;
 		} else if(startswith(target + 3, "set_speed.")) {
 			*subtype_a = UI_SET_SPEED;
 			*subtype_b = atoi(target + 3 + strlen("set_speed."));
