@@ -52,6 +52,7 @@ typedef struct {
 } segacd_context;
 
 segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8_t force_region, rom_info *info);
+void free_segacd(segacd_context *cd);
 memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_t *num_chunks);
 uint32_t gen_cycle_to_scd(uint32_t cycle, genesis_context *gen);
 void scd_run(segacd_context *cd, uint32_t cycle);

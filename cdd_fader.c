@@ -8,6 +8,12 @@ void cdd_fader_init(cdd_fader *fader)
 	fader->dst_attenuation = 0x4000;
 	fader->attenuation_step = 0;
 }
+
+void cdd_fader_deinit(cdd_fader *fader)
+{
+	render_free_source(fader->audio);
+}
+
 void cdd_fader_attenuation_write(cdd_fader *fader, uint16_t attenuation)
 {
 	fader->dst_attenuation = attenuation & 0xFFF0;

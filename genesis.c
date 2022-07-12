@@ -1549,6 +1549,9 @@ static void soft_reset(system_header *system)
 static void free_genesis(system_header *system)
 {
 	genesis_context *gen = (genesis_context *)system;
+	if (gen->expansion) {
+		free_segacd(gen->expansion);
+	}
 	vdp_free(gen->vdp);
 	memmap_chunk *map = (memmap_chunk *)gen->m68k->options->gen.memmap;
 	m68k_options_free(gen->m68k->options);

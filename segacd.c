@@ -1490,6 +1490,19 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	return cd;
 }
 
+void free_segacd(segacd_context *cd)
+{
+	cdd_fader_deinit(&cd->fader);
+	rf5c164_deinit(&cd->pcm);
+	m68k_options_free(cd->m68k->options);
+	free(cd->m68k);
+	free(cd->bram);
+	free(cd->pcm_ram);
+	free(cd->word_ram);
+	free(cd->prog_ram);
+	free(cd->rom_mut);
+}
+
 memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_t *num_chunks)
 {
 	static memmap_chunk main_cpu_map[] = {

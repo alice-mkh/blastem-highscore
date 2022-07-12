@@ -28,6 +28,11 @@ void rf5c164_init(rf5c164* pcm, uint32_t mclks, uint32_t divider)
 	pcm->clock_step = divider * 4;
 }
 
+void rf5c164_deinit(rf5c164* pcm)
+{
+	render_free_source(pcm->audio);
+}
+
 //48 cycles per channel
 //1 external write per 16 cycles
 //3 external writes per channel/sample
