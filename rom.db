@@ -1460,3 +1460,17 @@ T-172036 {
 		}
 	}
 }
+T-49116 {
+	name Beast Wrestler
+	device_overrides {
+		1 gamepad3.1
+		2 gamepad3.2
+	}
+}
+T-49186 {
+	name Exile
+	device_overrides {
+		1 gamepad3.1
+		2 gamepad3.2
+	}
+}
