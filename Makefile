@@ -361,7 +361,7 @@ m68k.c : m68k.cpu cpu_dsl.py
 	$(CC) $(CFLAGS) -c -o $@ $<
 
 %.png : %.xcf
-	xcf2png $< > $@
+	convert -background none -flatten $< $@
 
 %.tiles : %.spec
 	./img2tiles.py -s $< $@
