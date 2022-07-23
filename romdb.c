@@ -487,12 +487,15 @@ rom_info configure_rom_heuristics(uint8_t *rom, uint32_t rom_size, memmap_chunk 
 		case 'K':
 		case 'R':
 		case 'D':
+		case 'P':
 			//valid device letter
 			//TODO: do something with these
 			break;
+		case ' ':
+			//blanks are okay
+			break;
 		case 'F':
 		case 'T':
-		case 'P':
 			//unreleased peripheral, probably garbage
 			invalid = 1;
 			break;
