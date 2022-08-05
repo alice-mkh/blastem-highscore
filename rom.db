@@ -1474,3 +1474,20 @@ T-49186 {
 		2 gamepad3.2
 	}
 }
+T-172186 {
+	name NBA Live 98
+	SRAM {
+		size 8192
+		bus odd
+	}
+	map {
+		0 {
+			device ROM
+			last 1FFFFF
+		}
+		200000 {
+			device SRAM
+			last 3FFFFF
+		}
+	}
+}
