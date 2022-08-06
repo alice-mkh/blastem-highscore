@@ -69,7 +69,9 @@ typedef enum {
 	TOKEN_NUM,
 	TOKEN_NAME,
 	TOKEN_OPER,
-	TOKEN_SIZE
+	TOKEN_SIZE,
+	TOKEN_LBRACKET,
+	TOKEN_RBRACKET,
 } token_type;
 
 static const char *token_type_names[] = {
@@ -77,7 +79,9 @@ static const char *token_type_names[] = {
 	"TOKEN_NUM",
 	"TOKEN_NAME",
 	"TOKEN_OPER",
-	"TOKEN_SIZE"
+	"TOKEN_SIZE",
+	"TOKEN_LBRACKET",
+	"TOKEN_RBRACKET"
 };
 
 typedef struct {
@@ -153,6 +157,16 @@ static token parse_token(char *start, char **end)
 				.op = {start[1], 0}
 			}
 		};
+	case '[':
+		*end = start + 1;
+		return (token) {
+			.type = TOKEN_LBRACKET
+		};
+	case ']':
+		*end = start + 1;
+		return (token) {
+			.type = TOKEN_RBRACKET
+		};
 	}
 	*end = start + 1;
 	while (**end && !isblank(**end) && **end != '.')
@@ -175,7 +189,8 @@ typedef enum {
 	EXPR_SCALAR,
 	EXPR_UNARY,
 	EXPR_BINARY,
-	EXPR_SIZE
+	EXPR_SIZE,
+	EXPR_MEM
 } expr_type;
 
 typedef struct expr expr;
@@ -199,6 +214,9 @@ static void free_expr(expr *e)
 	}
 	free(e);
 }
+
+static expr *parse_scalar_or_muldiv(char *start, char **end);
+static expr *parse_expression(char *start, char **end);
 
 static expr *parse_scalar(char *start, char **end)
 {
@@ -224,6 +242,29 @@ static expr *parse_scalar(char *start, char **end)
 		*end = after_first;
 		return ret;
 	}
+	if (first.type == TOKEN_LBRACKET) {
+		expr *ret = calloc(1, sizeof(expr));
+		ret->type = EXPR_MEM;
+		ret->left = parse_expression(after_first, end);
+		if (!ret->left) {
+			fprintf(stderr, "Expression expected after `[`\n");
+			free(ret);
+			return NULL;
+		}
+		token rbrack = parse_token(*end, end);
+		if (rbrack.type != TOKEN_RBRACKET) {
+			fprintf(stderr, "Missing closing `]`");
+			free_expr(ret);
+			return NULL;
+		}
+		char *after_size;
+		token size = parse_token(*end, &after_size);
+		if (size.type == TOKEN_SIZE) {
+			*end = after_size;
+			ret->op = size;
+		}
+		return ret;
+	}
 	token second = parse_token(after_first, end);
 	if (second.type != TOKEN_SIZE) {
 		expr *ret = calloc(1, sizeof(expr));
@@ -240,9 +281,6 @@ static expr *parse_scalar(char *start, char **end)
 	ret->op = first;
 	return ret;
 }
-
-static expr *parse_scalar_or_muldiv(char *start, char **end);
-static expr *parse_expression(char *start, char **end);
 
 static expr *maybe_binary(expr *left, char *start, char **end)
 {
@@ -331,15 +369,31 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 		ret->left = target;
 		return ret;
 	}
-	char *after_second;
-	token second = parse_token(after_first, &after_second);
-	if (!second.type) {
+	if (first.type == TOKEN_LBRACKET) {
 		expr *ret = calloc(1, sizeof(expr));
-		ret->type = EXPR_SCALAR;
-		ret->op = first;
-		*end = after_first;
+		ret->type = EXPR_MEM;
+		ret->left = parse_expression(after_first, end);
+		if (!ret->left) {
+			fprintf(stderr, "Expression expected after `[`\n");
+			free(ret);
+			return NULL;
+		}
+		token rbrack = parse_token(*end, end);
+		if (rbrack.type != TOKEN_RBRACKET) {
+			fprintf(stderr, "Missing closing `]`");
+			free_expr(ret);
+			return NULL;
+		}
+		char *after_size;
+		token size = parse_token(*end, &after_size);
+		if (size.type == TOKEN_SIZE) {
+			*end = after_size;
+			ret->op = size;
+		}
 		return ret;
 	}
+	char *after_second;
+	token second = parse_token(after_first, &after_second);
 	if (second.type == TOKEN_OPER) {
 		expr *ret;
 		expr *bin = calloc(1, sizeof(expr));
@@ -380,8 +434,11 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 		value->left->op = first;
 		return maybe_muldiv(value, after_second, end);
 	} else {
-		fprintf(stderr, "Unexpected %s after scalar\n", token_type_names[second.type]);
-		return NULL;
+		expr *ret = calloc(1, sizeof(expr));
+		ret->type = EXPR_SCALAR;
+		ret->op = first;
+		*end = after_first;
+		return ret;
 	}
 }
 
@@ -408,15 +465,31 @@ static expr *parse_expression(char *start, char **end)
 		ret->left = target;
 		return ret;
 	}
-	char *after_second;
-	token second = parse_token(after_first, &after_second);
-	if (!second.type) {
+	if (first.type == TOKEN_LBRACKET) {
 		expr *ret = calloc(1, sizeof(expr));
-		ret->type = EXPR_SCALAR;
-		ret->op = first;
-		*end = after_first;
+		ret->type = EXPR_MEM;
+		ret->left = parse_expression(after_first, end);
+		if (!ret->left) {
+			fprintf(stderr, "Expression expected after `[`\n");
+			free(ret);
+			return NULL;
+		}
+		token rbrack = parse_token(*end, end);
+		if (rbrack.type != TOKEN_RBRACKET) {
+			fprintf(stderr, "Missing closing `]`");
+			free_expr(ret);
+			return NULL;
+		}
+		char *after_size;
+		token size = parse_token(*end, &after_size);
+		if (size.type == TOKEN_SIZE) {
+			*end = after_size;
+			ret->op = size;
+		}
 		return ret;
 	}
+	char *after_second;
+	token second = parse_token(after_first, &after_second);
 	if (second.type == TOKEN_OPER) {
 		expr *bin = calloc(1, sizeof(expr));
 		bin->type = EXPR_BINARY;
@@ -456,16 +529,21 @@ static expr *parse_expression(char *start, char **end)
 		value->left->op = first;
 		return maybe_binary(value, after_second, end);
 	} else {
-		fprintf(stderr, "Unexpected %s after scalar\n", token_type_names[second.type]);
-		return NULL;
+		expr *ret = calloc(1, sizeof(expr));
+		ret->type = EXPR_SCALAR;
+		ret->op = first;
+		*end = after_first;
+		return ret;
 	}
 }
 
 typedef struct debug_context debug_context;
 typedef uint8_t (*resolver)(debug_context *context, const char *name, uint32_t *out);
+typedef uint8_t (*reader)(debug_context *context, uint32_t *out, char size);
 
 struct debug_context {
 	resolver resolve;
+	reader   read_mem;
 	void     *system;
 };
 
@@ -551,6 +629,11 @@ uint8_t eval_expr(debug_context *context, expr *e, uint32_t *out)
 			break;
 		}
 		return 1;
+	case EXPR_MEM:
+		if (!eval_expr(context, e->left, out)) {
+			return 0;
+		}
+		return context->read_mem(context, out, e->op.v.op[0]);
 	default:
 		return 0;
 	}
@@ -608,17 +691,35 @@ static uint8_t m68k_read_byte(uint32_t address, m68k_context *context)
 	return read_byte(address, (void **)context->mem_pointers, &context->options->gen, context);
 }
 
-uint16_t m68k_read_word(uint32_t address, m68k_context *context)
+static uint16_t m68k_read_word(uint32_t address, m68k_context *context)
 {
 	return read_word(address, (void **)context->mem_pointers, &context->options->gen, context);
 }
 
-uint32_t m68k_read_long(uint32_t address, m68k_context *context)
+static uint32_t m68k_read_long(uint32_t address, m68k_context *context)
 {
 	return m68k_read_word(address, context) << 16 | m68k_read_word(address + 2, context);
 }
 
-uint8_t resolve_m68k(m68k_context *context, const char *name, uint32_t *out)
+static uint8_t read_m68k(m68k_context *context, uint32_t *out, char size)
+{
+	if (size == 'b') {
+		*out = m68k_read_byte(*out, context);
+	} else if (size == 'l') {
+		*out = m68k_read_long(*out, context);
+	} else {
+		*out = m68k_read_word(*out, context);
+	}
+	return 1;
+}
+
+static uint8_t read_genesis(debug_context *context, uint32_t *out, char size)
+{
+	genesis_context *gen = context->system;
+	return read_m68k(gen->m68k, out, size);
+}
+
+static uint8_t resolve_m68k(m68k_context *context, const char *name, uint32_t *out)
 {
 	if (name[0] == 'd' && name[1] >= '0' && name[1] <= '7') {
 		*out = context->dregs[name[1]-'0'];
@@ -640,7 +741,7 @@ uint8_t resolve_m68k(m68k_context *context, const char *name, uint32_t *out)
 	return 1;
 }
 
-uint8_t resolve_genesis(debug_context *context, const char *name, uint32_t *out)
+static uint8_t resolve_genesis(debug_context *context, const char *name, uint32_t *out)
 {
 	genesis_context *gen = context->system;
 	if (resolve_m68k(gen->m68k, name, out)) {
@@ -674,6 +775,7 @@ void debugger_print(m68k_context *context, char format_char, char *param, uint32
 	}
 	debug_context c = {
 		.resolve = resolve_genesis,
+		.read_mem = read_genesis,
 		.system = context->system
 	};
 	char *after;
