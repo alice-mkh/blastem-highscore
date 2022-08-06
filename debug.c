@@ -183,8 +183,29 @@ static token parse_token(char *start, char **end)
 		};
 	}
 	*end = start + 1;
-	while (**end && !isblank(**end) && **end != '.')
+	while (**end && !isblank(**end))
 	{
+		uint8_t done = 0;
+		switch (**end)
+		{
+		case '+':
+		case '-':
+		case '*':
+		case '/':
+		case '&':
+		case '|':
+		case '^':
+		case '~':
+		case '=':
+		case '!':
+		case '.':
+			done = 1;
+			break;
+		}
+		if (done) {
+			break;
+		}
+			
 		++*end;
 	}
 	char *name = malloc(*end - start + 1);
