@@ -868,85 +868,47 @@ void debugger_print(m68k_context *context, char format_char, char *param, uint32
 		.system = context->system
 	};
 	char *after;
-	expr *e = parse_expression(param, &after);
-	if (e) {
-		if (!eval_expr(&c, e, &value)) {
-			fprintf(stderr, "Failed to eval %s\n", param);
-		}
-		free_expr(e);
-	} else {
-		fprintf(stderr, "Failed to parse %s\n", param);
-	}
-	/*
-	if (param[0] == 'd' && param[1] >= '0' && param[1] <= '7') {
-		value = context->dregs[param[1]-'0'];
-		if (param[2] == '.') {
-			if (param[3] == 'w') {
-				value &= 0xFFFF;
-			} else if (param[3] == 'b') {
-				value &= 0xFF;
+	uint8_t at_least_one = 0;
+	while (*param && *param != '\n')
+	{
+		at_least_one = 1;
+		expr *e = parse_expression(param, &after);
+		if (e) {
+			if (!eval_expr(&c, e, &value)) {
+				fprintf(stderr, "Failed to eval %s\n", param);
 			}
+			free_expr(e);
+		} else {
+			fprintf(stderr, "Failed to parse %s\n", param);
 		}
-	} else if (param[0] == 'a' && param[1] >= '0' && param[1] <= '7') {
-		value = context->aregs[param[1]-'0'];
-		if (param[2] == '.') {
-			if (param[3] == 'w') {
-				value &= 0xFFFF;
-			} else if (param[3] == 'b') {
-				value &= 0xFF;
+		char *tmp_param = malloc(after-param+1);
+		memcpy(tmp_param, param, after-param);
+		tmp_param[after-param] = 0;
+		param = after;
+		if (format_char == 's') {
+			char tmp[128];
+			int i;
+			for (i = 0; i < sizeof(tmp)-1; i++, value++)
+			{
+				char c = m68k_read_byte(value, context);
+				if (c < 0x20 || c > 0x7F) {
+					break;
+				}
+				tmp[i] = c;
 			}
-		}
-	} else if (param[0] == 's' && param[1] == 'r') {
-		value = (context->status << 8);
-		for (int flag = 0; flag < 5; flag++) {
-			value |= context->flags[flag] << (4-flag);
-		}
-	} else if(param[0] == 'c') {
-		value = context->current_cycle;
-	} else if(param[0] == 'f') {
-		genesis_context *gen = context->system;
-		value = gen->vdp->frame;
-	} else if (param[0] == 'p' && param[1] == 'c') {
-		value = address;
-	} else if ((param[0] == '0' && param[1] == 'x') || param[0] == '$') {
-		char *after;
-		uint32_t p_addr = strtol(param+(param[0] == '0' ? 2 : 1), &after, 16);
-		if (after[0] == '.' && after[1] == 'l') {
-			value = m68k_read_long(p_addr, context);
-		} else if (after[0] == '.' && after[1] == 'b') {
-			value = m68k_read_byte(p_addr, context);
+			tmp[i] = 0;
+			printf(format, tmp_param, tmp);
 		} else {
-			value = m68k_read_word(p_addr, context);
+			printf(format, tmp_param, value);
 		}
-	} else if(param[0] == '(' && (param[1] == 'a' || param[1] == 'd') && param[2] >= '0' && param[2] <= '7' && param[3] == ')') {
-		uint8_t reg = param[2] - '0';
-		uint32_t p_addr = param[1] == 'a' ? context->aregs[reg] : context->dregs[reg];
-		if (param[4] == '.' && param[5] == 'l') {
-			value = m68k_read_long(p_addr, context);
-		} else if (param[4] == '.' && param[5] == 'b') {
-			value = m68k_read_byte(p_addr, context);
-		} else {
-			value = m68k_read_word(p_addr, context);
-		}
-	} else {
-		fprintf(stderr, "Unrecognized parameter to p: %s\n", param);
-		return;
-	}*/
-	if (format_char == 's') {
-		char tmp[128];
-		int i;
-		for (i = 0; i < sizeof(tmp)-1; i++, value++)
+		free(tmp_param);
+		while (*param && isblank(*param) && *param != '\n')
 		{
-			char c = m68k_read_byte(value, context);
-			if (c < 0x20 || c > 0x7F) {
-				break;
-			}
-			tmp[i] = c;
+			++param;
 		}
-		tmp[i] = 0;
-		printf(format, param, tmp);
-	} else {
-		printf(format, param, value);
+	}
+	if (!at_least_one) {
+		fprintf(stderr, "Missing argument to print/%c\n", format_char);
 	}
 }
 
