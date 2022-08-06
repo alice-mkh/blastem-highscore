@@ -634,6 +634,7 @@ struct debug_context {
 	resolver resolve;
 	reader   read_mem;
 	void     *system;
+	uint32_t address;
 };
 
 uint8_t eval_expr(debug_context *context, expr *e, uint32_t *out)
@@ -808,22 +809,25 @@ static uint8_t read_genesis(debug_context *context, uint32_t *out, char size)
 	return read_m68k(gen->m68k, out, size);
 }
 
-static uint8_t resolve_m68k(m68k_context *context, const char *name, uint32_t *out)
+static uint8_t resolve_m68k(debug_context *debug, m68k_context *context, const char *name, uint32_t *out)
 {
-	if (name[0] == 'd' && name[1] >= '0' && name[1] <= '7') {
+	if ((name[0] == 'd' || name[0] == 'D') && name[1] >= '0' && name[1] <= '7' && !name[2]) {
 		*out = context->dregs[name[1]-'0'];
-	} else if (name[0] == 'a' && name[1] >= '0' && name[1] <= '7') {
+	} else if ((name[0] == 'a' || name[0] == 'A') && name[1] >= '0' && name[1] <= '7' && !name[2]) {
 		*out = context->aregs[name[1]-'0'];
-	} else if (name[0] == 's' && name[1] == 'r') {
+	} else if (!strcasecmp(name, "sr")) {
 		*out = context->status << 8;
 		for (int flag = 0; flag < 5; flag++) {
 			*out |= context->flags[flag] << (4-flag);
 		}
-	} else if(name[0] == 'c') {
+	} else if(!strcasecmp(name, "cycle")) {
 		*out = context->current_cycle;
-	} else if (name[0] == 'p' && name[1] == 'c') {
-		//FIXME
-		//*out = address;
+	} else if (!strcasecmp(name, "pc")) {
+		*out = debug->address;
+	} else if (!strcasecmp(name, "usp")) {
+		*out = context->status & 0x20 ? context->aregs[8] : context->aregs[7];
+	} else if (!strcasecmp(name, "ssp")) {
+		*out = context->status & 0x20 ? context->aregs[7] : context->aregs[8];
 	} else {
 		return 0;
 	}
@@ -833,7 +837,7 @@ static uint8_t resolve_m68k(m68k_context *context, const char *name, uint32_t *o
 static uint8_t resolve_genesis(debug_context *context, const char *name, uint32_t *out)
 {
 	genesis_context *gen = context->system;
-	if (resolve_m68k(gen->m68k, name, out)) {
+	if (resolve_m68k(context, gen->m68k, name, out)) {
 		return 1;
 	}
 	if (!strcmp(name, "f") || !strcmp(name, "frame")) {
@@ -865,7 +869,8 @@ void debugger_print(m68k_context *context, char format_char, char *param, uint32
 	debug_context c = {
 		.resolve = resolve_genesis,
 		.read_mem = read_genesis,
-		.system = context->system
+		.system = context->system,
+		.address = address
 	};
 	char *after;
 	uint8_t at_least_one = 0;
