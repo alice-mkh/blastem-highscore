@@ -64,6 +64,498 @@ bp_def ** find_breakpoint_idx(bp_def ** cur, uint32_t index)
 	return cur;
 }
 
+typedef enum {
+	TOKEN_NONE,
+	TOKEN_NUM,
+	TOKEN_NAME,
+	TOKEN_OPER,
+	TOKEN_SIZE
+} token_type;
+
+static const char *token_type_names[] = {
+	"TOKEN_NONE",
+	"TOKEN_NUM",
+	"TOKEN_NAME",
+	"TOKEN_OPER",
+	"TOKEN_SIZE"
+};
+
+typedef struct {
+	token_type type;
+	union {
+		char     *str;
+		char     op[3];
+		uint32_t num;
+	} v;
+} token;
+
+static token parse_token(char *start, char **end)
+{
+	while(*start && isblank(*start) && *start != '\n')
+	{
+		++start;
+	}
+	if (!*start || *start == '\n') {
+		return (token){
+			.type = TOKEN_NONE
+		};
+		*end = start;
+	}
+	if (*start == '$' || (*start == '0' && start[1] == 'x')) {
+		return (token) {
+			.type = TOKEN_NUM,
+			.v = {
+				.num = strtol(start + (*start == '$' ? 1 : 2), end, 16)
+			}
+		};
+	}
+	if (isdigit(*start)) {
+		return (token) {
+			.type = TOKEN_NUM,
+			.v = {
+				.num = strtol(start, end, 10)
+			}
+		};
+	}
+	switch (*start)
+	{
+	case '+':
+	case '-':
+	case '*':
+	case '/':
+	case '&':
+	case '|':
+	case '^':
+	case '~':
+	case '=':
+	case '!':
+		if (*start == '!' && start[1] == '=') {
+			*end = start + 2;
+			return (token) {
+				.type = TOKEN_OPER,
+				.v = {
+					.op = {*start, start[1], 0}
+				}
+			};
+		}
+		*end = start + 1;
+		return (token) {
+			.type = TOKEN_OPER,
+			.v = {
+				.op = {*start, 0}
+			}
+		};
+	case '.':
+		*end = start + 2;
+		return (token) {
+			.type = TOKEN_SIZE,
+			.v = {
+				.op = {start[1], 0}
+			}
+		};
+	}
+	*end = start + 1;
+	while (**end && !isblank(**end) && **end != '.')
+	{
+		++*end;
+	}
+	char *name = malloc(*end - start + 1);
+	memcpy(name, start, *end - start);
+	name[*end-start] = 0;
+	return (token) {
+		.type = TOKEN_NAME,
+		.v = {
+			.str = name
+		}
+	};
+}
+
+typedef enum {
+	EXPR_NONE,
+	EXPR_SCALAR,
+	EXPR_UNARY,
+	EXPR_BINARY,
+	EXPR_SIZE
+} expr_type;
+
+typedef struct expr expr;
+
+struct expr {
+	expr_type type;
+	expr      *left;
+	expr      *right;
+	token     op;
+};
+
+static void free_expr(expr *e)
+{
+	if (!e) {
+		return;
+	}
+	free_expr(e->left);
+	free_expr(e->right);
+	if (e->op.type == TOKEN_NAME) {
+		free(e->op.v.str);
+	}
+	free(e);
+}
+
+static expr *parse_scalar(char *start, char **end)
+{
+	char *after_first;
+	token first = parse_token(start, &after_first);
+	if (!first.type) {
+		return NULL;
+	}
+	if (first.type == TOKEN_SIZE) {
+		fprintf(stderr, "Unexpected TOKEN_SIZE '.%s'\n", first.v.op);
+		return NULL;
+	}
+	if (first.type == TOKEN_OPER) {
+		expr *target = parse_scalar(after_first, end);
+		if (!target) {
+			fprintf(stderr, "Unary expression %s needs value\n", first.v.op);
+			return NULL;
+		}
+		expr *ret = calloc(1, sizeof(expr));
+		ret->type = EXPR_UNARY;
+		ret->op = first;
+		ret->left = target;
+		*end = after_first;
+		return ret;
+	}
+	token second = parse_token(after_first, end);
+	if (second.type != TOKEN_SIZE) {
+		expr *ret = calloc(1, sizeof(expr));
+		ret->type = EXPR_SCALAR;
+		ret->op = first;
+		*end = after_first;
+		return ret;
+	}
+	expr *ret = calloc(1, sizeof(expr));
+	ret->type = EXPR_SIZE;
+	ret->left = calloc(1, sizeof(expr));
+	ret->left->type = EXPR_SCALAR;
+	ret->left->op = second;
+	ret->op = first;
+	return ret;
+}
+
+static expr *parse_scalar_or_muldiv(char *start, char **end);
+static expr *parse_expression(char *start, char **end);
+
+static expr *maybe_binary(expr *left, char *start, char **end)
+{
+	char *after_first;
+	token first = parse_token(start, &after_first);
+	if (first.type != TOKEN_OPER) {
+		*end = start;
+		return left;
+	}
+	expr *bin = calloc(1, sizeof(expr));
+	bin->left = left;
+	bin->op = first;
+	bin->type = EXPR_BINARY;
+	switch (first.v.op[0])
+	{
+	case '*':
+	case '/':
+	case '&':
+	case '|':
+	case '^':
+		bin->right = parse_scalar(after_first, end);
+		return maybe_binary(bin, *end, end);
+	case '+':
+	case '-':
+		bin->right = parse_scalar_or_muldiv(after_first, end);
+		return maybe_binary(bin, *end, end);
+	case '=':
+	case '!':
+		bin->right = parse_expression(after_first, end);
+		return bin;
+	default:
+		bin->left = NULL;
+		free(bin);
+		return left;
+	}
+}
+
+static expr *maybe_muldiv(expr *left, char *start, char **end)
+{
+	char *after_first;
+	token first = parse_token(start, &after_first);
+	if (first.type != TOKEN_OPER) {
+		*end = start;
+		return left;
+	}
+	expr *bin = calloc(1, sizeof(expr));
+	bin->left = left;
+	bin->op = first;
+	bin->type = EXPR_BINARY;
+	switch (first.v.op[0])
+	{
+	case '*':
+	case '/':
+	case '&':
+	case '|':
+	case '^':
+		bin->right = parse_scalar(after_first, end);
+		return maybe_binary(bin, *end, end);
+	default:
+		bin->left = NULL;
+		free(bin);
+		return left;
+	}
+}
+
+static expr *parse_scalar_or_muldiv(char *start, char **end)
+{
+	char *after_first;
+	token first = parse_token(start, &after_first);
+	if (!first.type) {
+		return NULL;
+	}
+	if (first.type == TOKEN_SIZE) {
+		fprintf(stderr, "Unexpected TOKEN_SIZE '.%s'\n", first.v.op);
+		return NULL;
+	}
+	if (first.type == TOKEN_OPER) {
+		expr *target = parse_scalar(after_first, end);
+		if (!target) {
+			fprintf(stderr, "Unary expression %s needs value\n", first.v.op);
+			return NULL;
+		}
+		expr *ret = calloc(1, sizeof(expr));
+		ret->type = EXPR_UNARY;
+		ret->op = first;
+		ret->left = target;
+		return ret;
+	}
+	char *after_second;
+	token second = parse_token(after_first, &after_second);
+	if (!second.type) {
+		expr *ret = calloc(1, sizeof(expr));
+		ret->type = EXPR_SCALAR;
+		ret->op = first;
+		*end = after_first;
+		return ret;
+	}
+	if (second.type == TOKEN_OPER) {
+		expr *ret;
+		expr *bin = calloc(1, sizeof(expr));
+		bin->type = EXPR_BINARY;
+		bin->left = calloc(1, sizeof(expr));
+		bin->left->type = EXPR_SCALAR;
+		bin->left->op = first;
+		bin->op = second;
+		switch (second.v.op[0])
+		{
+		case '*':
+		case '/':
+		case '&':
+		case '|':
+		case '^':
+			bin->right = parse_scalar(after_second, end);
+			return maybe_muldiv(bin, *end, end);
+		case '+':
+		case '-':
+		case '=':
+		case '!':
+			ret = bin->left;
+			bin->left = NULL;
+			free_expr(bin);
+			return ret;
+		default:
+			fprintf(stderr, "%s is not a valid binary operator\n", second.v.op);
+			free(bin->left);
+			free(bin);
+			return NULL;
+		}
+	} else if (second.type == TOKEN_SIZE) {
+		expr *value = calloc(1, sizeof(expr));
+		value->type = EXPR_SIZE;
+		value->op = second;
+		value->left = calloc(1, sizeof(expr));
+		value->left->type = EXPR_SCALAR;
+		value->left->op = first;
+		return maybe_muldiv(value, after_second, end);
+	} else {
+		fprintf(stderr, "Unexpected %s after scalar\n", token_type_names[second.type]);
+		return NULL;
+	}
+}
+
+static expr *parse_expression(char *start, char **end)
+{
+	char *after_first;
+	token first = parse_token(start, &after_first);
+	if (!first.type) {
+		return NULL;
+	}
+	if (first.type == TOKEN_SIZE) {
+		fprintf(stderr, "Unexpected TOKEN_SIZE '.%s'\n", first.v.op);
+		return NULL;
+	}
+	if (first.type == TOKEN_OPER) {
+		expr *target = parse_scalar(after_first, end);
+		if (!target) {
+			fprintf(stderr, "Unary expression %s needs value\n", first.v.op);
+			return NULL;
+		}
+		expr *ret = calloc(1, sizeof(expr));
+		ret->type = EXPR_UNARY;
+		ret->op = first;
+		ret->left = target;
+		return ret;
+	}
+	char *after_second;
+	token second = parse_token(after_first, &after_second);
+	if (!second.type) {
+		expr *ret = calloc(1, sizeof(expr));
+		ret->type = EXPR_SCALAR;
+		ret->op = first;
+		*end = after_first;
+		return ret;
+	}
+	if (second.type == TOKEN_OPER) {
+		expr *bin = calloc(1, sizeof(expr));
+		bin->type = EXPR_BINARY;
+		bin->left = calloc(1, sizeof(expr));
+		bin->left->type = EXPR_SCALAR;
+		bin->left->op = first;
+		bin->op = second;
+		switch (second.v.op[0])
+		{
+		case '*':
+		case '/':
+		case '&':
+		case '|':
+		case '^':
+			bin->right = parse_scalar(after_second, end);
+			return maybe_binary(bin, *end, end);
+		case '+':
+		case '-':
+			bin->right = parse_scalar_or_muldiv(after_second, end);
+			return maybe_binary(bin, *end, end);
+		case '=':
+		case '!':
+			bin->right = parse_expression(after_second, end);
+			return bin;
+		default:
+			fprintf(stderr, "%s is not a valid binary operator\n", second.v.op);
+			free(bin->left);
+			free(bin);
+			return NULL;
+		}
+	} else if (second.type == TOKEN_SIZE) {
+		expr *value = calloc(1, sizeof(expr));
+		value->type = EXPR_SIZE;
+		value->op = second;
+		value->left = calloc(1, sizeof(expr));
+		value->left->type = EXPR_SCALAR;
+		value->left->op = first;
+		return maybe_binary(value, after_second, end);
+	} else {
+		fprintf(stderr, "Unexpected %s after scalar\n", token_type_names[second.type]);
+		return NULL;
+	}
+}
+
+typedef struct debug_context debug_context;
+typedef uint8_t (*resolver)(debug_context *context, const char *name, uint32_t *out);
+
+struct debug_context {
+	resolver resolve;
+	void     *system;
+};
+
+uint8_t eval_expr(debug_context *context, expr *e, uint32_t *out)
+{
+	uint32_t right;
+	switch(e->type)
+	{
+	case EXPR_SCALAR:
+		if (e->op.type == TOKEN_NAME) {
+			return context->resolve(context, e->op.v.str, out);
+		} else {
+			*out = e->op.v.num;
+			return 1;
+		}
+	case EXPR_UNARY:
+		if (!eval_expr(context, e->left, out)) {
+			return 0;
+		}
+		switch (e->op.v.op[0])
+		{
+		case '!':
+			*out = !*out;
+			break;
+		case '~':
+			*out = ~*out;
+			break;
+		case '-':
+			*out = -*out;
+			break;
+		default:
+			return 0;
+		}
+		return 1;
+	case EXPR_BINARY:
+		if (!eval_expr(context, e->left, out) || !eval_expr(context, e->right, &right)) {
+			return 0;
+		}
+		switch (e->op.v.op[0])
+		{
+		case '+':
+			*out += right;
+			break;
+		case '-':
+			*out -= right;
+			break;
+		case '*':
+			*out *= right;
+			break;
+		case '/':
+			*out /= right;
+			break;
+		case '&':
+			*out &= right;
+			break;
+		case '|':
+			*out |= right;
+			break;
+		case '^':
+			*out ^= right;
+			break;
+		case '=':
+			*out = *out == right;
+			break;
+		case '!':
+			*out = *out != right;
+			break;
+		default:
+			return 0;
+		}
+		return 1;
+	case EXPR_SIZE:
+		if (!eval_expr(context, e->left, out)) {
+			return 0;
+		}
+		switch (e->op.v.op[0])
+		{
+		case 'b':
+			*out &= 0xFF;
+			break;
+		case 'w':
+			*out &= 0xFFFF;
+			break;
+		}
+		return 1;
+	default:
+		return 0;
+	}
+}
+
 void add_display(disp_def ** head, uint32_t *index, char format_char, char * param)
 {
 	disp_def * ndisp = malloc(sizeof(*ndisp));
@@ -126,6 +618,41 @@ uint32_t m68k_read_long(uint32_t address, m68k_context *context)
 	return m68k_read_word(address, context) << 16 | m68k_read_word(address + 2, context);
 }
 
+uint8_t resolve_m68k(m68k_context *context, const char *name, uint32_t *out)
+{
+	if (name[0] == 'd' && name[1] >= '0' && name[1] <= '7') {
+		*out = context->dregs[name[1]-'0'];
+	} else if (name[0] == 'a' && name[1] >= '0' && name[1] <= '7') {
+		*out = context->aregs[name[1]-'0'];
+	} else if (name[0] == 's' && name[1] == 'r') {
+		*out = context->status << 8;
+		for (int flag = 0; flag < 5; flag++) {
+			*out |= context->flags[flag] << (4-flag);
+		}
+	} else if(name[0] == 'c') {
+		*out = context->current_cycle;
+	} else if (name[0] == 'p' && name[1] == 'c') {
+		//FIXME
+		//*out = address;
+	} else {
+		return 0;
+	}
+	return 1;
+}
+
+uint8_t resolve_genesis(debug_context *context, const char *name, uint32_t *out)
+{
+	genesis_context *gen = context->system;
+	if (resolve_m68k(gen->m68k, name, out)) {
+		return 1;
+	}
+	if (!strcmp(name, "f") || !strcmp(name, "frame")) {
+		*out = gen->vdp->frame;
+		return 1;
+	}
+	return 0;
+}
+
 void debugger_print(m68k_context *context, char format_char, char *param, uint32_t address)
 {
 	uint32_t value;
@@ -145,6 +672,21 @@ void debugger_print(m68k_context *context, char format_char, char *param, uint32
 	default:
 		fprintf(stderr, "Unrecognized format character: %c\n", format_char);
 	}
+	debug_context c = {
+		.resolve = resolve_genesis,
+		.system = context->system
+	};
+	char *after;
+	expr *e = parse_expression(param, &after);
+	if (e) {
+		if (!eval_expr(&c, e, &value)) {
+			fprintf(stderr, "Failed to eval %s\n", param);
+		}
+		free_expr(e);
+	} else {
+		fprintf(stderr, "Failed to parse %s\n", param);
+	}
+	/*
 	if (param[0] == 'd' && param[1] >= '0' && param[1] <= '7') {
 		value = context->dregs[param[1]-'0'];
 		if (param[2] == '.') {
@@ -198,7 +740,7 @@ void debugger_print(m68k_context *context, char format_char, char *param, uint32
 	} else {
 		fprintf(stderr, "Unrecognized parameter to p: %s\n", param);
 		return;
-	}
+	}*/
 	if (format_char == 's') {
 		char tmp[128];
 		int i;
