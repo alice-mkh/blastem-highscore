@@ -72,6 +72,8 @@ typedef enum {
 	TOKEN_SIZE,
 	TOKEN_LBRACKET,
 	TOKEN_RBRACKET,
+	TOKEN_LPAREN,
+	TOKEN_RPAREN
 } token_type;
 
 static const char *token_type_names[] = {
@@ -81,7 +83,9 @@ static const char *token_type_names[] = {
 	"TOKEN_OPER",
 	"TOKEN_SIZE",
 	"TOKEN_LBRACKET",
-	"TOKEN_RBRACKET"
+	"TOKEN_RBRACKET",
+	"TOKEN_LPAREN",
+	"TOKEN_RPAREN"
 };
 
 typedef struct {
@@ -166,6 +170,16 @@ static token parse_token(char *start, char **end)
 		*end = start + 1;
 		return (token) {
 			.type = TOKEN_RBRACKET
+		};
+	case '(':
+		*end = start + 1;
+		return (token) {
+			.type = TOKEN_LPAREN
+		};
+	case ')':
+		*end = start + 1;
+		return (token) {
+			.type = TOKEN_RPAREN
 		};
 	}
 	*end = start + 1;
@@ -264,6 +278,24 @@ static expr *parse_scalar(char *start, char **end)
 			ret->op = size;
 		}
 		return ret;
+	}
+	if (first.type == TOKEN_LPAREN) {
+		expr *ret = parse_expression(after_first, end);
+		if (!ret) {
+			fprintf(stderr, "Expression expected after `(`\n");
+			return NULL;
+		}
+		token rparen = parse_token(*end, end);
+		if (rparen.type != TOKEN_RPAREN) {
+			fprintf(stderr, "Missing closing `)`");
+			free_expr(ret);
+			return NULL;
+		}
+		return ret;
+	}
+	if (first.type != TOKEN_NUM && first.type != TOKEN_NAME) {
+		fprintf(stderr, "Unexpected token %s\n", token_type_names[first.type]);
+		return NULL;
 	}
 	token second = parse_token(after_first, end);
 	if (second.type != TOKEN_SIZE) {
@@ -390,7 +422,25 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 			*end = after_size;
 			ret->op = size;
 		}
-		return ret;
+		return maybe_muldiv(ret, *end, end);
+	}
+	if (first.type == TOKEN_LPAREN) {
+		expr *ret = parse_expression(after_first, end);
+		if (!ret) {
+			fprintf(stderr, "Expression expected after `(`\n");
+			return NULL;
+		}
+		token rparen = parse_token(*end, end);
+		if (rparen.type != TOKEN_RPAREN) {
+			fprintf(stderr, "Missing closing `)`");
+			free_expr(ret);
+			return NULL;
+		}
+		return maybe_muldiv(ret, *end, end);
+	}
+	if (first.type != TOKEN_NUM && first.type != TOKEN_NAME) {
+		fprintf(stderr, "Unexpected token %s\n", token_type_names[first.type]);
+		return NULL;
 	}
 	char *after_second;
 	token second = parse_token(after_first, &after_second);
@@ -486,7 +536,25 @@ static expr *parse_expression(char *start, char **end)
 			*end = after_size;
 			ret->op = size;
 		}
-		return ret;
+		return maybe_binary(ret, *end, end);
+	}
+	if (first.type == TOKEN_LPAREN) {
+		expr *ret = parse_expression(after_first, end);
+		if (!ret) {
+			fprintf(stderr, "Expression expected after `(`\n");
+			return NULL;
+		}
+		token rparen = parse_token(*end, end);
+		if (rparen.type != TOKEN_RPAREN) {
+			fprintf(stderr, "Missing closing `)`");
+			free_expr(ret);
+			return NULL;
+		}
+		return maybe_binary(ret, *end, end);
+	}
+	if (first.type != TOKEN_NUM && first.type != TOKEN_NAME) {
+		fprintf(stderr, "Unexpected token %s\n", token_type_names[first.type]);
+		return NULL;
 	}
 	char *after_second;
 	token second = parse_token(after_first, &after_second);
