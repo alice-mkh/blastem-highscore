@@ -626,31 +626,20 @@ static expr *parse_expression(char *start, char **end)
 	}
 }
 
-typedef struct debug_context debug_context;
-typedef uint8_t (*resolver)(debug_context *context, const char *name, uint32_t *out);
-typedef uint8_t (*reader)(debug_context *context, uint32_t *out, char size);
-
-struct debug_context {
-	resolver resolve;
-	reader   read_mem;
-	void     *system;
-	uint32_t address;
-};
-
-uint8_t eval_expr(debug_context *context, expr *e, uint32_t *out)
+uint8_t eval_expr(debug_root *root, expr *e, uint32_t *out)
 {
 	uint32_t right;
 	switch(e->type)
 	{
 	case EXPR_SCALAR:
 		if (e->op.type == TOKEN_NAME) {
-			return context->resolve(context, e->op.v.str, out);
+			return root->resolve(root, e->op.v.str, out);
 		} else {
 			*out = e->op.v.num;
 			return 1;
 		}
 	case EXPR_UNARY:
-		if (!eval_expr(context, e->left, out)) {
+		if (!eval_expr(root, e->left, out)) {
 			return 0;
 		}
 		switch (e->op.v.op[0])
@@ -669,7 +658,7 @@ uint8_t eval_expr(debug_context *context, expr *e, uint32_t *out)
 		}
 		return 1;
 	case EXPR_BINARY:
-		if (!eval_expr(context, e->left, out) || !eval_expr(context, e->right, &right)) {
+		if (!eval_expr(root, e->left, out) || !eval_expr(root, e->right, &right)) {
 			return 0;
 		}
 		switch (e->op.v.op[0])
@@ -706,7 +695,7 @@ uint8_t eval_expr(debug_context *context, expr *e, uint32_t *out)
 		}
 		return 1;
 	case EXPR_SIZE:
-		if (!eval_expr(context, e->left, out)) {
+		if (!eval_expr(root, e->left, out)) {
 			return 0;
 		}
 		switch (e->op.v.op[0])
@@ -720,10 +709,10 @@ uint8_t eval_expr(debug_context *context, expr *e, uint32_t *out)
 		}
 		return 1;
 	case EXPR_MEM:
-		if (!eval_expr(context, e->left, out)) {
+		if (!eval_expr(root, e->left, out)) {
 			return 0;
 		}
-		return context->read_mem(context, out, e->op.v.op[0]);
+		return root->read_mem(root, out, e->op.v.op[0]);
 	default:
 		return 0;
 	}
@@ -791,8 +780,9 @@ static uint32_t m68k_read_long(uint32_t address, m68k_context *context)
 	return m68k_read_word(address, context) << 16 | m68k_read_word(address + 2, context);
 }
 
-static uint8_t read_m68k(m68k_context *context, uint32_t *out, char size)
+static uint8_t read_m68k(debug_root *root, uint32_t *out, char size)
 {
+	m68k_context *context = root->cpu_context;
 	if (size == 'b') {
 		*out = m68k_read_byte(*out, context);
 	} else if (size == 'l') {
@@ -803,14 +793,9 @@ static uint8_t read_m68k(m68k_context *context, uint32_t *out, char size)
 	return 1;
 }
 
-static uint8_t read_genesis(debug_context *context, uint32_t *out, char size)
+static uint8_t resolve_m68k(debug_root *root, const char *name, uint32_t *out)
 {
-	genesis_context *gen = context->system;
-	return read_m68k(gen->m68k, out, size);
-}
-
-static uint8_t resolve_m68k(debug_context *debug, m68k_context *context, const char *name, uint32_t *out)
-{
+	m68k_context *context = root->cpu_context;
 	if ((name[0] == 'd' || name[0] == 'D') && name[1] >= '0' && name[1] <= '7' && !name[2]) {
 		*out = context->dregs[name[1]-'0'];
 	} else if ((name[0] == 'a' || name[0] == 'A') && name[1] >= '0' && name[1] <= '7' && !name[2]) {
@@ -823,7 +808,7 @@ static uint8_t resolve_m68k(debug_context *debug, m68k_context *context, const c
 	} else if(!strcasecmp(name, "cycle")) {
 		*out = context->current_cycle;
 	} else if (!strcasecmp(name, "pc")) {
-		*out = debug->address;
+		*out = root->address;
 	} else if (!strcasecmp(name, "usp")) {
 		*out = context->status & 0x20 ? context->aregs[8] : context->aregs[7];
 	} else if (!strcasecmp(name, "ssp")) {
@@ -834,12 +819,13 @@ static uint8_t resolve_m68k(debug_context *debug, m68k_context *context, const c
 	return 1;
 }
 
-static uint8_t resolve_genesis(debug_context *context, const char *name, uint32_t *out)
+static uint8_t resolve_genesis(debug_root *root, const char *name, uint32_t *out)
 {
-	genesis_context *gen = context->system;
-	if (resolve_m68k(context, gen->m68k, name, out)) {
+	if (resolve_m68k(root, name, out)) {
 		return 1;
 	}
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
 	if (!strcmp(name, "f") || !strcmp(name, "frame")) {
 		*out = gen->vdp->frame;
 		return 1;
@@ -847,7 +833,7 @@ static uint8_t resolve_genesis(debug_context *context, const char *name, uint32_
 	return 0;
 }
 
-void debugger_print(m68k_context *context, char format_char, char *param, uint32_t address)
+void debugger_print(debug_root *root, char format_char, char *param)
 {
 	uint32_t value;
 	char format[8];
@@ -866,12 +852,6 @@ void debugger_print(m68k_context *context, char format_char, char *param, uint32
 	default:
 		fprintf(stderr, "Unrecognized format character: %c\n", format_char);
 	}
-	debug_context c = {
-		.resolve = resolve_genesis,
-		.read_mem = read_genesis,
-		.system = context->system,
-		.address = address
-	};
 	char *after;
 	uint8_t at_least_one = 0;
 	while (*param && *param != '\n')
@@ -879,7 +859,7 @@ void debugger_print(m68k_context *context, char format_char, char *param, uint32
 		at_least_one = 1;
 		expr *e = parse_expression(param, &after);
 		if (e) {
-			if (!eval_expr(&c, e, &value)) {
+			if (!eval_expr(root, e, &value)) {
 				fprintf(stderr, "Failed to eval %s\n", param);
 			}
 			free_expr(e);
@@ -895,7 +875,9 @@ void debugger_print(m68k_context *context, char format_char, char *param, uint32
 			int i;
 			for (i = 0; i < sizeof(tmp)-1; i++, value++)
 			{
-				char c = m68k_read_byte(value, context);
+				uint32_t addr = value;
+				root->read_mem(root, &addr, 'b');
+				char c = addr;
 				if (c < 0x20 || c > 0x7F) {
 					break;
 				}
@@ -1440,6 +1422,7 @@ int run_debugger_command(m68k_context *context, uint32_t address, char *input_bu
 	if (!root) {
 		return 0;
 	}
+	root->address = address;
 	switch(input_buf[0])
 	{
 		case 'c':
@@ -1542,7 +1525,7 @@ int run_debugger_command(m68k_context *context, uint32_t address, char *input_bu
 					fputs("display command requires a parameter\n", stderr);
 					break;
 				}
-				debugger_print(context, format_char, param, address);
+				debugger_print(root, format_char, param);
 				add_display(&root->displays, &root->disp_index, format_char, param);
 			} else {
 				param = find_param(input_buf);
@@ -1574,7 +1557,7 @@ int run_debugger_command(m68k_context *context, uint32_t address, char *input_bu
 			}
 			param = find_param(input_buf);
 			if (param) {
-				debugger_print(context, format_char, param, address);
+				debugger_print(root, format_char, param);
 			} else {
 				m68k_disasm(&inst, input_buf);
 				printf("%X: %s\n", address, input_buf);
@@ -1846,7 +1829,7 @@ void debugger(m68k_context * context, uint32_t address)
 		remove_breakpoint(context, address);
 	}
 	for (disp_def * cur = root->displays; cur; cur = cur->next) {
-		debugger_print(context, cur->format_char, cur->param, address);
+		debugger_print(root, cur->format_char, cur->param);
 	}
 	m68k_disasm(&inst, input_buf);
 	printf("%X: %s\n", address, input_buf);

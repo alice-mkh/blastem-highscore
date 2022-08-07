@@ -23,15 +23,22 @@ typedef struct bp_def {
 	uint32_t      index;
 } bp_def;
 
-typedef struct {
+typedef struct debug_root debug_root;
+typedef uint8_t (*resolver)(debug_root *root, const char *name, uint32_t *out);
+typedef uint8_t (*reader)(debug_root *root, uint32_t *out, char size);
+
+struct debug_root {
 	void     *cpu_context;
 	bp_def   *breakpoints;
 	disp_def *displays;
+	resolver resolve;
+	reader   read_mem;
 	uint32_t bp_index;
 	uint32_t disp_index;
 	uint32_t branch_t;
 	uint32_t branch_f;
-} debug_root;
+	uint32_t address;
+};
 
 debug_root *find_root(void *cpu);
 bp_def ** find_breakpoint(bp_def ** cur, uint32_t address);
