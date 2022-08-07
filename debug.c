@@ -3,6 +3,7 @@
 #include "68kinst.h"
 #include "segacd.h"
 #include "blastem.h"
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
