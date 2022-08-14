@@ -2722,6 +2722,10 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 		fatal_error("Failed to get native pointer on entering Z80 debugger at address %X\n", address);
 	}
 	for (disp_def * cur = root->displays; cur; cur = cur->next) {
+		for (int i = 0; i < cur->num_args; i++)
+		{
+			eval_expr(root, cur->args[i].parsed, &cur->args[i].value);
+		}
 		cmd_print(root, cur->format, cur->num_args, cur->args);
 	}
 	uint8_t * after_pc = z80_decode(pc, &inst);
@@ -2822,6 +2826,10 @@ void debugger(m68k_context * context, uint32_t address)
 	root->after = after;
 	root->inst = &inst;
 	for (disp_def * cur = root->displays; cur; cur = cur->next) {
+		for (int i = 0; i < cur->num_args; i++)
+		{
+			eval_expr(root, cur->args[i].parsed, &cur->args[i].value);
+		}
 		cmd_print(root, cur->format, cur->num_args, cur->args);
 	}
 	m68k_disasm(&inst, input_buf);
