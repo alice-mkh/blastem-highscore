@@ -386,6 +386,26 @@ static void run_sms(system_header *system)
 			system->delayed_load_slot = 0;
 
 		}
+		if (sms->vdp->frame != sms->last_frame) {
+			uint32_t elapsed = sms->vdp->frame - sms->last_frame;
+			sms->last_frame = sms->vdp->frame;
+			if (system->enter_debugger_frames) {
+				if (elapsed >= system->enter_debugger_frames) {
+					system->enter_debugger_frames = 0;
+					system->enter_debugger = 1;
+				} else {
+					system->enter_debugger_frames -= elapsed;
+				}
+			}
+			
+			if(exit_after){
+				if (elapsed >= exit_after) {
+					exit(0);
+				} else {
+					exit_after -= elapsed;
+				}
+			}
+		}
 		if (system->enter_debugger && sms->z80->pc) {
 			system->enter_debugger = 0;
 			zdebugger(sms->z80, sms->z80->pc);

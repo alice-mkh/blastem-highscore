@@ -460,14 +460,24 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 	}
 	if (v_context->frame != gen->last_frame) {
 		//printf("reached frame end %d | MCLK Cycles: %d, Target: %d, VDP cycles: %d, vcounter: %d, hslot: %d\n", gen->last_frame, mclks, gen->frame_end, v_context->cycles, v_context->vcounter, v_context->hslot);
+		uint32_t elapsed = v_context->frame - gen->last_frame;
 		gen->last_frame = v_context->frame;
 		event_flush(mclks);
 		gen->last_flush_cycle = mclks;
+		if (gen->header.enter_debugger_frames) {
+			if (elapsed >= gen->header.enter_debugger_frames) {
+				gen->header.enter_debugger_frames = 0;
+				gen->header.enter_debugger = 1;
+			} else {
+				gen->header.enter_debugger_frames -= elapsed;
+			}
+		}
 
 		if(exit_after){
-			--exit_after;
-			if (!exit_after) {
+			if (elapsed >= exit_after) {
 				exit(0);
+			} else {
+				exit_after -= elapsed;
 			}
 		}
 		if (context->current_cycle > MAX_NO_ADJUST) {

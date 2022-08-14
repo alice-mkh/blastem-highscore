@@ -1304,6 +1304,12 @@ static uint8_t cmd_set(debug_root *root, char *format, int num_args, command_arg
 	return 1;
 }
 
+static uint8_t cmd_frames(debug_root *root, char *format, int num_args, command_arg *args)
+{
+	current_system->enter_debugger_frames = args[0].value;
+	return 0;
+}
+
 static uint8_t cmd_delete_m68k(debug_root *root, char *format, int num_args, command_arg *args)
 {
 	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, args[0].value);
@@ -1683,6 +1689,16 @@ command_def common_commands[] = {
 		.min_args = 2,
 		.max_args = 2,
 		.skip_eval = 1
+	},
+	{
+		.names = (const char *[]){
+			"frames", NULL
+		},
+		.usage = "frames EXPRESSION",
+		.desc = "Resume execution for EXPRESSION video frames",
+		.impl = cmd_frames,
+		.min_args = 1,
+		.max_args = 1
 	}
 };
 #define NUM_COMMON (sizeof(common_commands)/sizeof(*common_commands))

@@ -69,6 +69,7 @@ struct system_header {
 	arena             *arena;
 	char              *next_rom;
 	char              *save_dir;
+	int               enter_debugger_frames;
 	uint8_t           enter_debugger;
 	uint8_t           should_exit;
 	uint8_t           save_state;
