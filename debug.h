@@ -90,6 +90,7 @@ typedef struct {
 typedef struct bp_def {
 	struct bp_def  *next;
 	parsed_command *commands;
+	expr           *condition;
 	uint32_t       num_commands;
 	uint32_t       address;
 	uint32_t       index;

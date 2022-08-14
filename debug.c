@@ -1327,6 +1327,27 @@ static uint8_t cmd_binddown(debug_root *root, char *format, char *param)
 	return 1;
 }
 
+static uint8_t cmd_condition(debug_root *root, char *format, int num_args, command_arg *args)
+{
+	if (!eval_expr(root, args[0].parsed, &args[0].value)) {
+		fprintf(stderr, "Failed to evaluate breakpoint number: %s\n", args[0].raw);
+		return 1;
+	}
+	bp_def **target = find_breakpoint_idx(&root->breakpoints, args[0].value);
+	if (!*target) {
+		fprintf(stderr, "Failed to find breakpoint %u\n", args[0].value);
+		return 1;
+	}
+	free_expr((*target)->condition);
+	if (num_args > 1 && args[1].parsed) {
+		(*target)->condition = args[1].parsed;
+		args[1].parsed = NULL;
+	} else {
+		(*target)->condition = NULL;
+	}
+	return 1;
+}
+
 static uint8_t cmd_delete_m68k(debug_root *root, char *format, int num_args, command_arg *args)
 {
 	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, args[0].value);
@@ -1736,6 +1757,16 @@ command_def common_commands[] = {
 		.raw_impl = cmd_binddown,
 		.min_args = 1,
 		.max_args = 1
+	},
+	{
+		.names = (const char *[]){
+			"condition", NULL
+		},
+		.usage = "condition BREAKPOINT [EXPRESSION]",
+		.desc = "Makes breakpoint BREAKPOINT conditional on the value of EXPRESSION or removes a condition if EXPRESSION is omitted",
+		.impl = cmd_condition,
+		.min_args = 1,
+		.max_args = 2
 	}
 };
 #define NUM_COMMON (sizeof(common_commands)/sizeof(*common_commands))
@@ -2670,6 +2701,18 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 	//Check if this is a user set breakpoint, or just a temporary one
 	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address);
 	if (*this_bp) {
+		if ((*this_bp)->condition) {
+			uint32_t condres;
+			if (eval_expr(root, (*this_bp)->condition, &condres)) {
+				if (!condres) {
+					return context;
+				}
+			} else {
+				fprintf(stderr, "Failed to eval condition for Z80 breakpoint %u\n", (*this_bp)->index);
+				free_expr((*this_bp)->condition);
+				(*this_bp)->condition = NULL;
+			}
+		}
 		printf("Z80 Breakpoint %d hit\n", (*this_bp)->index);
 	} else {
 		zremove_breakpoint(context, address);
@@ -2746,14 +2789,23 @@ void debugger(m68k_context * context, uint32_t address)
 		root->branch_t = root->branch_f = 0;
 	}
 
-	uint32_t after = m68k_decode(m68k_instruction_fetch, context, &inst, address);
 	root->address = address;
-	root->after = after;
-	root->inst = &inst;
 	int debugging = 1;
 	//Check if this is a user set breakpoint, or just a temporary one
 	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address);
 	if (*this_bp) {
+		if ((*this_bp)->condition) {
+			uint32_t condres;
+			if (eval_expr(root, (*this_bp)->condition, &condres)) {
+				if (!condres) {
+					return;
+				}
+			} else {
+				fprintf(stderr, "Failed to eval condition for M68K breakpoint %u\n", (*this_bp)->index);
+				free_expr((*this_bp)->condition);
+				(*this_bp)->condition = NULL;
+			}
+		}
 		for (uint32_t i = 0; debugging && i < (*this_bp)->num_commands; i++)
 		{
 			debugging = run_command(root, (*this_bp)->commands + i);
@@ -2766,6 +2818,9 @@ void debugger(m68k_context * context, uint32_t address)
 	} else {
 		remove_breakpoint(context, address);
 	}
+	uint32_t after = m68k_decode(m68k_instruction_fetch, context, &inst, address);
+	root->after = after;
+	root->inst = &inst;
 	for (disp_def * cur = root->displays; cur; cur = cur->next) {
 		cmd_print(root, cur->format, cur->num_args, cur->args);
 	}
