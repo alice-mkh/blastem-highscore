@@ -2078,6 +2078,33 @@ static uint8_t cmd_backtrace_z80(debug_root *root, char *format, int num_args, c
 	return 1;
 }
 
+static uint8_t cmd_gen_m68k(debug_root *root, char *format, char *param)
+{
+	while (param && *param && isblank(*param))
+	{
+		++param;
+	}
+	genesis_context *gen = (genesis_context *)current_system;
+	
+	if (param && *param && !isspace(*param)) {
+		parsed_command cmd;
+		debug_root *m68k_root = find_m68k_root(gen->m68k);
+		if (!m68k_root) {
+			fputs("Failed to get debug root for M68K\n", stderr);
+			return 1;
+		}
+		if (!parse_command(m68k_root, param, &cmd)) {
+			return 1;
+		}
+		uint8_t ret = run_command(m68k_root, &cmd);
+		free_parsed_command(&cmd);
+		return ret;
+	} else {
+		gen->header.enter_debugger = 1;
+		return 0;
+	}
+}
+
 command_def z80_commands[] = {
 	{
 		.names = (const char *[]){
@@ -2152,6 +2179,21 @@ command_def z80_commands[] = {
 };
 
 #define NUM_Z80 (sizeof(z80_commands)/sizeof(*z80_commands))
+
+command_def gen_z80_commands[] = {
+	{
+		.names = (const char *[]){
+			"m68k", NULL
+		},
+		.usage = "m68k [COMMAND]",
+		.desc = "Run a M68K debugger command or switch to M68K context when no command is given",
+		.raw_impl = cmd_gen_m68k,
+		.min_args = 0,
+		.max_args = -1
+	}
+};
+
+#define NUM_GEN_Z80 (sizeof(gen_z80_commands)/sizeof(*gen_z80_commands))
 
 #endif
 
@@ -2679,6 +2721,9 @@ debug_root *find_z80_root(z80_context *context)
 	if (root && !root->commands) {
 		add_commands(root, common_commands, NUM_COMMON);
 		add_commands(root, z80_commands, NUM_Z80);
+		if (current_system->type == SYSTEM_GENESIS || current_system->type == SYSTEM_SEGACD) {
+			add_commands(root, gen_z80_commands, NUM_GEN_Z80);
+		}
 		root->read_mem = read_z80;
 		root->write_mem = write_z80;
 		root->set = set_z80;
