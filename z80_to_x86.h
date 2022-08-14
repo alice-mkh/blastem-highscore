@@ -112,6 +112,7 @@ uint8_t z80_get_busack(z80_context * context, uint32_t cycle);
 void z80_adjust_cycles(z80_context * context, uint32_t deduction);
 void z80_serialize(z80_context *context, serialize_buffer *buf);
 void z80_deserialize(deserialize_buffer *buf, void *vcontext);
+uint32_t z80_get_instruction_start(z80_context *context, uint32_t address);
 
 #endif //Z80_TO_X86_H_
 
