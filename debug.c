@@ -1631,7 +1631,7 @@ static uint8_t cmd_gen_z80(debug_root *root, char *format, char *param)
 		free_parsed_command(&cmd);
 		return ret;
 	} else {
-		fputs("not implemented yet", stderr);
+		gen->enter_z80_debugger = 1;
 		return 0;
 	}
 }

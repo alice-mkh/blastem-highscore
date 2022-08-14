@@ -377,8 +377,9 @@ static void z80_next_int_pulse(z80_context * z_context)
 #endif
 }
 
-static void sync_z80(z80_context * z_context, uint32_t mclks)
+static void sync_z80(genesis_context *gen, uint32_t mclks)
 {
+	z80_context *z_context = gen->z80;
 #ifndef NO_Z80
 	if (z80_enabled) {
 #ifdef NEW_CORE
@@ -386,6 +387,13 @@ static void sync_z80(z80_context * z_context, uint32_t mclks)
 			z80_next_int_pulse(z_context);
 		}
 #endif
+		if (gen->enter_z80_debugger && !z_context->reset && !z_context->busack) {
+			while (!z_context->pc) {
+				z80_run(z_context, z_context->current_cycle + 4);
+			}
+			gen->enter_z80_debugger = 0;
+			zdebugger(z_context, z_context->pc);
+		}
 		z80_run(z_context, mclks);
 	} else
 #endif
@@ -444,7 +452,7 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 #endif
 
 	uint32_t mclks = context->current_cycle;
-	sync_z80(z_context, mclks);
+	sync_z80(gen, mclks);
 	sync_sound(gen, mclks);
 	vdp_run_context(v_context, mclks);
 	io_run(gen->io.ports, mclks);
@@ -545,7 +553,7 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 				//advance Z80 core to the start of an instruction
 				while (!z_context->pc)
 				{
-					sync_z80(z_context, z_context->current_cycle + MCLKS_PER_Z80);
+					sync_z80(gen, z_context->current_cycle + MCLKS_PER_Z80);
 				}
 			}
 #endif
@@ -668,7 +676,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 			context->current_cycle += m68k_cycle_diff;
 			//Lock the Z80 out of the bus until the VDP access is complete
 			gen->bus_busy = 1;
-			sync_z80(gen->z80, v_context->cycles);
+			sync_z80(gen, v_context->cycles);
 			gen->bus_busy = 0;
 		}
 	} else if (vdp_port < 0x18) {
@@ -765,7 +773,7 @@ static uint16_t vdp_port_read(uint32_t vdp_port, m68k_context * context)
 		//Lock the Z80 out of the bus until the VDP access is complete
 		genesis_context *gen = context->system;
 		gen->bus_busy = 1;
-		sync_z80(gen->z80, v_context->cycles);
+		sync_z80(gen, v_context->cycles);
 		gen->bus_busy = 0;
 	}
 #ifdef REFRESH_EMULATION
@@ -942,7 +950,7 @@ static m68k_context * io_write(uint32_t location, m68k_context * context, uint8_
 					}
 				}
 			} else if (masked == 0x11200) {
-				sync_z80(gen->z80, context->current_cycle);
+				sync_z80(gen, context->current_cycle);
 				if (value & 1) {
 					if (z80_enabled) {
 						z80_clear_reset(gen->z80, context->current_cycle);

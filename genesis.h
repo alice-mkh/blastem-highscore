@@ -74,6 +74,7 @@ struct genesis_context {
 	uint8_t         reset_requested;
 	uint8_t         tmss;
 	uint8_t         vdp_unlocked;
+	uint8_t         enter_z80_debugger;
 	eeprom_state    eeprom;
 	nor_state       nor;
 };
