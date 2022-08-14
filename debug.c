@@ -2626,7 +2626,7 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 	z80inst inst;
 	genesis_context *system = context->system;
 	init_terminal();
-	debug_root *root = find_root(context);
+	debug_root *root = find_z80_root(context);
 	if (!root) {
 		return context;
 	}
