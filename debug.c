@@ -184,7 +184,7 @@ static token parse_token(char *start, char **end)
 		if (done) {
 			break;
 		}
-			
+
 		++*end;
 	}
 	char *name = malloc(*end - start + 1);
@@ -555,14 +555,29 @@ static expr *parse_expression(char *start, char **end)
 		case '|':
 		case '^':
 			bin->right = parse_scalar(after_second, end);
+			if (!bin->right) {
+				fprintf(stderr, "Expected expression to the right of %s\n", second.v.op);
+				free_expr(bin);
+				return NULL;
+			}
 			return maybe_binary(bin, *end, end);
 		case '+':
 		case '-':
 			bin->right = parse_scalar_or_muldiv(after_second, end);
+			if (!bin->right) {
+				fprintf(stderr, "Expected expression to the right of %s\n", second.v.op);
+				free_expr(bin);
+				return NULL;
+			}
 			return maybe_binary(bin, *end, end);
 		case '=':
 		case '!':
 			bin->right = parse_expression(after_second, end);
+			if (!bin->right) {
+				fprintf(stderr, "Expected expression to the right of %s\n", second.v.op);
+				free_expr(bin);
+				return NULL;
+			}
 			return bin;
 		default:
 			fprintf(stderr, "%s is not a valid binary operator\n", second.v.op);
@@ -946,7 +961,7 @@ uint8_t parse_command(debug_root *root, char *text, parsed_command *out)
 	}
 	out->def = def;
 	out->format = format;
-	
+
 	ret = 1;
 cleanup_args:
 	if (!ret) {
@@ -1588,7 +1603,7 @@ static uint8_t cmd_main(debug_root *root, char *format, char *param)
 	}
 	m68k_context *m68k = root->cpu_context;
 	segacd_context *cd = m68k->system;
-	
+
 	if (param && *param && !isspace(*param)) {
 		parsed_command cmd;
 		debug_root *main_root = find_m68k_root(cd->genesis->m68k);
@@ -1616,7 +1631,7 @@ static uint8_t cmd_gen_z80(debug_root *root, char *format, char *param)
 	}
 	m68k_context *m68k = root->cpu_context;
 	genesis_context *gen = m68k->system;
-	
+
 	if (param && *param && !isspace(*param)) {
 		parsed_command cmd;
 		debug_root *z80_root = find_z80_root(gen->z80);
@@ -2085,7 +2100,7 @@ static uint8_t cmd_gen_m68k(debug_root *root, char *format, char *param)
 		++param;
 	}
 	genesis_context *gen = (genesis_context *)current_system;
-	
+
 	if (param && *param && !isspace(*param)) {
 		parsed_command cmd;
 		debug_root *m68k_root = find_m68k_root(gen->m68k);
