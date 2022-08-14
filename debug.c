@@ -3,6 +3,7 @@
 #include "68kinst.h"
 #include "segacd.h"
 #include "blastem.h"
+#include "bindings.h"
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1310,6 +1311,22 @@ static uint8_t cmd_frames(debug_root *root, char *format, int num_args, command_
 	return 0;
 }
 
+static uint8_t cmd_bindup(debug_root *root, char *format, char *param)
+{
+	if (!bind_up(param)) {
+		fprintf(stderr, "%s is not a valid binding name\n", param);
+	}
+	return 1;
+}
+
+static uint8_t cmd_binddown(debug_root *root, char *format, char *param)
+{
+	if (!bind_down(param)) {
+		fprintf(stderr, "%s is not a valid binding name\n", param);
+	}
+	return 1;
+}
+
 static uint8_t cmd_delete_m68k(debug_root *root, char *format, int num_args, command_arg *args)
 {
 	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, args[0].value);
@@ -1697,6 +1714,26 @@ command_def common_commands[] = {
 		.usage = "frames EXPRESSION",
 		.desc = "Resume execution for EXPRESSION video frames",
 		.impl = cmd_frames,
+		.min_args = 1,
+		.max_args = 1
+	},
+	{
+		.names = (const char *[]){
+			"bindup", NULL
+		},
+		.usage = "bindup NAME",
+		.desc = "Simulate a keyup for binding NAME",
+		.raw_impl = cmd_bindup,
+		.min_args = 1,
+		.max_args = 1
+	},
+	{
+		.names = (const char *[]){
+			"binddown", NULL
+		},
+		.usage = "bindown NAME",
+		.desc = "Simulate a keydown for binding NAME",
+		.raw_impl = cmd_binddown,
 		.min_args = 1,
 		.max_args = 1
 	}

@@ -22,6 +22,8 @@ void handle_joy_added(int joystick);
 void handle_mouse_moved(int mouse, uint16_t x, uint16_t y, int16_t deltax, int16_t deltay);
 void handle_mousedown(int mouse, int button);
 void handle_mouseup(int mouse, int button);
+uint8_t bind_up(const char *target);
+uint8_t bind_down(const char *target);
 
 void bindings_release_capture(void);
 void bindings_reacquire_capture(void);

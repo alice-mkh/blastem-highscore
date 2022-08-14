@@ -586,7 +586,7 @@ void bindings_reacquire_capture(void)
 	}
 }
 
-int parse_binding_target(int device_num, char * target, tern_node * padbuttons, tern_node *mousebuttons, uint8_t * subtype_a, uint8_t * subtype_b)
+int parse_binding_target(int device_num, const char * target, tern_node * padbuttons, tern_node *mousebuttons, uint8_t * subtype_a, uint8_t * subtype_b)
 {
 	const int gpadslen = strlen("gamepads.");
 	const int mouselen = strlen("mouse.");
@@ -952,6 +952,29 @@ static tern_node *get_mouse_buttons()
 	}
 	return mousebuttons;
 }
+
+uint8_t bind_up(const char *target)
+{
+	keybinding bind;
+	bind.bind_type = parse_binding_target(0, target, get_pad_buttons(), get_mouse_buttons(), &bind.subtype_a, &bind.subtype_b);
+	if (!bind.bind_type) {
+		return 0;
+	}
+	handle_binding_up(&bind);
+	return 1;
+}
+
+uint8_t bind_down(const char *target)
+{
+	keybinding bind;
+	bind.bind_type = parse_binding_target(0, target, get_pad_buttons(), get_mouse_buttons(), &bind.subtype_a, &bind.subtype_b);
+	if (!bind.bind_type) {
+		return 0;
+	}
+	handle_binding_down(&bind);
+	return 1;
+}
+
 
 tern_node *get_binding_node_for_pad(int padnum)
 {
