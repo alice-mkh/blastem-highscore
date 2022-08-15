@@ -1127,7 +1127,7 @@ static uint8_t cmd_print(debug_root *root, char *format, int num_args, command_a
 			{
 				uint32_t tmp_addr = addr;
 				root->read_mem(root, &tmp_addr, 'b');
-				char c = addr;
+				char c = tmp_addr;
 				if (c < 0x20 || c > 0x7F) {
 					break;
 				}
@@ -1137,6 +1137,109 @@ static uint8_t cmd_print(debug_root *root, char *format, int num_args, command_a
 			printf(format_str, args[i].raw, tmp);
 		} else {
 			printf(format_str, args[i].raw, args[i].value);
+		}
+	}
+	return 1;
+}
+
+static uint8_t cmd_printf(debug_root *root, char *format, char *param)
+{
+	if (!param) {
+		fputs("printf requires at least one parameter\n", stderr);
+		return 1;
+	}
+	while (isblank(*param))
+	{
+		++param;
+	}
+	if (*param != '"') {
+		fprintf(stderr, "First parameter to printf must be a string, found '%s'\n", param);
+		return 1;
+	}
+	++param;
+	char *fmt = strdup(param);
+	char *cur = param, *out = fmt;
+	while (*cur && *cur != '"')
+	{
+		if (*cur == '\\') {
+			switch (cur[1])
+			{
+			case 't':
+				*(out++) = '\t';
+				break;
+			case 'n':
+				*(out++) = '\n';
+				break;
+			case 'r':
+				*(out++) = '\r';
+				break;
+			case '\\':
+				*(out++) = '\\';
+				break;
+			default:
+				fprintf(stderr, "Unsupported escape character %c in string %s\n", cur[1], fmt);
+				free(fmt);
+				return 1;
+			}
+			cur += 2;
+		} else {
+			*(out++) = *(cur++);
+		}
+	}
+	*out = 0;
+	++cur;
+	param = cur;
+	cur = fmt;
+	char format_str[3] = {'%', 'd', 0};
+	while (*cur)
+	{
+		if (*cur == '%') {
+			switch(cur[1])
+			{
+			case 'x':
+			case 'X':
+			case 'c':
+			case 'd':
+			case 's':
+				break;
+			default:
+				fprintf(stderr, "Unsupported format character %c\n", cur[1]);
+				free(fmt);
+				return 1;
+			}
+			format_str[1] = cur[1];
+			expr *arg = parse_expression(param, &param);
+			if (!arg) {
+				free(fmt);
+				return 1;
+			}
+			uint32_t val;
+			if (!eval_expr(root, arg, &val)) {
+				free(fmt);
+				return 1;
+			}
+			if (cur[1] == 's') {
+				char tmp[128];
+				int j;
+				for (j = 0; j < sizeof(tmp)-1; j++, val++)
+				{
+					uint32_t addr = val;
+					root->read_mem(root, &addr, 'b');
+					char c = addr;
+					if (c < 0x20 || c > 0x7F) {
+						break;
+					}
+					tmp[j] = c;
+				}
+				tmp[j] = 0;
+				printf(format_str, tmp);
+			} else {
+				printf(format_str, val);
+			}
+			cur += 2;
+		} else {
+			putchar(*cur);
+			++cur;
 		}
 	}
 	return 1;
@@ -1689,6 +1792,16 @@ command_def common_commands[] = {
 		.usage = "print[/FORMAT] EXPRESSION...",
 		.desc = "Print one or more expressions using the optional format character",
 		.impl = cmd_print,
+		.min_args = 1,
+		.max_args = -1
+	},
+	{
+		.names = (const char *[]){
+			"printf", NULL
+		},
+		.usage = "printf FORMAT EXPRESSION...",
+		.desc = "Print a string with C-style formatting specifiers replaced with the value of the remaining arguments",
+		.raw_impl = cmd_printf,
 		.min_args = 1,
 		.max_args = -1
 	},
