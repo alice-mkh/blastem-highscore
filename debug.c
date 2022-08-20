@@ -116,7 +116,9 @@ static token parse_token(char *start, char **end)
 	case '~':
 	case '=':
 	case '!':
-		if (*start == '!' && start[1] == '=') {
+	case '>':
+	case '<':
+		if ((*start == '!' || *start == '>' || *start == '<') && start[1] == '=') {
 			*end = start + 2;
 			return (token) {
 				.type = TOKEN_OPER,
@@ -177,6 +179,8 @@ static token parse_token(char *start, char **end)
 		case '~':
 		case '=':
 		case '!':
+		case '>':
+		case '<':
 		case '.':
 			done = 1;
 			break;
@@ -323,6 +327,8 @@ static expr *maybe_binary(expr *left, char *start, char **end)
 		return maybe_binary(bin, *end, end);
 	case '=':
 	case '!':
+	case '>':
+	case '<':
 		bin->right = parse_expression(after_first, end);
 		return bin;
 	default:
@@ -447,6 +453,8 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 		case '-':
 		case '=':
 		case '!':
+		case '>':
+		case '<':
 			ret = bin->left;
 			bin->left = NULL;
 			free_expr(bin);
@@ -572,6 +580,8 @@ static expr *parse_expression(char *start, char **end)
 			return maybe_binary(bin, *end, end);
 		case '=':
 		case '!':
+		case '>':
+		case '<':
 			bin->right = parse_expression(after_second, end);
 			if (!bin->right) {
 				fprintf(stderr, "Expected expression to the right of %s\n", second.v.op);
@@ -668,6 +678,12 @@ uint8_t eval_expr(debug_root *root, expr *e, uint32_t *out)
 			break;
 		case '!':
 			*out = *out != right;
+			break;
+		case '>':
+			*out = e->op.v.op[1] ? *out >= right : *out > right;
+			break;
+		case '<':
+			*out = e->op.v.op[1] ? *out <= right : *out < right;
 			break;
 		default:
 			return 0;
