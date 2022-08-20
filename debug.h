@@ -56,19 +56,21 @@ typedef struct {
 } command_arg;
 
 typedef struct debug_root debug_root;
-typedef uint8_t (*raw_cmd)(debug_root *root, char *format, char *param);
-typedef uint8_t (*cmd)(debug_root *root, char *format, int num_args, command_arg *args);
+typedef struct parsed_command parsed_command;
+typedef uint8_t (*cmd_fun)(debug_root *root, parsed_command *cmd);
 
 typedef struct {
 	const char **names;
 	const char *usage;
 	const char *desc;
-	raw_cmd    raw_impl;
-	cmd        impl;
+	cmd_fun    impl;
 	int        min_args;
 	int        max_args;
 	uint8_t    skip_eval;
 	uint8_t    visited;
+	uint8_t    has_block;
+	uint8_t    accepts_else;
+	uint8_t    raw_args;
 } command_def;
 
 typedef struct disp_def {
@@ -80,12 +82,19 @@ typedef struct disp_def {
 } disp_def;
 
 typedef struct {
-	command_def *def;
-	char        *format;
-	char        *raw;
-	command_arg *args;
-	int         num_args;
-} parsed_command;
+	parsed_command *commands;
+	int            num_commands;
+} command_block;
+
+struct parsed_command {
+	command_def   *def;
+	char          *format;
+	char          *raw;
+	command_arg   *args;
+	int           num_args;
+	command_block block;
+	command_block else_block;
+};
 
 typedef struct bp_def {
 	struct bp_def  *next;

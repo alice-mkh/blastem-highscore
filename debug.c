@@ -903,7 +903,7 @@ uint8_t parse_command(debug_root *root, char *text, parsed_command *out)
 		++cur;
 	}
 	text = cur;
-	if (def->raw_impl) {
+	if (def->raw_args) {
 		while (*cur && *cur != '\n')
 		{
 			++cur;
@@ -977,6 +977,16 @@ cleanup_name:
 	return ret;
 }
 
+static void free_parsed_command(parsed_command *cmd);
+static void free_command_block(command_block *block)
+{
+	for (int i = 0; i < block->num_commands; i++)
+	{
+		free_parsed_command(block->commands + i);
+	}
+	free(block->commands);
+}
+
 static void free_parsed_command(parsed_command *cmd)
 {
 	free(cmd->format);
@@ -986,10 +996,149 @@ static void free_parsed_command(parsed_command *cmd)
 		free(cmd->args[i].raw);
 		free_expr(cmd->args[i].parsed);
 	}
+	free_command_block(&cmd->block);
+	free_command_block(&cmd->else_block);
 	free(cmd->args);
 }
 
-static uint8_t cmd_quit(debug_root *root, char *format, int num_args, command_arg *args)
+enum {
+	READ_FAILED = 0,
+	NORMAL,
+	EMPTY,
+	ELSE,
+	END
+};
+
+static uint8_t read_parse_command(debug_root *root, parsed_command *out, int indent_level)
+{
+	++indent_level;
+	for (int i = 0; i < indent_level; i++)
+	{
+		putchar('>');
+	}
+	putchar(' ');
+	fflush(stdout);
+#ifdef _WIN32
+#define wait 0
+#else
+	int wait = 1;
+	fd_set read_fds;
+	FD_ZERO(&read_fds);
+	struct timeval timeout;
+#endif
+	do {
+		process_events();
+#ifndef _WIN32
+		timeout.tv_sec = 0;
+		timeout.tv_usec = 16667;
+		FD_SET(fileno(stdin), &read_fds);
+		if(select(fileno(stdin) + 1, &read_fds, NULL, NULL, &timeout) >= 1) {
+			wait = 0;
+		}
+#endif
+	} while (wait);
+
+	char input_buf[1024];
+	if (!fgets(input_buf, sizeof(input_buf), stdin)) {
+		fputs("fgets failed", stderr);
+		return READ_FAILED;
+	}
+	char *stripped = strip_ws(input_buf);
+	if (!stripped[0]) {
+		return EMPTY;
+	}
+	if (indent_level > 1) {
+		if (!strcmp(stripped, "else")) {
+			return ELSE;
+		}
+		if (!strcmp(stripped, "end")) {
+			return END;
+		}
+	}
+	if (parse_command(root, input_buf, out)) {
+		if (!out->def->has_block) {
+			return NORMAL;
+		}
+		int command_storage = 4;
+		command_block *block = &out->block;
+		block->commands = calloc(command_storage, sizeof(parsed_command));
+		block->num_commands = 0;
+		for (;;)
+		{
+			if (block->num_commands == command_storage) {
+				command_storage *= 2;
+				block->commands = realloc(block->commands, command_storage * sizeof(parsed_command));
+			}
+			switch (read_parse_command(root, block->commands + block->num_commands, indent_level))
+			{
+			case READ_FAILED:
+				return READ_FAILED;
+			case NORMAL:
+				block->num_commands++;
+				break;
+			case END:
+				return NORMAL;
+			case ELSE:
+				if (block == &out->else_block) {
+					fprintf(stderr, "Too many else blocks for command %s\n", out->def->names[0]);
+					return READ_FAILED;
+				}
+				if (!out->def->accepts_else) {
+					fprintf(stderr, "Command %s does not take an else block\n", out->def->names[0]);
+					return READ_FAILED;
+				}
+				block = &out->else_block;
+				block->commands = calloc(command_storage, sizeof(parsed_command));
+				block->num_commands = 0;
+				break;
+			}
+		}
+	}
+	return READ_FAILED;
+}
+
+static uint8_t run_command(debug_root *root, parsed_command *cmd)
+{
+	if (!cmd->def->raw_args && !cmd->def->skip_eval) {
+		for (int i = 0; i < cmd->num_args; i++)
+		{
+			if (!eval_expr(root, cmd->args[i].parsed, &cmd->args[i].value)) {
+				fprintf(stderr, "Failed to eval %s\n", cmd->args[i].raw);
+				return 1;
+			}
+		}
+	}
+	return cmd->def->impl(root, cmd);
+}
+
+static void debugger_repl(debug_root *root)
+{
+
+	int debugging = 1;
+	parsed_command cmds[2] = {0};
+	int cur = 0;
+	uint8_t has_last = 0;
+	while(debugging) {
+		switch (read_parse_command(root, cmds + cur, 0))
+		{
+		case NORMAL:
+			debugging = run_command(root, cmds + cur);
+			if (debugging && has_last) {
+				cur = !cur;
+				free_parsed_command(cmds + cur);
+				memset(cmds + cur, 0, sizeof(cmds[cur]));
+			}
+			break;
+		case EMPTY:
+			debugging = run_command(root, cmds + !cur);
+			break;
+		}
+	}
+	free_parsed_command(cmds);
+	free_parsed_command(cmds + 1);
+}
+
+static uint8_t cmd_quit(debug_root *root, parsed_command *cmd)
 {
 	exit(0);
 }
@@ -1084,7 +1233,7 @@ static void help_second_pass(char *key, tern_val val, uint8_t valtype, void *dat
 	putchar('\n');
 }
 
-static uint8_t cmd_help(debug_root *root, char *format, char *param)
+static uint8_t cmd_help(debug_root *root, parsed_command *cmd)
 {
 	help_state state = {0,0};
 	tern_foreach(root->commands, help_first_pass, &state);
@@ -1094,14 +1243,13 @@ static uint8_t cmd_help(debug_root *root, char *format, char *param)
 	return 1;
 }
 
-static uint8_t cmd_continue(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_continue(debug_root *root, parsed_command *cmd)
 {
 	return 0;
 }
 
-static uint8_t cmd_print(debug_root *root, char *format, int num_args, command_arg *args)
+static void make_format_str(char *format_str, char *format)
 {
-	char format_str[8];
 	strcpy(format_str, "%s: %d\n");
 	if (format) {
 		switch (format[0])
@@ -1117,33 +1265,45 @@ static uint8_t cmd_print(debug_root *root, char *format, int num_args, command_a
 			fprintf(stderr, "Unrecognized format character: %c\n", format[0]);
 		}
 	}
-	for (int i = 0; i < num_args; i++)
-	{
-		if (format && format[0] == 's') {
-			char tmp[128];
-			int j;
-			uint32_t addr = args[i].value;
-			for (j = 0; j < sizeof(tmp)-1; j++, addr++)
-			{
-				uint32_t tmp_addr = addr;
-				root->read_mem(root, &tmp_addr, 'b');
-				char c = tmp_addr;
-				if (c < 0x20 || c > 0x7F) {
-					break;
-				}
-				tmp[j] = c;
+}
+
+static void do_print(debug_root *root, char *format_str, char *raw, uint32_t value)
+{
+	if (format_str[5] == 's') {
+		char tmp[128];
+		int j;
+		uint32_t addr = value;
+		for (j = 0; j < sizeof(tmp)-1; j++, addr++)
+		{
+			uint32_t tmp_addr = addr;
+			root->read_mem(root, &tmp_addr, 'b');
+			char c = tmp_addr;
+			if (c < 0x20 || c > 0x7F) {
+				break;
 			}
-			tmp[j] = 0;
-			printf(format_str, args[i].raw, tmp);
-		} else {
-			printf(format_str, args[i].raw, args[i].value);
+			tmp[j] = c;
 		}
+		tmp[j] = 0;
+		printf(format_str, raw, tmp);
+	} else {
+		printf(format_str, raw, value);
+	}
+}
+
+static uint8_t cmd_print(debug_root *root, parsed_command *cmd)
+{
+	char format_str[8];
+	make_format_str(format_str, cmd->format);
+	for (int i = 0; i < cmd->num_args; i++)
+	{
+		do_print(root, format_str, cmd->args[i].raw, cmd->args[i].value);
 	}
 	return 1;
 }
 
-static uint8_t cmd_printf(debug_root *root, char *format, char *param)
+static uint8_t cmd_printf(debug_root *root, parsed_command *cmd)
 {
+	char *param = cmd->raw;
 	if (!param) {
 		fputs("printf requires at least one parameter\n", stderr);
 		return 1;
@@ -1245,28 +1405,28 @@ static uint8_t cmd_printf(debug_root *root, char *format, char *param)
 	return 1;
 }
 
-static uint8_t cmd_display(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_display(debug_root *root, parsed_command *cmd)
 {
-	cmd_print(root, format, num_args, args);
+	cmd_print(root, cmd);
 	disp_def *ndisp = calloc(1, sizeof(*ndisp));
 	ndisp->next = root->displays;
 	ndisp->index = root->disp_index++;
-	ndisp->format = format ? strdup(format) : NULL;
-	ndisp->num_args = num_args;
-	ndisp->args = calloc(num_args, sizeof(command_arg));
-	memcpy(ndisp->args, args, num_args * sizeof(command_arg));
-	memset(args, 0, num_args * sizeof(command_arg));
+	ndisp->format = cmd->format ? strdup(cmd->format) : NULL;
+	ndisp->num_args = cmd->num_args;
+	ndisp->args = cmd->args;
+	cmd->args = NULL;
+	cmd->num_args = 0;
 	root->displays = ndisp;
 	printf("Added display %d\n", ndisp->index);
 	return 1;
 }
 
-static uint8_t cmd_delete_display(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_delete_display(debug_root *root, parsed_command *cmd)
 {
 	disp_def **cur = &root->displays;
 	while (*cur)
 	{
-		if ((*cur)->index == args[0].value) {
+		if ((*cur)->index == cmd->args[0].value) {
 			disp_def *del_disp = *cur;
 			*cur = del_disp->next;
 			free(del_disp->format);
@@ -1285,7 +1445,7 @@ static uint8_t cmd_delete_display(debug_root *root, char *format, int num_args, 
 	return 1;
 }
 
-static uint8_t cmd_softreset(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_softreset(debug_root *root, parsed_command *cmd)
 {
 	if (current_system->soft_reset) {
 		current_system->soft_reset(current_system);
@@ -1296,40 +1456,23 @@ static uint8_t cmd_softreset(debug_root *root, char *format, int num_args, comma
 	}
 }
 
-static uint8_t cmd_command(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_command(debug_root *root, parsed_command *cmd)
 {
-	bp_def **target = find_breakpoint_idx(&root->breakpoints, args[0].value);
+	bp_def **target = find_breakpoint_idx(&root->breakpoints, cmd->args[0].value);
 	if (!target) {
-		fprintf(stderr, "Breakpoint %d does not exist!\n", args[0].value);
+		fprintf(stderr, "Breakpoint %d does not exist!\n", cmd->args[0].value);
 		return 1;
 	}
-	printf("Enter commands for breakpoing %d, type end when done\n", args[0].value);
-	char cmd_buf[1024];
-	char *commands = NULL;
-	uint32_t cmd_storage = 4;
 	for (uint32_t i = 0; i < (*target)->num_commands; i++)
 	{
 		free_parsed_command((*target)->commands + i);
 	}
 	free((*target)->commands);
-	(*target)->commands = calloc(cmd_storage, sizeof(parsed_command));
-	for (;;)
-	{
-		fputs(">>", stdout);
-		fflush(stdout);
-		fgets(cmd_buf, sizeof(cmd_buf), stdin);
-		if (!strcmp(cmd_buf, "end\n")) {
-			return 1;
-		} else {
-			if ((*target)->num_commands == cmd_storage) {
-				cmd_storage *= 2;
-				(*target)->commands = realloc((*target)->commands, cmd_storage * sizeof(parsed_command));
-			}
-			if (parse_command(root, cmd_buf, (*target)->commands + (*target)->num_commands)) {
-				++(*target)->num_commands;
-			}
-		}
-	}
+	(*target)->commands = cmd->block.commands;
+	(*target)->num_commands = cmd->block.num_commands;
+	cmd->block.commands = NULL;
+	cmd->block.num_commands = 0;
+	return 1;
 }
 
 const char *expr_type_names[] = {
@@ -1341,62 +1484,46 @@ const char *expr_type_names[] = {
 	"EXPR_MEM"
 };
 
-static uint8_t run_command(debug_root *root, parsed_command *cmd)
-{
-	if (cmd->def->raw_impl) {
-		return cmd->def->raw_impl(root, cmd->format, cmd->raw);
-	} else {
-		for (int i = 0; i < cmd->num_args; i++)
-		{
-			if (!eval_expr(root, cmd->args[i].parsed, &cmd->args[i].value)) {
-				fprintf(stderr, "Failed to eval %s\n", cmd->args[i].raw);
-				return 1;
-			}
-		}
-		return cmd->def->impl(root, cmd->format, cmd->num_args, cmd->args);
-	}
-}
-
-static uint8_t cmd_set(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_set(debug_root *root, parsed_command *cmd)
 {
 	char *name = NULL;
 	char size = 0;
 	uint32_t address;
-	switch (args[0].parsed->type)
+	switch (cmd->args[0].parsed->type)
 	{
 	case EXPR_SCALAR:
-		if (args[0].parsed->op.type == TOKEN_NAME) {
-			name = args[0].parsed->op.v.str;
+		if (cmd->args[0].parsed->op.type == TOKEN_NAME) {
+			name = cmd->args[0].parsed->op.v.str;
 		} else {
 			fputs("First argument to set must be a name or memory expression, not a number", stderr);
 			return 1;
 		}
 		break;
 	case EXPR_SIZE:
-		size = args[0].parsed->op.v.op[0];
-		if (args[0].parsed->left->op.type == TOKEN_NAME) {
-			name = args[0].parsed->left->op.v.str;
+		size = cmd->args[0].parsed->op.v.op[0];
+		if (cmd->args[0].parsed->left->op.type == TOKEN_NAME) {
+			name = cmd->args[0].parsed->left->op.v.str;
 		} else {
 			fputs("First argument to set must be a name or memory expression, not a number", stderr);
 			return 1;
 		}
 		break;
 	case EXPR_MEM:
-		size = args[0].parsed->op.v.op[0];
-		if (!eval_expr(root, args[0].parsed->left, &address)) {
-			fprintf(stderr, "Failed to eval %s\n", args[0].raw);
+		size = cmd->args[0].parsed->op.v.op[0];
+		if (!eval_expr(root, cmd->args[0].parsed->left, &address)) {
+			fprintf(stderr, "Failed to eval %s\n", cmd->args[0].raw);
 			return 1;
 		}
 		break;
 	default:
-		fprintf(stderr, "First argument to set must be a name or memory expression, got %s\n", expr_type_names[args[0].parsed->type]);
+		fprintf(stderr, "First argument to set must be a name or memory expression, got %s\n", expr_type_names[cmd->args[0].parsed->type]);
 		return 1;
 	}
-	if (!eval_expr(root, args[1].parsed, &args[1].value)) {
-		fprintf(stderr, "Failed to eval %s\n", args[1].raw);
+	if (!eval_expr(root, cmd->args[1].parsed, &cmd->args[1].value)) {
+		fprintf(stderr, "Failed to eval %s\n", cmd->args[1].raw);
 		return 1;
 	}
-	uint32_t value = args[1].value;
+	uint32_t value = cmd->args[1].value;
 	if (name && size && size != 'l') {
 		uint32_t old;
 		if (!root->resolve(root, name, &old)) {
@@ -1423,54 +1550,54 @@ static uint8_t cmd_set(debug_root *root, char *format, int num_args, command_arg
 	return 1;
 }
 
-static uint8_t cmd_frames(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_frames(debug_root *root, parsed_command *cmd)
 {
-	current_system->enter_debugger_frames = args[0].value;
+	current_system->enter_debugger_frames = cmd->args[0].value;
 	return 0;
 }
 
-static uint8_t cmd_bindup(debug_root *root, char *format, char *param)
+static uint8_t cmd_bindup(debug_root *root, parsed_command *cmd)
 {
-	if (!bind_up(param)) {
-		fprintf(stderr, "%s is not a valid binding name\n", param);
+	if (!bind_up(cmd->raw)) {
+		fprintf(stderr, "%s is not a valid binding name\n", cmd->raw);
 	}
 	return 1;
 }
 
-static uint8_t cmd_binddown(debug_root *root, char *format, char *param)
+static uint8_t cmd_binddown(debug_root *root, parsed_command *cmd)
 {
-	if (!bind_down(param)) {
-		fprintf(stderr, "%s is not a valid binding name\n", param);
+	if (!bind_down(cmd->raw)) {
+		fprintf(stderr, "%s is not a valid binding name\n", cmd->raw);
 	}
 	return 1;
 }
 
-static uint8_t cmd_condition(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_condition(debug_root *root, parsed_command *cmd)
 {
-	if (!eval_expr(root, args[0].parsed, &args[0].value)) {
-		fprintf(stderr, "Failed to evaluate breakpoint number: %s\n", args[0].raw);
+	if (!eval_expr(root, cmd->args[0].parsed, &cmd->args[0].value)) {
+		fprintf(stderr, "Failed to evaluate breakpoint number: %s\n", cmd->args[0].raw);
 		return 1;
 	}
-	bp_def **target = find_breakpoint_idx(&root->breakpoints, args[0].value);
+	bp_def **target = find_breakpoint_idx(&root->breakpoints, cmd->args[0].value);
 	if (!*target) {
-		fprintf(stderr, "Failed to find breakpoint %u\n", args[0].value);
+		fprintf(stderr, "Failed to find breakpoint %u\n", cmd->args[0].value);
 		return 1;
 	}
 	free_expr((*target)->condition);
-	if (num_args > 1 && args[1].parsed) {
-		(*target)->condition = args[1].parsed;
-		args[1].parsed = NULL;
+	if (cmd->num_args > 1 && cmd->args[1].parsed) {
+		(*target)->condition = cmd->args[1].parsed;
+		cmd->args[1].parsed = NULL;
 	} else {
 		(*target)->condition = NULL;
 	}
 	return 1;
 }
 
-static uint8_t cmd_delete_m68k(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_delete_m68k(debug_root *root, parsed_command *cmd)
 {
-	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, args[0].value);
+	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, cmd->args[0].value);
 	if (!*this_bp) {
-		fprintf(stderr, "Breakpoint %d does not exist\n", args[0].value);
+		fprintf(stderr, "Breakpoint %d does not exist\n", cmd->args[0].value);
 		return 1;
 	}
 	bp_def *tmp = *this_bp;
@@ -1487,25 +1614,25 @@ static uint8_t cmd_delete_m68k(debug_root *root, char *format, int num_args, com
 	return 1;
 }
 
-static uint8_t cmd_breakpoint_m68k(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_breakpoint_m68k(debug_root *root, parsed_command *cmd)
 {
-	insert_breakpoint(root->cpu_context, args[0].value, debugger);
+	insert_breakpoint(root->cpu_context, cmd->args[0].value, debugger);
 	bp_def *new_bp = calloc(1, sizeof(bp_def));
 	new_bp->next = root->breakpoints;
-	new_bp->address = args[0].value;
+	new_bp->address = cmd->args[0].value;
 	new_bp->index = root->bp_index++;
 	root->breakpoints = new_bp;
-	printf("68K Breakpoint %d set at %X\n", new_bp->index, args[0].value);
+	printf("68K Breakpoint %d set at %X\n", new_bp->index, cmd->args[0].value);
 	return 1;
 }
 
-static uint8_t cmd_advance_m68k(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_advance_m68k(debug_root *root, parsed_command *cmd)
 {
-	insert_breakpoint(root->cpu_context, args[0].value, debugger);
+	insert_breakpoint(root->cpu_context, cmd->args[0].value, debugger);
 	return 0;
 }
 
-static uint8_t cmd_step_m68k(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_step_m68k(debug_root *root, parsed_command *cmd)
 {
 	m68kinst *inst = root->inst;
 	m68k_context *context = root->cpu_context;
@@ -1537,7 +1664,7 @@ static uint8_t cmd_step_m68k(debug_root *root, char *format, int num_args, comma
 	return 0;
 }
 
-static uint8_t cmd_over_m68k(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_over_m68k(debug_root *root, parsed_command *cmd)
 {
 	m68kinst *inst = root->inst;
 	m68k_context *context = root->cpu_context;
@@ -1574,7 +1701,7 @@ static uint8_t cmd_over_m68k(debug_root *root, char *format, int num_args, comma
 	return 0;
 }
 
-static uint8_t cmd_next_m68k(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_next_m68k(debug_root *root, parsed_command *cmd)
 {
 	m68kinst *inst = root->inst;
 	m68k_context *context = root->cpu_context;
@@ -1606,7 +1733,7 @@ static uint8_t cmd_next_m68k(debug_root *root, char *format, int num_args, comma
 	return 0;
 }
 
-static uint8_t cmd_backtrace_m68k(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_backtrace_m68k(debug_root *root, parsed_command *cmd)
 {
 	m68k_context *context = root->cpu_context;
 	uint32_t stack = context->aregs[7];
@@ -1632,7 +1759,7 @@ static uint8_t cmd_backtrace_m68k(debug_root *root, char *format, int num_args, 
 	return 1;
 }
 
-static uint8_t cmd_vdp_sprites(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_vdp_sprites(debug_root *root, parsed_command *cmd)
 {
 	m68k_context *context = root->cpu_context;
 	genesis_context * gen = context->system;
@@ -1640,7 +1767,7 @@ static uint8_t cmd_vdp_sprites(debug_root *root, char *format, int num_args, com
 	return 1;
 }
 
-static uint8_t cmd_vdp_regs(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_vdp_regs(debug_root *root, parsed_command *cmd)
 {
 	m68k_context *context = root->cpu_context;
 	genesis_context * gen = context->system;
@@ -1648,12 +1775,12 @@ static uint8_t cmd_vdp_regs(debug_root *root, char *format, int num_args, comman
 	return 1;
 }
 
-static uint8_t cmd_ym_channel(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_ym_channel(debug_root *root, parsed_command *cmd)
 {
 	m68k_context *context = root->cpu_context;
 	genesis_context * gen = context->system;
-	if (num_args) {
-		ym_print_channel_info(gen->ym, args[0].value - 1);
+	if (cmd->num_args) {
+		ym_print_channel_info(gen->ym, cmd->args[0].value - 1);
 	} else {
 		for (int i = 0; i < 6; i++) {
 			ym_print_channel_info(gen->ym, i);
@@ -1662,7 +1789,7 @@ static uint8_t cmd_ym_channel(debug_root *root, char *format, int num_args, comm
 	return 1;
 }
 
-static uint8_t cmd_ym_timer(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_ym_timer(debug_root *root, parsed_command *cmd)
 {
 	m68k_context *context = root->cpu_context;
 	genesis_context * gen = context->system;
@@ -1670,8 +1797,9 @@ static uint8_t cmd_ym_timer(debug_root *root, char *format, int num_args, comman
 	return 1;
 }
 
-static uint8_t cmd_sub(debug_root *root, char *format, char *param)
+static uint8_t cmd_sub(debug_root *root, parsed_command *cmd)
 {
+	char *param = cmd->raw;
 	while (param && *param && isblank(*param))
 	{
 		++param;
@@ -1698,8 +1826,9 @@ static uint8_t cmd_sub(debug_root *root, char *format, char *param)
 	}
 }
 
-static uint8_t cmd_main(debug_root *root, char *format, char *param)
+static uint8_t cmd_main(debug_root *root, parsed_command *cmd)
 {
+	char *param = cmd->raw;
 	while (param && *param && isblank(*param))
 	{
 		++param;
@@ -1726,8 +1855,9 @@ static uint8_t cmd_main(debug_root *root, char *format, char *param)
 	}
 }
 
-static uint8_t cmd_gen_z80(debug_root *root, char *format, char *param)
+static uint8_t cmd_gen_z80(debug_root *root, parsed_command *cmd)
 {
+	char *param = cmd->raw;
 	while (param && *param && isblank(*param))
 	{
 		++param;
@@ -1771,9 +1901,10 @@ command_def common_commands[] = {
 		},
 		.usage = "help",
 		.desc = "Print a list of available commands for the current debug context",
-		.raw_impl = cmd_help,
+		.impl = cmd_help,
 		.min_args = 0,
-		.max_args = 1
+		.max_args = 1,
+		.raw_args = 1
 	},
 	{
 		.names = (const char *[]){
@@ -1801,9 +1932,10 @@ command_def common_commands[] = {
 		},
 		.usage = "printf FORMAT EXPRESSION...",
 		.desc = "Print a string with C-style formatting specifiers replaced with the value of the remaining arguments",
-		.raw_impl = cmd_printf,
+		.impl = cmd_printf,
 		.min_args = 1,
-		.max_args = -1
+		.max_args = -1,
+		.raw_args = 1
 	},
 	{
 		.names = (const char *[]){
@@ -1843,7 +1975,8 @@ command_def common_commands[] = {
 		.desc = "Set a list of debugger commands to be executed when the given breakpoint is hit",
 		.impl = cmd_command,
 		.min_args = 1,
-		.max_args = 1
+		.max_args = 1,
+		.has_block = 1
 	},
 	{
 		.names = (const char *[]){
@@ -1872,9 +2005,10 @@ command_def common_commands[] = {
 		},
 		.usage = "bindup NAME",
 		.desc = "Simulate a keyup for binding NAME",
-		.raw_impl = cmd_bindup,
+		.impl = cmd_bindup,
 		.min_args = 1,
-		.max_args = 1
+		.max_args = 1,
+		.raw_args = 1
 	},
 	{
 		.names = (const char *[]){
@@ -1882,9 +2016,10 @@ command_def common_commands[] = {
 		},
 		.usage = "bindown NAME",
 		.desc = "Simulate a keydown for binding NAME",
-		.raw_impl = cmd_binddown,
+		.impl = cmd_binddown,
 		.min_args = 1,
-		.max_args = 1
+		.max_args = 1,
+		.raw_args = 1
 	},
 	{
 		.names = (const char *[]){
@@ -1894,7 +2029,8 @@ command_def common_commands[] = {
 		.desc = "Makes breakpoint BREAKPOINT conditional on the value of EXPRESSION or removes a condition if EXPRESSION is omitted",
 		.impl = cmd_condition,
 		.min_args = 1,
-		.max_args = 2
+		.max_args = 2,
+		.skip_eval = 1
 	}
 };
 #define NUM_COMMON (sizeof(common_commands)/sizeof(*common_commands))
@@ -2002,9 +2138,10 @@ command_def genesis_commands[] = {
 		},
 		.usage = "z80 [COMMAND]",
 		.desc = "Run a Z80 debugger command or switch to Z80 context when no command is given",
-		.raw_impl = cmd_gen_z80,
+		.impl = cmd_gen_z80,
 		.min_args = 0,
-		.max_args = -1
+		.max_args = -1,
+		.raw_args = 1
 	},
 #endif
 	{
@@ -2038,9 +2175,10 @@ command_def scd_main_commands[] = {
 		},
 		.usage = "subcpu [COMMAND]",
 		.desc = "Run a Sub-CPU debugger command or switch to Sub-CPU context when no command is given",
-		.raw_impl = cmd_sub,
+		.impl = cmd_sub,
 		.min_args = 0,
-		.max_args = -1
+		.max_args = -1,
+		.raw_args = 1
 	}
 };
 
@@ -2053,9 +2191,10 @@ command_def scd_sub_commands[] = {
 		},
 		.usage = "maincpu [COMMAND]",
 		.desc = "Run a Main-CPU debugger command or switch to Main-CPU context when no command is given",
-		.raw_impl = cmd_main,
+		.impl = cmd_main,
 		.min_args = 0,
-		.max_args = -1
+		.max_args = -1,
+		.raw_args = 1
 	}
 };
 
@@ -2063,11 +2202,11 @@ command_def scd_sub_commands[] = {
 
 #ifndef NO_Z80
 
-static uint8_t cmd_delete_z80(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_delete_z80(debug_root *root, parsed_command *cmd)
 {
-	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, args[0].value);
+	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, cmd->args[0].value);
 	if (!*this_bp) {
-		fprintf(stderr, "Breakpoint %d does not exist\n", args[0].value);
+		fprintf(stderr, "Breakpoint %d does not exist\n", cmd->args[0].value);
 		return 1;
 	}
 	bp_def *tmp = *this_bp;
@@ -2084,25 +2223,25 @@ static uint8_t cmd_delete_z80(debug_root *root, char *format, int num_args, comm
 	return 1;
 }
 
-static uint8_t cmd_breakpoint_z80(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_breakpoint_z80(debug_root *root, parsed_command *cmd)
 {
-	zinsert_breakpoint(root->cpu_context, args[0].value, (uint8_t *)zdebugger);
+	zinsert_breakpoint(root->cpu_context, cmd->args[0].value, (uint8_t *)zdebugger);
 	bp_def *new_bp = calloc(1, sizeof(bp_def));
 	new_bp->next = root->breakpoints;
-	new_bp->address = args[0].value;
+	new_bp->address = cmd->args[0].value;
 	new_bp->index = root->bp_index++;
 	root->breakpoints = new_bp;
-	printf("Z80 Breakpoint %d set at %X\n", new_bp->index, args[0].value);
+	printf("Z80 Breakpoint %d set at %X\n", new_bp->index, cmd->args[0].value);
 	return 1;
 }
 
-static uint8_t cmd_advance_z80(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_advance_z80(debug_root *root, parsed_command *cmd)
 {
-	zinsert_breakpoint(root->cpu_context, args[0].value, (uint8_t *)zdebugger);
+	zinsert_breakpoint(root->cpu_context, cmd->args[0].value, (uint8_t *)zdebugger);
 	return 0;
 }
 
-static uint8_t cmd_step_z80(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_step_z80(debug_root *root, parsed_command *cmd)
 {
 	z80inst *inst = root->inst;
 	z80_context *context = root->cpu_context;
@@ -2136,13 +2275,13 @@ static uint8_t cmd_step_z80(debug_root *root, char *format, int num_args, comman
 	return 0;
 }
 
-static uint8_t cmd_over_z80(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_over_z80(debug_root *root, parsed_command *cmd)
 {
 	fputs("not implemented yet\n", stderr);
 	return 1;
 }
 
-static uint8_t cmd_next_z80(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_next_z80(debug_root *root, parsed_command *cmd)
 {
 	z80inst *inst = root->inst;
 	z80_context *context = root->cpu_context;
@@ -2176,7 +2315,7 @@ static uint8_t cmd_next_z80(debug_root *root, char *format, int num_args, comman
 	return 0;
 }
 
-static uint8_t cmd_backtrace_z80(debug_root *root, char *format, int num_args, command_arg *args)
+static uint8_t cmd_backtrace_z80(debug_root *root, parsed_command *cmd)
 {
 	z80_context *context = root->cpu_context;
 	uint32_t stack = context->sp;
@@ -2206,8 +2345,9 @@ static uint8_t cmd_backtrace_z80(debug_root *root, char *format, int num_args, c
 	return 1;
 }
 
-static uint8_t cmd_gen_m68k(debug_root *root, char *format, char *param)
+static uint8_t cmd_gen_m68k(debug_root *root, parsed_command *cmd)
 {
+	char *param = cmd->raw;
 	while (param && *param && isblank(*param))
 	{
 		++param;
@@ -2315,9 +2455,10 @@ command_def gen_z80_commands[] = {
 		},
 		.usage = "m68k [COMMAND]",
 		.desc = "Run a M68K debugger command or switch to M68K context when no command is given",
-		.raw_impl = cmd_gen_m68k,
+		.impl = cmd_gen_m68k,
 		.min_args = 0,
-		.max_args = -1
+		.max_args = -1,
+		.raw_args = 1
 	}
 };
 
@@ -2871,6 +3012,7 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 	if (!root) {
 		return context;
 	}
+	root->address = address;
 	//Check if this is a user set breakpoint, or just a temporary one
 	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address);
 	if (*this_bp) {
@@ -2894,40 +3036,23 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 	if (!pc) {
 		fatal_error("Failed to get native pointer on entering Z80 debugger at address %X\n", address);
 	}
+	uint8_t * after_pc = z80_decode(pc, &inst);
+	uint16_t after = address + (after_pc-pc);
+	root->after = after;
+	root->inst = &inst;
 	for (disp_def * cur = root->displays; cur; cur = cur->next) {
+		char format_str[8];
+		make_format_str(format_str, cur->format);
 		for (int i = 0; i < cur->num_args; i++)
 		{
 			eval_expr(root, cur->args[i].parsed, &cur->args[i].value);
+			do_print(root, format_str, cur->args[i].raw, cur->args[i].value);
 		}
-		cmd_print(root, cur->format, cur->num_args, cur->args);
 	}
-	uint8_t * after_pc = z80_decode(pc, &inst);
+
 	z80_disasm(&inst, input_buf, address);
 	printf("%X:\t%s\n", address, input_buf);
-	uint16_t after = address + (after_pc-pc);
-	root->address = address;
-	root->after = after;
-	root->inst = &inst;
-	int debugging = 1;
-	while(debugging) {
-		fputs(">", stdout);
-		if (!fgets(input_buf, sizeof(input_buf), stdin)) {
-			fputs("fgets failed", stderr);
-			break;
-		}
-		strip_nl(input_buf);
-		//hitting enter repeats last command
-		if (input_buf[0]) {
-			strcpy(last_cmd, input_buf);
-		} else {
-			strcpy(input_buf, last_cmd);
-		}
-		parsed_command cmd;
-		if (parse_command(root, input_buf, &cmd)) {
-			debugging = run_command(root, &cmd);
-			free_parsed_command(&cmd);
-		}
-	}
+	debugger_repl(root);
 	return context;
 }
 
@@ -2999,55 +3124,16 @@ void debugger(m68k_context * context, uint32_t address)
 	root->after = after;
 	root->inst = &inst;
 	for (disp_def * cur = root->displays; cur; cur = cur->next) {
+		char format_str[8];
+		make_format_str(format_str, cur->format);
 		for (int i = 0; i < cur->num_args; i++)
 		{
 			eval_expr(root, cur->args[i].parsed, &cur->args[i].value);
+			do_print(root, format_str, cur->args[i].raw, cur->args[i].value);
 		}
-		cmd_print(root, cur->format, cur->num_args, cur->args);
 	}
 	m68k_disasm(&inst, input_buf);
 	printf("%X: %s\n", address, input_buf);
-#ifdef _WIN32
-#define prompt 1
-#else
-	int prompt = 1;
-	fd_set read_fds;
-	FD_ZERO(&read_fds);
-	struct timeval timeout;
-#endif
-	while (debugging) {
-		if (prompt) {
-			fputs(">", stdout);
-			fflush(stdout);
-		}
-		process_events();
-#ifndef _WIN32
-		timeout.tv_sec = 0;
-		timeout.tv_usec = 16667;
-		FD_SET(fileno(stdin), &read_fds);
-		if(select(fileno(stdin) + 1, &read_fds, NULL, NULL, &timeout) < 1) {
-			prompt = 0;
-			continue;
-		} else {
-			prompt = 1;
-		}
-#endif
-		if (!fgets(input_buf, sizeof(input_buf), stdin)) {
-			fputs("fgets failed", stderr);
-			break;
-		}
-		strip_nl(input_buf);
-		//hitting enter repeats last command
-		if (input_buf[0]) {
-			strcpy(last_cmd, input_buf);
-		} else {
-			strcpy(input_buf, last_cmd);
-		}
-		parsed_command cmd;
-		if (parse_command(root, input_buf, &cmd)) {
-			debugging = run_command(root, &cmd);
-			free_parsed_command(&cmd);
-		}
-	}
+	debugger_repl(root);
 	return;
 }
