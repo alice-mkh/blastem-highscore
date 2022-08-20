@@ -1475,6 +1475,37 @@ static uint8_t cmd_command(debug_root *root, parsed_command *cmd)
 	return 1;
 }
 
+static uint8_t execute_block(debug_root *root, command_block * block)
+{
+	uint8_t debugging = 1;
+	for (int i = 0; i < block->num_commands; i++)
+	{
+		debugging = run_command(root, block->commands + i) && debugging;
+	}
+	return debugging;
+}
+
+static uint8_t cmd_if(debug_root *root, parsed_command *cmd)
+{
+	return execute_block(root, cmd->args[0].value ? &cmd->block : &cmd->else_block);
+}
+
+static uint8_t cmd_while(debug_root *root, parsed_command *cmd)
+{
+	if (!cmd->args[0].value) {
+		return execute_block(root, &cmd->else_block);
+	}
+	int debugging = 1;
+	do {
+		debugging = execute_block(root, &cmd->block) && debugging;
+		if (!eval_expr(root, cmd->args[0].parsed, &cmd->args[0].value)) {
+			fprintf(stderr, "Failed to eval %s\n", cmd->args[0].raw);
+			return 1;
+		}
+	} while (cmd->args[0].value);
+	return debugging;
+}
+
 const char *expr_type_names[] = {
 	"EXPR_NONE",
 	"EXPR_SCALAR",
@@ -2031,6 +2062,30 @@ command_def common_commands[] = {
 		.min_args = 1,
 		.max_args = 2,
 		.skip_eval = 1
+	},
+	{
+		.names = (const char *[]){
+			"if", NULL
+		},
+		.usage = "if CONDITION",
+		.desc = "If the condition is true, the following block is executed. Otherwise the else block is executed if present",
+		.impl = cmd_if,
+		.min_args = 1,
+		.max_args = 1,
+		.has_block = 1,
+		.accepts_else = 1
+	},
+	{
+		.names = (const char *[]){
+			"while", NULL
+		},
+		.usage = "while CONDITION",
+		.desc = "The following block is executed repeatedly until the condition is false. If the condition is false at the start, the else block is executed if present",
+		.impl = cmd_while,
+		.min_args = 1,
+		.max_args = 1,
+		.has_block = 1,
+		.accepts_else = 1
 	}
 };
 #define NUM_COMMON (sizeof(common_commands)/sizeof(*common_commands))
