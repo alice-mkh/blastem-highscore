@@ -1918,7 +1918,7 @@ command_def common_commands[] = {
 	},
 	{
 		.names = (const char *[]){
-			"print", NULL
+			"print", "p", NULL
 		},
 		.usage = "print[/FORMAT] EXPRESSION...",
 		.desc = "Print one or more expressions using the optional format character",
