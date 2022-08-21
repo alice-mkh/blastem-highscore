@@ -1134,24 +1134,35 @@ static void debugger_repl(debug_root *root)
 	parsed_command cmds[2] = {0};
 	int cur = 0;
 	uint8_t has_last = 0;
+	if (root->last_cmd.def) {
+		memcpy(cmds + 1, &root->last_cmd, sizeof(root->last_cmd));
+		has_last = 1;
+	}
 	while(debugging) {
 		switch (read_parse_command(root, cmds + cur, 0))
 		{
 		case NORMAL:
 			debugging = run_command(root, cmds + cur);
+			cur = !cur;
 			if (debugging && has_last) {
-				cur = !cur;
 				free_parsed_command(cmds + cur);
 				memset(cmds + cur, 0, sizeof(cmds[cur]));
 			}
+			has_last = 1;
 			break;
 		case EMPTY:
-			debugging = run_command(root, cmds + !cur);
+			if (has_last) {
+				debugging = run_command(root, cmds + !cur);
+			}
 			break;
 		}
 	}
-	free_parsed_command(cmds);
-	free_parsed_command(cmds + 1);
+	if (has_last) {
+		memcpy(&root->last_cmd, cmds + !cur, sizeof(root->last_cmd));
+	} else {
+		free_parsed_command(cmds + !cur);
+	}
+	free_parsed_command(cmds + cur);
 }
 
 static uint8_t cmd_quit(debug_root *root, parsed_command *cmd)
@@ -1855,7 +1866,7 @@ static uint8_t cmd_sub(debug_root *root, parsed_command *cmd)
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
 	if (param && *param && !isspace(*param)) {
-		parsed_command cmd;
+		parsed_command cmd = {0};
 		debug_root *sub_root = find_m68k_root(cd->m68k);
 		if (!sub_root) {
 			fputs("Failed to get debug root for Sub CPU\n", stderr);
@@ -1884,7 +1895,7 @@ static uint8_t cmd_main(debug_root *root, parsed_command *cmd)
 	segacd_context *cd = m68k->system;
 
 	if (param && *param && !isspace(*param)) {
-		parsed_command cmd;
+		parsed_command cmd = {0};
 		debug_root *main_root = find_m68k_root(cd->genesis->m68k);
 		if (!main_root) {
 			fputs("Failed to get debug root for Main CPU\n", stderr);
@@ -1913,7 +1924,7 @@ static uint8_t cmd_gen_z80(debug_root *root, parsed_command *cmd)
 	genesis_context *gen = m68k->system;
 
 	if (param && *param && !isspace(*param)) {
-		parsed_command cmd;
+		parsed_command cmd = {0};
 		debug_root *z80_root = find_z80_root(gen->z80);
 		if (!z80_root) {
 			fputs("Failed to get debug root for Z80\n", stderr);
@@ -2426,7 +2437,7 @@ static uint8_t cmd_gen_m68k(debug_root *root, parsed_command *cmd)
 	genesis_context *gen = (genesis_context *)current_system;
 
 	if (param && *param && !isspace(*param)) {
-		parsed_command cmd;
+		parsed_command cmd = {0};
 		debug_root *m68k_root = find_m68k_root(gen->m68k);
 		if (!m68k_root) {
 			fputs("Failed to get debug root for M68K\n", stderr);

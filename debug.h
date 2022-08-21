@@ -111,21 +111,22 @@ typedef uint8_t (*reader)(debug_root *root, uint32_t *out, char size);
 typedef uint8_t (*writer)(debug_root *root, uint32_t address, uint32_t value, char size);
 
 struct debug_root {
-	void      *cpu_context;
-	bp_def    *breakpoints;
-	disp_def  *displays;
-	tern_node *commands;
-	resolver  resolve;
-	reader    read_mem;
-	setter    set;
-	writer    write_mem;
-	uint32_t  bp_index;
-	uint32_t  disp_index;
-	uint32_t  branch_t;
-	uint32_t  branch_f;
-	void      *inst;
-	uint32_t  address;
-	uint32_t  after;
+	void           *cpu_context;
+	bp_def         *breakpoints;
+	disp_def       *displays;
+	tern_node      *commands;
+	resolver       resolve;
+	reader         read_mem;
+	setter         set;
+	writer         write_mem;
+	parsed_command last_cmd;
+	uint32_t       bp_index;
+	uint32_t       disp_index;
+	uint32_t       branch_t;
+	uint32_t       branch_f;
+	void           *inst;
+	uint32_t       address;
+	uint32_t       after;
 };
 
 debug_root *find_root(void *cpu);
