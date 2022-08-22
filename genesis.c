@@ -1873,7 +1873,7 @@ static genesis_context *shared_init(uint32_t system_opts, rom_info *rom, uint8_t
 	}
 
 	uint8_t max_vsram = !strcmp(tern_find_ptr_default(model, "vsram", "40"), "64");
-	gen->vdp = init_vdp_context(gen->version_reg & 0x40, max_vsram);
+	gen->vdp = init_vdp_context(gen->version_reg & 0x40, max_vsram, VDP_GENESIS);
 	gen->vdp->system = &gen->header;
 	gen->frame_end = vdp_cycles_to_frame_end(gen->vdp);
 	char * config_cycles = tern_find_path(config, "clocks\0max_cycles\0", TVAL_PTR).ptrval;

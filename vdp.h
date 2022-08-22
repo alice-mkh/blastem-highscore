@@ -163,6 +163,14 @@ enum {
 	VDP_NUM_DEBUG_TYPES
 };
 
+enum {
+	VDP_GENESIS,
+	VDP_GAMEGEAR,
+	VDP_SMS2,
+	VDP_SMS,
+	VDP_TMS9918A
+};
+
 typedef struct {
 	system_header  *system;
 	//pointer to current line in framebuffer
@@ -245,12 +253,14 @@ typedef struct {
 	uint8_t        debug_fb_indices[VDP_NUM_DEBUG_TYPES];
 	uint8_t        debug_modes[VDP_NUM_DEBUG_TYPES];
 	uint8_t        pushed_frame;
+	uint8_t        type;
+	uint8_t        cram_latch;
 	uint8_t        vdpmem[];
 } vdp_context;
 
 
 
-vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram);
+vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t type);
 void vdp_free(vdp_context *context);
 void vdp_run_context_full(vdp_context * context, uint32_t target_cycles);
 void vdp_run_context(vdp_context * context, uint32_t target_cycles);

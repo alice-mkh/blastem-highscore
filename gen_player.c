@@ -12,7 +12,7 @@
 #ifdef IS_LIB
 #define MAX_SOUND_CYCLES (MCLKS_PER_YM*NUM_OPERATORS*6*4)
 #else
-#define MAX_SOUND_CYCLES 100000	
+#define MAX_SOUND_CYCLES 100000
 #endif
 
 static void sync_sound(gen_player *gen, uint32_t target)
@@ -92,7 +92,7 @@ static void run(gen_player *player)
 			vdp_replay_event(player->vdp, event, &player->reader);
 		}
 		}
-			
+
 		}
 		if (!player->reader.socket) {
 			reader_ensure_data(&player->reader, 1);
@@ -136,17 +136,17 @@ static void config_common(gen_player *player)
 	uint8_t name_len = load_int8(&player->reader.buffer);
 	player->header.info.name = calloc(1, name_len + 1);
 	load_buffer8(&player->reader.buffer, player->header.info.name, name_len);
-	
-	player->vdp = init_vdp_context(vid_std == VID_PAL, 0);
+
+	player->vdp = init_vdp_context(vid_std == VID_PAL, 0, VDP_GENESIS);
 	render_set_video_standard(vid_std);
 	uint32_t master_clock = vid_std == VID_NTSC ? MCLKS_NTSC : MCLKS_PAL;
-	
+
 	player->ym = malloc(sizeof(ym2612_context));
 	ym_init(player->ym, master_clock, MCLKS_PER_YM, 0);
-	
+
 	player->psg = malloc(sizeof(psg_context));
 	psg_init(player->psg, master_clock, MCLKS_PER_PSG);
-	
+
 	player->header.start_context = start_context;
 	player->header.gamepad_down = gamepad_down;
 	player->header.gamepad_up = gamepad_up;

@@ -146,7 +146,7 @@ static void update_video_params(vdp_context *context)
 
 static uint8_t color_map_init_done;
 
-vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram)
+vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t type)
 {
 	vdp_context *context = calloc(1, sizeof(vdp_context) + VRAM_SIZE);
 	if (headless) {
@@ -161,6 +161,7 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram)
 	context->fifo_read = -1;
 	context->regs[REG_HINT] = context->hint_counter = 0xFF;
 	context->vsram_size = has_max_vsram ? MAX_VSRAM_SIZE : MIN_VSRAM_SIZE;
+	context->type = type;
 
 	if (!color_map_init_done) {
 		uint8_t b,g,r;
@@ -174,9 +175,16 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram)
 				g = levels[((color >> 5) & 0x7) + 7];
 				r = levels[((color >> 1) & 0x7) + 7];
 			} else if(color & FBUF_MODE4) {
-				b = levels[(color >> 4 & 0xC) | (color >> 6 & 0x2)];
-				g = levels[(color >> 2 & 0x8) | (color >> 1 & 0x4) | (color >> 4 & 0x2)];
-				r = levels[(color << 1 & 0xC) | (color >> 1 & 0x2)];
+				if (type == VDP_GAMEGEAR) {
+					b = (color >> 8 & 0xF) * 0x11;
+					g = (color >> 4 & 0xF) * 0x11;
+					r = (color & 0xF) * 0x11;
+				} else {
+					//TODO: Mode 4 has a separate DAC tap so this isn't quite correct
+					b = levels[(color >> 4 & 0xC) | (color >> 6 & 0x2)];
+					g = levels[(color >> 2 & 0x8) | (color >> 1 & 0x4) | (color >> 4 & 0x2)];
+					r = levels[(color << 1 & 0xC) | (color >> 1 & 0x2)];
+				}
 			} else {
 				b = levels[(color >> 8) & 0xE];
 				g = levels[(color >> 4) & 0xE];
@@ -805,7 +813,11 @@ static void update_color_map(vdp_context *context, uint16_t index, uint16_t valu
 	context->colors[index] = color_map[value & CRAM_BITS];
 	context->colors[index + SHADOW_OFFSET] = color_map[(value & CRAM_BITS) | FBUF_SHADOW];
 	context->colors[index + HIGHLIGHT_OFFSET] = color_map[(value & CRAM_BITS) | FBUF_HILIGHT];
-	context->colors[index + MODE4_OFFSET] = color_map[(value & CRAM_BITS) | FBUF_MODE4];
+	if (context->type == VDP_GAMEGEAR) {
+		context->colors[index + MODE4_OFFSET] = color_map[(value & 0xFFF) | FBUF_MODE4];
+	} else {
+		context->colors[index + MODE4_OFFSET] = color_map[(value & CRAM_BITS) | FBUF_MODE4];
+	}
 }
 
 void write_cram_internal(vdp_context * context, uint16_t addr, uint16_t value)
@@ -819,6 +831,8 @@ static void write_cram(vdp_context * context, uint16_t address, uint16_t value)
 	uint16_t addr;
 	if (context->regs[REG_MODE_2] & BIT_MODE_5) {
 		addr = (address/2) & (CRAM_SIZE-1);
+	} else if (context->type == VDP_GAMEGEAR) {
+		addr = (address/2) & 31;
 	} else {
 		addr = address & 0x1F;
 		value = (value << 1 & 0xE) | (value << 2 & 0xE0) | (value & 0xE00);
@@ -940,7 +954,14 @@ static void external_slot(vdp_context * context)
 			//printf("CRAM Write | %X to %X\n", start->value, (start->address/2) & (CRAM_SIZE-1));
 			uint16_t val;
 			if (start->partial == 3) {
-				if ((start->address & 1) && (context->regs[REG_MODE_2] & BIT_MODE_5)) {
+				if (context->type == VDP_GAMEGEAR) {
+					if (start->address & 1) {
+						val = start->value << 8 | context->cram_latch;
+					} else {
+						context->cram_latch = start->value;
+						break;
+					}
+				} else if ((start->address & 1) && (context->regs[REG_MODE_2] & BIT_MODE_5)) {
 					val = (context->cram[start->address >> 1 & (CRAM_SIZE-1)] & 0xFF) | start->value << 8;
 				} else {
 					uint16_t address = (context->regs[REG_MODE_2] & BIT_MODE_5) ? start->address >> 1 & (CRAM_SIZE-1) : start->address & 0x1F;
