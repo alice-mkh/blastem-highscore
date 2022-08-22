@@ -26,6 +26,7 @@ typedef struct {
 	uint32_t      normal_clock;
 	uint32_t      last_frame;
 	uint8_t       should_return;
+	uint8_t       start_button_region;
 	uint8_t       ram[SMS_RAM_SIZE];
 	uint8_t       bank_regs[4];
 	uint8_t       cart_ram[SMS_CART_RAM_SIZE];

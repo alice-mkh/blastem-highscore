@@ -195,8 +195,46 @@ uint8_t debug_commands(system_header *system, char *input_buf)
 	return 1;
 }
 
+static uint8_t gg_io_read(uint32_t location, void *vcontext)
+{
+	z80_context *z80 = vcontext;
+	sms_context *sms = z80->system;
+	if (!location) {
+		return sms->start_button_region;
+	} else {
+		//TODO: implement link port
+		return 0xFF;
+	}
+}
+
+static void *gg_io_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	//TODO: implement link port
+	return vcontext;
+}
+
+static uint8_t psg_pan_read(uint32_t location, void *vcontext)
+{
+	//TODO: implement PSG pan
+	return 0xFF;
+}
+
+static void *psg_pan_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	//TODO: implement PSG pan
+	return vcontext;
+}
 static memmap_chunk io_map[] = {
 	{0x00, 0x40, 0xFF, .write_8 = memory_io_write},
+	{0x40, 0x80, 0xFF, .read_8 = hv_read, .write_8 = sms_psg_write},
+	{0x80, 0xC0, 0xFF, .read_8 = vdp_read, .write_8 = vdp_write},
+	{0xC0, 0x100,0xFF, .read_8 = io_read}
+};
+
+static memmap_chunk io_gg[] = {
+	{0x00, 0x07, 0xFF, .read_8 = gg_io_read, .write_8 = gg_io_write},
+	{0x07, 0x08, 0xFF, .read_8 = psg_pan_read, .write_8 = psg_pan_write},
+	{0x08, 0x40, 0xFF, .write_8 = memory_io_write},
 	{0x40, 0x80, 0xFF, .read_8 = hv_read, .write_8 = sms_psg_write},
 	{0x80, 0xC0, 0xFF, .read_8 = vdp_read, .write_8 = vdp_write},
 	{0xC0, 0x100,0xFF, .read_8 = io_read}
@@ -543,6 +581,8 @@ static void gamepad_down(system_header *system, uint8_t gamepad_num, uint8_t but
 		if (button == MAIN_UNIT_PAUSE) {
 			vdp_pbc_pause(sms->vdp);
 		}
+	} else if (sms->vdp->type == VDP_GAMEGEAR && gamepad_num == 1 && button == BUTTON_START) {
+		sms->start_button_region &= 0x7F;
 	} else {
 		io_gamepad_down(&sms->io, gamepad_num, button);
 	}
@@ -551,7 +591,11 @@ static void gamepad_down(system_header *system, uint8_t gamepad_num, uint8_t but
 static void gamepad_up(system_header *system, uint8_t gamepad_num, uint8_t button)
 {
 	sms_context *sms = (sms_context *)system;
-	io_gamepad_up(&sms->io, gamepad_num, button);
+	if (sms->vdp->type == VDP_GAMEGEAR && gamepad_num == 1 && button == BUTTON_START) {
+		sms->start_button_region |= 0x80;
+	} else {
+		io_gamepad_up(&sms->io, gamepad_num, button);
+	}
 }
 
 static void mouse_down(system_header *system, uint8_t mouse_num, uint8_t button)
@@ -626,7 +670,13 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.info.map = malloc(sizeof(memmap_chunk) * sms->header.info.map_chunks);
 	memcpy(sms->header.info.map, memory_map, sizeof(memmap_chunk) * sms->header.info.map_chunks);
 	z80_options *zopts = malloc(sizeof(z80_options));
-	init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_map, 4, 15, 0xFF);
+	uint8_t vdp_type = strcasecmp(media->extension, "gg") ? VDP_GENESIS : VDP_GAMEGEAR;
+	if (vdp_type == VDP_GAMEGEAR) {
+		init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_gg, 6, 15, 0xFF);
+		sms->start_button_region = 0xC0;
+	} else {
+		init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_map, 4, 15, 0xFF);
+	}
 	sms->z80 = init_z80_context(zopts);
 	sms->z80->system = sms;
 	sms->z80->Z80_OPTS->gen.debug_cmd_handler = debug_commands;
@@ -650,7 +700,7 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 
 	set_gain_config(sms);
 
-	sms->vdp = init_vdp_context(0, 0, strcasecmp(media->extension, "gg") ? VDP_GENESIS : VDP_GAMEGEAR);
+	sms->vdp = init_vdp_context(0, 0, vdp_type);
 	sms->vdp->system = &sms->header;
 
 	sms->header.info.save_type = SAVE_NONE;
