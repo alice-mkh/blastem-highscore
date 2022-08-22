@@ -212,16 +212,12 @@ static void *gg_io_write(uint32_t location, void *vcontext, uint8_t value)
 	//TODO: implement link port
 	return vcontext;
 }
-
-static uint8_t psg_pan_read(uint32_t location, void *vcontext)
-{
-	//TODO: implement PSG pan
-	return 0xFF;
-}
-
 static void *psg_pan_write(uint32_t location, void *vcontext, uint8_t value)
 {
-	//TODO: implement PSG pan
+	z80_context *z80 = vcontext;
+	sms_context *sms = z80->system;
+	psg_run(sms->psg, z80->Z80_CYCLE);
+	sms->psg->pan = value;
 	return vcontext;
 }
 static memmap_chunk io_map[] = {
@@ -233,7 +229,7 @@ static memmap_chunk io_map[] = {
 
 static memmap_chunk io_gg[] = {
 	{0x00, 0x07, 0xFF, .read_8 = gg_io_read, .write_8 = gg_io_write},
-	{0x07, 0x08, 0xFF, .read_8 = psg_pan_read, .write_8 = psg_pan_write},
+	{0x07, 0x08, 0xFF, .write_8 = psg_pan_write},
 	{0x08, 0x40, 0xFF, .write_8 = memory_io_write},
 	{0x40, 0x80, 0xFF, .read_8 = hv_read, .write_8 = sms_psg_write},
 	{0x80, 0xC0, 0xFF, .read_8 = vdp_read, .write_8 = vdp_write},

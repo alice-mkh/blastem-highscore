@@ -25,6 +25,7 @@ typedef struct {
 	uint8_t  noise_use_tone;
 	uint8_t  noise_type;
 	uint8_t  latch;
+	uint8_t  pan;
 } psg_context;
 
 

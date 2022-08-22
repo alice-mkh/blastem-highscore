@@ -13,11 +13,12 @@
 void psg_init(psg_context * context, uint32_t master_clock, uint32_t clock_div)
 {
 	memset(context, 0, sizeof(*context));
-	context->audio = render_audio_source("PSG", master_clock, clock_div, 1);
+	context->audio = render_audio_source("PSG", master_clock, clock_div, 2);
 	context->clock_inc = clock_div;
 	for (int i = 0; i < 4; i++) {
 		context->volume[i] = 0xF;
 	}
+	context->pan = 0xFF;
 }
 
 void psg_free(psg_context *context)
@@ -110,18 +111,33 @@ void psg_run(psg_context * context, uint32_t cycles)
 			}
 		}
 
-		int16_t accum = 0;
+		int16_t left_accum = 0, right_accum = 0;
+		uint8_t pan_left = 0x10, pan_right = 0x1;
 
 		for (int i = 0; i < 3; i++) {
 			if (context->output_state[i]) {
-				accum += volume_table[context->volume[i]];
+				int16_t value = volume_table[context->volume[i]];
+				if (context->pan & pan_left) {
+					left_accum += value;
+				}
+				if (context->pan & pan_right) {
+					right_accum += value;
+				}
+				pan_left <<= 1;
+				pan_right <<= 1;
 			}
 		}
 		if (context->noise_out) {
-			accum += volume_table[context->volume[3]];
+			int16_t value = volume_table[context->volume[3]];
+			if (context->pan & pan_left) {
+				left_accum += value;
+			}
+			if (context->pan & pan_right) {
+				right_accum += value;
+			}
 		}
 
-		render_put_mono_sample(context->audio, accum);
+		render_put_stereo_sample(context->audio, left_accum, right_accum);
 
 		context->cycles += context->clock_inc;
 	}
