@@ -228,8 +228,8 @@ static memmap_chunk io_map[] = {
 };
 
 static memmap_chunk io_gg[] = {
-	{0x00, 0x07, 0xFF, .read_8 = gg_io_read, .write_8 = gg_io_write},
-	{0x07, 0x08, 0xFF, .write_8 = psg_pan_write},
+	{0x00, 0x06, 0xFF, .read_8 = gg_io_read, .write_8 = gg_io_write},
+	{0x06, 0x07, 0xFF, .write_8 = psg_pan_write},
 	{0x08, 0x40, 0xFF, .write_8 = memory_io_write},
 	{0x40, 0x80, 0xFF, .read_8 = hv_read, .write_8 = sms_psg_write},
 	{0x80, 0xC0, 0xFF, .read_8 = vdp_read, .write_8 = vdp_write},
