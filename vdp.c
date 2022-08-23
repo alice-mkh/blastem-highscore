@@ -166,7 +166,11 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t
 	if (!color_map_init_done) {
 		uint8_t b,g,r;
 		for (uint16_t color = 0; color < (1 << 12); color++) {
-			if (color & FBUF_SHADOW) {
+			if (type == VDP_GAMEGEAR) {
+				b = (color >> 8 & 0xF) * 0x11;
+				g = (color >> 4 & 0xF) * 0x11;
+				r = (color & 0xF) * 0x11;
+			}else if (color & FBUF_SHADOW) {
 				b = levels[(color >> 9) & 0x7];
 				g = levels[(color >> 5) & 0x7];
 				r = levels[(color >> 1) & 0x7];
@@ -175,16 +179,10 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t
 				g = levels[((color >> 5) & 0x7) + 7];
 				r = levels[((color >> 1) & 0x7) + 7];
 			} else if(color & FBUF_MODE4) {
-				if (type == VDP_GAMEGEAR) {
-					b = (color >> 8 & 0xF) * 0x11;
-					g = (color >> 4 & 0xF) * 0x11;
-					r = (color & 0xF) * 0x11;
-				} else {
-					//TODO: Mode 4 has a separate DAC tap so this isn't quite correct
-					b = levels[(color >> 4 & 0xC) | (color >> 6 & 0x2)];
-					g = levels[(color >> 2 & 0x8) | (color >> 1 & 0x4) | (color >> 4 & 0x2)];
-					r = levels[(color << 1 & 0xC) | (color >> 1 & 0x2)];
-				}
+				//TODO: Mode 4 has a separate DAC tap so this isn't quite correct
+				b = levels[(color >> 4 & 0xC) | (color >> 6 & 0x2)];
+				g = levels[(color >> 2 & 0x8) | (color >> 1 & 0x4) | (color >> 4 & 0x2)];
+				r = levels[(color << 1 & 0xC) | (color >> 1 & 0x2)];
 			} else {
 				b = levels[(color >> 8) & 0xE];
 				g = levels[(color >> 4) & 0xE];
@@ -814,7 +812,7 @@ static void update_color_map(vdp_context *context, uint16_t index, uint16_t valu
 	context->colors[index + SHADOW_OFFSET] = color_map[(value & CRAM_BITS) | FBUF_SHADOW];
 	context->colors[index + HIGHLIGHT_OFFSET] = color_map[(value & CRAM_BITS) | FBUF_HILIGHT];
 	if (context->type == VDP_GAMEGEAR) {
-		context->colors[index + MODE4_OFFSET] = color_map[(value & 0xFFF) | FBUF_MODE4];
+		context->colors[index + MODE4_OFFSET] = color_map[value & 0xFFF];
 	} else {
 		context->colors[index + MODE4_OFFSET] = color_map[(value & CRAM_BITS) | FBUF_MODE4];
 	}
