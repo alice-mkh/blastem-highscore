@@ -392,6 +392,10 @@ static void fetch_sprite_cells_mode4(vdp_context * context)
 static void render_sprite_cells_mode4(vdp_context * context)
 {
 	if (context->sprite_index >= context->sprite_draws) {
+		uint8_t zoom = context->type != VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_SPRITE_ZM);
+		if (context->type == VDP_SMS && context->sprite_index < 4) {
+			zoom = 0;
+		}
 		sprite_draw * d = context->sprite_draw_list + context->sprite_index;
 		uint32_t pixels = planar_to_chunky[context->fetch_tmp[0]] << 1;
 		pixels |= planar_to_chunky[context->fetch_tmp[1]];
@@ -410,6 +414,19 @@ static void render_sprite_cells_mode4(vdp_context * context)
 				}
 			} else {
 				context->linebuf[x] = pixels >> i & 0xF;
+			}
+			if (zoom) {
+				x++;
+				if (context->linebuf[x] && (pixels >> i & 0xF)) {
+					if (
+						((context->regs[REG_MODE_1] & BIT_SPRITE_8PX) && x > 8)
+						|| ((!(context->regs[REG_MODE_1] & BIT_SPRITE_8PX)) && x < 256)
+					) {
+						context->flags2 |= FLAG2_SPRITE_COLLIDE;
+					}
+				} else {
+					context->linebuf[x] = pixels >> i & 0xF;
+				}
 			}
 		}
 		context->sprite_index--;
@@ -683,12 +700,20 @@ static void scan_sprite_table_mode4(vdp_context * context)
 		uint32_t sat_address = mode4_address_map[(context->regs[REG_SAT] << 7 & 0x3F00) + context->sprite_index];
 		uint32_t y = context->vdpmem[sat_address+1];
 		uint32_t size = (context->regs[REG_MODE_2] & BIT_SPRITE_SZ) ? 16 : 8;
+		uint32_t ysize = size;
+		uint8_t zoom = context->type != VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_SPRITE_ZM);
+		if (context->type == VDP_SMS && context->slot_counter <= 4) {
+			zoom = 0;
+		}
+		if (zoom) {
+			ysize *= 2;
+		}
 
 		if (y == 0xd0) {
 			context->sprite_index = MAX_SPRITES_FRAME_H32;
 			return;
 		} else {
-			if (y <= line && line < (y + size)) {
+			if (y <= line && line < (y + ysize)) {
 				if (!context->slot_counter) {
 					context->sprite_index = MAX_SPRITES_FRAME_H32;
 					context->flags |= FLAG_DOT_OFLOW;
@@ -707,7 +732,7 @@ static void scan_sprite_table_mode4(vdp_context * context)
 				context->sprite_index = MAX_SPRITES_FRAME_H32;
 				return;
 			} else {
-				if (y <= line && line < (y + size)) {
+				if (y <= line && line < (y + ysize)) {
 					if (!context->slot_counter) {
 						context->sprite_index = MAX_SPRITES_FRAME_H32;
 						context->flags |= FLAG_DOT_OFLOW;
@@ -788,11 +813,19 @@ static void read_sprite_x_mode4(vdp_context * context)
 		uint32_t address = (context->regs[REG_SAT] << 7 & 0x3F00) + 0x80 + context->sprite_info_list[context->cur_slot].index * 2;
 		address = mode4_address_map[address];
 		--context->sprite_draws;
+		uint8_t zoom = context->type != VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_SPRITE_ZM);
+		if (context->type == VDP_SMS && context->sprite_draws < 4) {
+			zoom = 0;
+		}
 		uint32_t tile_address = context->vdpmem[address] * 32 + (context->regs[REG_STILE_BASE] << 11 & 0x2000);
 		if (context->regs[REG_MODE_2] & BIT_SPRITE_SZ) {
 			tile_address &= ~32;
 		}
-		tile_address += (context->vcounter - context->sprite_info_list[context->cur_slot].y)* 4;
+		uint16_t y_diff = context->vcounter - context->sprite_info_list[context->cur_slot].y;
+		if (zoom) {
+			y_diff >>= 1;
+		}
+		tile_address += y_diff * 4;
 		context->sprite_draw_list[context->sprite_draws].x_pos = context->vdpmem[address + 1];
 		context->sprite_draw_list[context->sprite_draws].address = tile_address;
 		context->cur_slot--;

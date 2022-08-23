@@ -116,6 +116,7 @@ enum {
 #define BIT_PAL        0x08
 #define BIT_MODE_5     0x04
 #define BIT_SPRITE_SZ  0x02
+#define BIT_SPRITE_ZM  0x01
 
 //Mode reg 3
 #define BIT_EINT_EN    0x08
