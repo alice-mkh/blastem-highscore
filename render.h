@@ -83,6 +83,7 @@ typedef SDL_Thread* render_thread;
 typedef enum {
 	VID_NTSC,
 	VID_PAL,
+	VID_GAMEGEAR,
 	NUM_VID_STD
 } vid_std;
 

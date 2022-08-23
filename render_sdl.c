@@ -779,10 +779,10 @@ void render_enable_gamepad_events(uint8_t enabled)
 	}
 }
 
-static uint32_t overscan_top[NUM_VID_STD] = {2, 21};
-static uint32_t overscan_bot[NUM_VID_STD] = {1, 17};
-static uint32_t overscan_left[NUM_VID_STD] = {13, 13};
-static uint32_t overscan_right[NUM_VID_STD] = {14, 14};
+static uint32_t overscan_top[NUM_VID_STD] = {2, 21, 51};
+static uint32_t overscan_bot[NUM_VID_STD] = {1, 17, 48};
+static uint32_t overscan_left[NUM_VID_STD] = {13, 13, 61};
+static uint32_t overscan_right[NUM_VID_STD] = {14, 14, 62};
 static vid_std video_standard = VID_NTSC;
 static uint8_t need_ui_fb_resize;
 
@@ -941,7 +941,7 @@ static void drain_events()
 	}
 }
 
-static char *vid_std_names[NUM_VID_STD] = {"ntsc", "pal"};
+static char *vid_std_names[NUM_VID_STD] = {"ntsc", "pal", "gamegear"};
 static int display_hz;
 static int source_hz;
 static int source_frame;
@@ -1504,7 +1504,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 
 	last_width = width;
 	uint32_t height = which <= FRAMEBUFFER_EVEN
-		? (video_standard == VID_NTSC ? 243 : 294) - (overscan_top[video_standard] + overscan_bot[video_standard])
+		? (video_standard == VID_PAL ? 294 : 243) - (overscan_top[video_standard] + overscan_bot[video_standard])
 		: 240;
 	FILE *screenshot_file = NULL;
 	uint32_t shot_height, shot_width;
@@ -1521,7 +1521,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 		}
 		free(screenshot_path);
 		screenshot_path = NULL;
-		shot_height = video_standard == VID_NTSC ? 243 : 294;
+		shot_height = height;
 		shot_width = width;
 	}
 	interlaced = last != which;
@@ -1835,7 +1835,7 @@ uint32_t render_emulated_width()
 
 uint32_t render_emulated_height()
 {
-	return (video_standard == VID_NTSC ? 243 : 294) - overscan_top[video_standard] - overscan_bot[video_standard];
+	return (video_standard == VID_PAL ? 294 : 243) - overscan_top[video_standard] - overscan_bot[video_standard];
 }
 
 uint32_t render_overscan_left()

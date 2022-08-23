@@ -412,7 +412,11 @@ static void run_sms(system_header *system)
 	sms_context *sms = (sms_context *)system;
 	uint32_t target_cycle = sms->z80->Z80_CYCLE + 3420*16;
 	//TODO: PAL support
-	render_set_video_standard(VID_NTSC);
+	if (sms->vdp->type == VDP_GAMEGEAR) {
+		render_set_video_standard(VID_GAMEGEAR);
+	} else {
+		render_set_video_standard(VID_NTSC);
+	}
 	while (!sms->should_return)
 	{
 		if (system->delayed_load_slot) {
