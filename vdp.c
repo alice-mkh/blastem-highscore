@@ -3822,9 +3822,12 @@ int vdp_control_port_write(vdp_context * context, uint16_t value)
 				//printf("register %d set to %X\n", reg, value & 0xFF);
 				if (reg == REG_MODE_1 && (value & BIT_HVC_LATCH) && !(context->regs[reg] & BIT_HVC_LATCH)) {
 					vdp_latch_hv(context);
-				}
-				if (reg == REG_BG_COLOR) {
+				} else if (reg == REG_BG_COLOR) {
 					value &= 0x3F;
+				} else if (reg == REG_MODE_2 && context->type != VDP_GENESIS) {
+					// only the Genesis VDP does anything with this bit
+					// so just clear it to prevent Mode 5 selection if we're not emulating that chip
+					value &= ~BIT_MODE_5;
 				}
 				/*if (reg == REG_MODE_4 && ((value ^ context->regs[reg]) & BIT_H40)) {
 					printf("Mode changed from H%d to H%d @ %d, frame: %d\n", context->regs[reg] & BIT_H40 ? 40 : 32, value & BIT_H40 ? 40 : 32, context->cycles, context->frame);
