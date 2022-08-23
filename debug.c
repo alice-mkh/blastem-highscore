@@ -14,6 +14,9 @@
 #include "util.h"
 #include "terminal.h"
 #include "z80inst.h"
+#ifndef NO_Z80
+#include "sms.h"
+#endif
 
 #ifdef NEW_CORE
 #define Z80_OPTS opts
@@ -2455,6 +2458,22 @@ static uint8_t cmd_gen_m68k(debug_root *root, parsed_command *cmd)
 	}
 }
 
+static uint8_t cmd_vdp_sprites_sms(debug_root *root, parsed_command *cmd)
+{
+	z80_context *context = root->cpu_context;
+	sms_context * sms = context->system;
+	vdp_print_sprite_table(sms->vdp);
+	return 1;
+}
+
+static uint8_t cmd_vdp_regs_sms(debug_root *root, parsed_command *cmd)
+{
+	z80_context *context = root->cpu_context;
+	sms_context * sms = context->system;
+	vdp_print_reg_explain(sms->vdp);
+	return 1;
+}
+
 command_def z80_commands[] = {
 	{
 		.names = (const char *[]){
@@ -2545,6 +2564,31 @@ command_def gen_z80_commands[] = {
 };
 
 #define NUM_GEN_Z80 (sizeof(gen_z80_commands)/sizeof(*gen_z80_commands))
+
+command_def sms_commands[] = {
+	{
+		.names = (const char *[]){
+			"vdpsprites", "vs", NULL
+		},
+		.usage = "vdpsprites",
+		.desc = "Print the VDP sprite table",
+		.impl = cmd_vdp_sprites_sms,
+		.min_args = 0,
+		.max_args = 0
+	},
+	{
+		.names = (const char *[]){
+			"vdpsregs", "vr", NULL
+		},
+		.usage = "vdpregs",
+		.desc = "Print VDP register values with a short description",
+		.impl = cmd_vdp_regs_sms,
+		.min_args = 0,
+		.max_args = 0
+	}
+};
+
+#define NUM_SMS (sizeof(sms_commands)/sizeof(*sms_commands))
 
 #endif
 
@@ -2667,6 +2711,8 @@ static uint8_t resolve_z80(debug_root *root, const char *name, uint32_t *out)
 			*out = context->regs[Z80_C];
 		} else if (name[1] == '\'' && !name[2]) {
 			*out = context->alt_regs[Z80_C];
+		} else if (!strcmp(name + 1, "ycle")) {
+			*out = context->current_cycle;
 		} else {
 			return 0;
 		}
@@ -2839,6 +2885,20 @@ static uint8_t resolve_z80(debug_root *root, const char *name, uint32_t *out)
 		return 0;
 	}
 	return 1;
+}
+
+static uint8_t resolve_sms(debug_root *root, const char *name, uint32_t *out)
+{
+	if (resolve_z80(root, name, out)) {
+		return 1;
+	}
+	z80_context *z80 = root->cpu_context;
+	sms_context *sms = z80->system;
+	if (!strcmp(name, "f") || !strcmp(name, "frame")) {
+		*out = sms->vdp->frame;
+		return 1;
+	}
+	return 0;
 }
 
 static uint8_t set_z80(debug_root *root, const char *name, uint32_t value)
@@ -3072,13 +3132,23 @@ debug_root *find_z80_root(z80_context *context)
 	if (root && !root->commands) {
 		add_commands(root, common_commands, NUM_COMMON);
 		add_commands(root, z80_commands, NUM_Z80);
-		if (current_system->type == SYSTEM_GENESIS || current_system->type == SYSTEM_SEGACD) {
+		switch (current_system->type)
+		{
+		case SYSTEM_GENESIS:
+		case SYSTEM_SEGACD:
 			add_commands(root, gen_z80_commands, NUM_GEN_Z80);
+			root->resolve = resolve_z80;
+			break;
+		case SYSTEM_SMS:
+			root->resolve = resolve_sms;
+			add_commands(root, sms_commands, NUM_SMS);
+			break;
+		default:
+			root->resolve = resolve_z80;
 		}
 		root->read_mem = read_z80;
 		root->write_mem = write_z80;
 		root->set = set_z80;
-		root->resolve = resolve_z80;
 	}
 	return root;
 }
