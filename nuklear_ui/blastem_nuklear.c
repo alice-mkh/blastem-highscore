@@ -31,7 +31,7 @@ typedef struct
 	struct nk_image  ui;
 } ui_image;
 
-static ui_image **ui_images, *controller_360, *controller_ps4, 
+static ui_image **ui_images, *controller_360, *controller_ps4,
 	*controller_ps4_6b, *controller_wiiu, *controller_gen_6b;
 static uint32_t num_ui_images, ui_image_storage;
 
@@ -69,7 +69,7 @@ static void clear_view_stack()
 
 void view_play(struct nk_context *context)
 {
-	
+
 }
 
 static char *browser_cur_path;
@@ -163,7 +163,7 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 						init_system_with_media(full_path, SYSTEM_UNKNOWN);
 						free(full_path);
 					}
-					
+
 					clear_view_stack();
 					show_play_view();
 				} else if (browser_setting_path) {
@@ -174,7 +174,7 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 				} else {
 					lockon_media(full_path);
 					free(full_path);
-					
+
 					clear_view_stack();
 					show_play_view();
 				}
@@ -322,13 +322,13 @@ static void menu(struct nk_context *context, uint32_t num_entries, const menu_it
 	const uint32_t button_height = context->style.font->height * 1.75;
 	const uint32_t ideal_button_width = context->style.font->height * 10;
 	const uint32_t button_space = 6;
-	
+
 	uint32_t width = render_width();
 	uint32_t height = render_height();
 	uint32_t top = height/2 - (button_height * num_entries)/2;
 	uint32_t button_width = width > ideal_button_width ? ideal_button_width : width;
 	uint32_t left = width/2 - button_width/2;
-	
+
 	nk_layout_space_begin(context, NK_STATIC, top + button_height * num_entries, num_entries);
 	for (uint32_t i = 0; i < num_entries; i++)
 	{
@@ -369,7 +369,7 @@ void binding_group(struct nk_context *context, char *name, const char **binds, c
 	nk_layout_row_static(context, (context->style.font->height + 4)*num_binds+context->style.font->height+30, render_width() - 80, 1);
 	if (nk_group_begin(context, name, NK_WINDOW_TITLE)) {
 		nk_layout_row_static(context, context->style.font->height, render_width()/2 - 80, 2);
-		
+
 		for (int i = 0; i < num_binds; i++)
 		{
 			char *label_alloc = bind_names ? NULL : path_extension(binds[i]);
@@ -500,7 +500,7 @@ void view_key_bindings(struct nk_context *context)
 		"ui.compositing_debug", "ui.vdp_debug_mode"
 	};
 	const char *debug_names[] = {
-		"CPU Debugger", "Plane Debugger", "VRAM Debugger", "CRAM Debugger", 
+		"CPU Debugger", "Plane Debugger", "VRAM Debugger", "CRAM Debugger",
 		"Layer Debugger", "Cycle Mode/Pal"
 	};
 	const uint32_t NUM_C1_BINDS = sizeof(controller1_binds)/sizeof(*controller1_binds);
@@ -557,7 +557,7 @@ void view_key_bindings(struct nk_context *context)
 				memcpy(path, "bindings\0keys\0", prefix_len);
 				memcpy(path + prefix_len, name, suffix_len);
 				path[prefix_len + suffix_len] = 0;
-				
+
 				config_dirty = 1;
 				config = tern_insert_path(config, path, (tern_val){.ptrval = strdup(set_binding)}, TVAL_PTR);
 				free(path);
@@ -600,7 +600,7 @@ static char * config_ps_names[] = {
 	[SDL_CONTROLLER_BUTTON_RIGHTSTICK] = "r3",
 };
 
-typedef struct {	
+typedef struct {
 	const char *button_binds[SDL_CONTROLLER_BUTTON_MAX];
 	const char *left_stick[NUM_AXIS_DIRS];
 	const char *right_stick[NUM_AXIS_DIRS];
@@ -723,14 +723,14 @@ static void view_button_binding(struct nk_context *context)
 		"ui.set_speed.8",
 		"ui.set_speed.9"
 	};
-		
+
 	if (nk_begin(context, "Button Binding", nk_rect(0, 0, render_width(), render_height()), 0)) {
 		bind_option_group(context, "Controller Buttons", pad_opts, sizeof(pad_opts)/sizeof(*pad_opts));
 		bind_option_group(context, "System Buttons", system_buttons, sizeof(system_buttons)/sizeof(*system_buttons));
 		bind_option_group(context, "Emulator Control", emu_control, sizeof(emu_control)/sizeof(*emu_control));
 		bind_option_group(context, "Debugging", debugger, sizeof(debugger)/sizeof(*debugger));
 		bind_option_group(context, "Speed Control", speeds, sizeof(speeds)/sizeof(*speeds));
-		
+
 		nk_layout_row_static(context, context->style.font->height, (render_width() - 80)/4, 1);
 		if (nk_button_label(context, "Back")) {
 			pop_view();
@@ -743,11 +743,11 @@ static void binding_box(struct nk_context *context, pad_bind_config *bindings, c
 {
 	const struct nk_user_font *font = context->style.font;
 	float row_height = font->height * 2;
-	
+
 	char const **labels = calloc(sizeof(char *), num_binds);
 	char const ***conf_vals = calloc(sizeof(char *), num_binds);
 	float max_width = 0.0f;
-	
+
 	int skipped = 0;
 	for (int i = 0; i < num_binds; i++)
 	{
@@ -771,7 +771,7 @@ static void binding_box(struct nk_context *context, pad_bind_config *bindings, c
 	}
 	nk_layout_space_push(context, nk_rect(x, y, width, (num_binds - skipped) * (row_height + 4) + 4));
 	nk_group_begin(context, name, NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR);
-	
+
 	float widths[] = {max_width + 3, width - (max_width + 6)};
 	nk_layout_row(context, NK_STATIC, row_height, 2, widths);
 	for (int i = 0; i < num_binds; i++)
@@ -874,7 +874,7 @@ static void save_stick_binds(char *axes_key, size_t axes_key_size, const char **
 		full_key[axes_key_size+prefix_len] = axis;
 		memcpy(full_key + axes_key_size + prefix_len + 1, suffix, suffix_len  +1);
 		full_key[axes_key_size + prefix_len + 1 + suffix_len + 1] = 0;
-		
+
 		if (bindings[i]) {
 			tern_insert_path(config, full_key, (tern_val){.ptrval = strdup(bindings[i])}, TVAL_PTR);
 		} else {
@@ -884,7 +884,7 @@ static void save_stick_binds(char *axes_key, size_t axes_key_size, const char **
 				free(prev_val.ptrval);
 			}
 		}
-		
+
 		free(full_key);
 	}
 }
@@ -925,7 +925,7 @@ static void handle_dest_clicked(uint32_t dest)
 	char *button_key = malloc(button_key_size);
 	memcpy(button_key, pad_key, pad_key_size);
 	memcpy(button_key + pad_key_size, button_base, sizeof(button_base));
-	
+
 	char *final_key;
 	for (int i = 0; i < SDL_CONTROLLER_BUTTON_MAX; i++)
 	{
@@ -936,8 +936,8 @@ static void handle_dest_clicked(uint32_t dest)
 			suffix = SDL_GameControllerGetStringForButton(i);
 			base_key_len = button_key_size;
 			base = button_key;
-			
-			
+
+
 		} else {
 			static const char *dir_keys[] = {"up", "down", "left", "right"};
 			suffix = dir_keys[i - SDL_CONTROLLER_BUTTON_DPAD_UP];
@@ -962,13 +962,13 @@ static void handle_dest_clicked(uint32_t dest)
 	}
 	free(button_key);
 	free(dpad_key);
-	
+
 	static const char axes_base[] = "axes";
 	size_t axes_key_size = pad_key_size + sizeof(axes_base);
 	char *axes_key = malloc(axes_key_size);
 	memcpy(axes_key, pad_key, pad_key_size);
 	memcpy(axes_key + pad_key_size, axes_base, sizeof(axes_base));
-	
+
 	save_stick_binds(axes_key, axes_key_size,bindings->left_stick, "left");
 	save_stick_binds(axes_key, axes_key_size,bindings->right_stick, "right");
 	for (int i = SDL_CONTROLLER_AXIS_TRIGGERLEFT; i < SDL_CONTROLLER_AXIS_MAX; i++)
@@ -991,7 +991,7 @@ static void handle_dest_clicked(uint32_t dest)
 		free(final_key);
 	}
 	free(axes_key);
-	
+
 	free(pad_key);
 	if (dest == SIMILAR_CONTROLLERS) {
 		free(key);
@@ -1007,7 +1007,7 @@ void view_select_binding_dest(struct nk_context *context)
 	options[DEFAULT].title = "Use as default";
 	options[BY_INDEX].title = by_index_names[selected_controller];
 	options[SIMILAR_CONTROLLERS].title = make_human_readable_type_name(&selected_controller_info);
-	
+
 	if (nk_begin(context, "Select Binding Dest", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
 		menu(context, NUM_DEST_TYPES, options, handle_dest_clicked);
 		nk_end(context);
@@ -1050,24 +1050,24 @@ void view_controller_bindings(struct nk_context *context)
 				}
 			}
 		}
-	
+
 		float orig_height = def_font->handle.height;
 		def_font->handle.height *= 0.5f;
-		
+
 		uint32_t avail_height = render_height() - 2 * orig_height;
 		float desired_width = render_width() * 0.5f, desired_height = avail_height * 0.5f;
 		ui_image *controller_image = select_best_image(&selected_controller_info);
-		
+
 		float controller_ratio = (float)controller_image->width / (float)controller_image->height;
-		
+
 		const struct nk_user_font *font = context->style.font;
 		int MIN_BIND_BOX_WIDTH = font->width(font->userdata, font->height, "Right", strlen("Right"))
 			+ def_font->handle.width(font->userdata, font->height, "Internal Screenshot", strlen("Internal Screenshot"));
-		
+
 		if (render_width() - desired_width < 2.5f*MIN_BIND_BOX_WIDTH) {
 			desired_width = render_width() - 2.5f*MIN_BIND_BOX_WIDTH;
 		}
-		
+
 		if (desired_width / desired_height > controller_ratio) {
 			desired_width = desired_height * controller_ratio;
 		} else {
@@ -1080,7 +1080,7 @@ void view_controller_bindings(struct nk_context *context)
 		nk_layout_space_begin(context, NK_STATIC, avail_height, INT_MAX);
 		nk_layout_space_push(context, nk_rect(img_left, img_top, desired_width, desired_height));
 		nk_image(context, controller_image->ui);
-		
+
 		float bind_box_width = (render_width() - img_right) * 0.8f;
 		if (bind_box_width < MIN_BIND_BOX_WIDTH) {
 			bind_box_width = render_width() - img_right;
@@ -1096,7 +1096,7 @@ void view_controller_bindings(struct nk_context *context)
 		} else {
 			bind_box_left = img_right + (render_width() - img_right) / 2.0f - bind_box_width / 2.0f;
 		}
-		
+
 		if (selected_controller_info.variant == VARIANT_NORMAL) {
 			binding_box(context, bindings, "Action Buttons", bind_box_left, img_top, bind_box_width, 4, (int[]){
 				SDL_CONTROLLER_BUTTON_A,
@@ -1114,7 +1114,7 @@ void view_controller_bindings(struct nk_context *context)
 				selected_controller_info.variant == VARIANT_6B_RIGHT ? SDL_CONTROLLER_BUTTON_RIGHTSHOULDER : SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
 			});
 		}
-		
+
 		if (selected_controller_info.variant == VARIANT_NORMAL) {
 			binding_box(context, bindings, "Right Shoulder", bind_box_left, font->height/2, bind_box_width, 2, (int[]){
 				SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,
@@ -1122,19 +1122,19 @@ void view_controller_bindings(struct nk_context *context)
 			});
 		} else {
 			binding_box(context, bindings, "Right Shoulder", bind_box_left, font->height/2, bind_box_width,
-				selected_controller_info.variant == VARIANT_6B_BUMPERS ? 1 : 2, 
+				selected_controller_info.variant == VARIANT_6B_BUMPERS ? 1 : 2,
 				(int[]){
 				selected_controller_info.variant == VARIANT_6B_RIGHT ? SDL_CONTROLLER_BUTTON_LEFTSHOULDER : AXIS | SDL_CONTROLLER_AXIS_TRIGGERRIGHT,
 				AXIS | SDL_CONTROLLER_AXIS_TRIGGERLEFT
 			});
 		}
-		
+
 		binding_box(context, bindings, "Misc Buttons", (render_width() - bind_box_width) / 2, font->height/2, bind_box_width, 3, (int[]){
 			SDL_CONTROLLER_BUTTON_BACK,
 			SDL_CONTROLLER_BUTTON_GUIDE,
 			SDL_CONTROLLER_BUTTON_START
 		});
-		
+
 		if (selected_controller_info.variant == VARIANT_NORMAL)
 		{
 			binding_box(context, bindings, "Right Stick", img_right - desired_width/3, img_bot, bind_box_width, 5, (int[]){
@@ -1145,7 +1145,7 @@ void view_controller_bindings(struct nk_context *context)
 				SDL_CONTROLLER_BUTTON_RIGHTSTICK
 			});
 		}
-		
+
 		bind_box_left -= img_right;
 		float dpad_left, dpad_top;
 		if (selected_controller_info.variant == VARIANT_NORMAL)
@@ -1163,30 +1163,30 @@ void view_controller_bindings(struct nk_context *context)
 			dpad_left = bind_box_left;
 			dpad_top = img_top;
 		}
-		
+
 		if (selected_controller_info.variant == VARIANT_NORMAL) {
 			binding_box(context, bindings, "Left Shoulder", bind_box_left, font->height/2, bind_box_width, 2, (int[]){
 				SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
 				AXIS | SDL_CONTROLLER_AXIS_TRIGGERLEFT
 			});
 		} else {
-			binding_box(context, bindings, "Left Shoulder", bind_box_left, font->height/2, bind_box_width, 
-				selected_controller_info.variant == VARIANT_6B_BUMPERS ? 1 : 2, 
+			binding_box(context, bindings, "Left Shoulder", bind_box_left, font->height/2, bind_box_width,
+				selected_controller_info.variant == VARIANT_6B_BUMPERS ? 1 : 2,
 				(int[]){
 				selected_controller_info.variant == VARIANT_6B_RIGHT ? SDL_CONTROLLER_BUTTON_LEFTSTICK : AXIS | SDL_CONTROLLER_AXIS_TRIGGERLEFT,
 				SDL_CONTROLLER_BUTTON_RIGHTSTICK
 			});
 		}
-		
+
 		binding_box(context, bindings, "D-pad", dpad_left, dpad_top, bind_box_width, 4, (int[]){
 			SDL_CONTROLLER_BUTTON_DPAD_UP,
 			SDL_CONTROLLER_BUTTON_DPAD_DOWN,
 			SDL_CONTROLLER_BUTTON_DPAD_LEFT,
 			SDL_CONTROLLER_BUTTON_DPAD_RIGHT
 		});
-		
+
 		nk_layout_space_end(context);
-		
+
 		def_font->handle.height = orig_height;
 		nk_layout_row_static(context, orig_height + 4, (render_width() - 2*orig_height) / 4, 1);
 		if (nk_button_label(context, controller_binding_changed ? "Save" : "Back")) {
@@ -1230,30 +1230,30 @@ static void view_controller_mappings(struct nk_context *context)
 	static int quiet, button_a = -1, button_a_axis = -1;
 	uint8_t added_mapping = 0;
 	if (nk_begin(context, "Controllers", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
-		
+
 		nk_layout_space_begin(context, NK_STATIC, render_height() - context->style.font->height, 3);
-		
+
 		if (current_button < SDL_CONTROLLER_BUTTON_MAX) {
 			snprintf(buffer, sizeof(buffer), "Press Button %s", get_button_label(&selected_controller_info, current_button));
 		} else {
 			snprintf(buffer, sizeof(buffer), "Move Axis %s", get_axis_label(&selected_controller_info, current_axis));
 		}
-		
+
 		float height = context->style.font->height * 1.25;
 		float top = render_height()/2 - 1.5 * height;
 		float width = render_width() - context->style.font->height;
-		
+
 		nk_layout_space_push(context, nk_rect(0, top, width, height));
 		nk_label(context, buffer, NK_TEXT_CENTERED);
 		if (current_button > SDL_CONTROLLER_BUTTON_B) {
 			nk_layout_space_push(context, nk_rect(0, top + height, width, height));
 			nk_label(context, "OR", NK_TEXT_CENTERED);
-		
+
 			nk_layout_space_push(context, nk_rect(0, top + 2.0 * height, width, height));
 			snprintf(buffer, sizeof(buffer), "Press Button %s to skip", get_button_label(&selected_controller_info, SDL_CONTROLLER_BUTTON_A));
 			nk_label(context, buffer, NK_TEXT_CENTERED);
 		}
-		
+
 		nk_layout_space_end(context);
 		if (quiet) {
 			--quiet;
@@ -1279,7 +1279,7 @@ static void view_controller_mappings(struct nk_context *context)
 				mapping_string[mapping_pos++] = '.';
 				mapping_string[mapping_pos++] = '0' + hat_value;
 				added_mapping = 1;
-				
+
 				last_hat = hat_moved;
 				last_hat_value = hat_value;
 			} else if (axis_moved >= 0 && abs(axis_value) > 1000 && (
@@ -1303,7 +1303,7 @@ static void view_controller_mappings(struct nk_context *context)
 				added_mapping = 1;
 			}
 		}
-			
+
 		while (added_mapping) {
 			quiet = QUIET_FRAMES;
 			if (current_button < SDL_CONTROLLER_BUTTON_MAX) {
@@ -1363,7 +1363,7 @@ static void show_mapping_view(void)
 		}
 		mapping_string[mapping_pos] = c;
 	}
-	
+
 	push_view(view_controller_mappings);
 }
 
@@ -1395,16 +1395,16 @@ static void view_controller_variant(struct nk_context *context)
 				selected = 1;
 			}
 			char buffer[512];
-			snprintf(buffer, sizeof(buffer), "6 face buttons including %s and %s", 
-				get_button_label(&selected_controller_info, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER), 
+			snprintf(buffer, sizeof(buffer), "6 face buttons including %s and %s",
+				get_button_label(&selected_controller_info, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER),
 				get_axis_label(&selected_controller_info, SDL_CONTROLLER_AXIS_TRIGGERRIGHT)
 			);
 			if (nk_button_label(context, buffer)) {
 				selected_controller_info.variant = VARIANT_6B_RIGHT;
 				selected = 1;
 			}
-			snprintf(buffer, sizeof(buffer), "6 face buttons including %s and %s", 
-				get_button_label(&selected_controller_info, SDL_CONTROLLER_BUTTON_LEFTSHOULDER), 
+			snprintf(buffer, sizeof(buffer), "6 face buttons including %s and %s",
+				get_button_label(&selected_controller_info, SDL_CONTROLLER_BUTTON_LEFTSHOULDER),
 				get_button_label(&selected_controller_info, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER)
 			);
 			if (nk_button_label(context, buffer)) {
@@ -1495,8 +1495,8 @@ void view_controllers(struct nk_context *context)
 		float bindings_ratio = (float)bindings_width / total;
 		float remap_ratio = (float)remap_width / total;
 		float change_type_ratio = (float)change_type_width / total;
-		
-		
+
+
 		uint8_t found_controller = 0;
 		for (int i = 0; i < MAX_JOYSTICKS; i++)
 		{
@@ -1515,7 +1515,7 @@ void view_controllers(struct nk_context *context)
 				}
 				int button_start = image_width + context->style.font->height;
 				int button_area_width = render_width() - image_width - 2 * context->style.font->height;
-				
+
 				nk_layout_space_push(context, nk_rect(button_start, 0, button_area_width, inner_height/2));
 				nk_label(context, info.name, NK_TEXT_CENTERED);
 				const struct nk_user_font *font = context->style.font;
@@ -1637,7 +1637,7 @@ void settings_path(struct nk_context *context, char *label, char *path, char *de
 		config_dirty = 1;
 		config = tern_insert_path(config, path, (tern_val){.ptrval = strdup(buffer)}, TVAL_PTR);
 	}
-	
+
 	nk_spacing(context, 1);
 	if (nk_button_label(context, "Browse")) {
 		browser_label = label;
@@ -1692,7 +1692,7 @@ shader_prog *get_shader_progs(dir_entry *entries, size_t num_entries, shader_pro
 	uint32_t num_progs = *num_existing;
 	uint32_t prog_storage = *storage;
 	uint32_t starting = num_progs;
-	
+
 	for (uint32_t i = 0; i < num_entries; i++) {
 		if (entries[i].is_dir) {
 			continue;
@@ -1713,12 +1713,12 @@ shader_prog *get_shader_progs(dir_entry *entries, size_t num_entries, shader_pro
 					progs = realloc(progs, sizeof(*progs) * prog_storage);
 				}
 				progs[num_progs].vertex = NULL;
-				progs[num_progs++].fragment = strdup(entries[i].name); 
+				progs[num_progs++].fragment = strdup(entries[i].name);
 			}
 		}
 		free(no_ext);
 	}
-	
+
 	for (uint32_t i = 0; i < num_entries; i++) {
 		if (entries[i].is_dir) {
 			continue;
@@ -1874,7 +1874,7 @@ void view_video_settings(struct nk_context *context)
 		settings_int_property(context, "", "Bottom", "video\0pal\0overscan\0bottom\0", 17, 0, 32);
 		settings_int_property(context, "", "Left", "video\0pal\0overscan\0left\0", 13, 0, 32);
 		settings_int_property(context, "", "Right", "video\0pal\0overscan\0right\0", 14, 0, 32);
-		
+
 		if (nk_button_label(context, "Back")) {
 			pop_view();
 		}
@@ -1943,13 +1943,20 @@ typedef struct {
 	const char **names;
 	uint32_t   num_models;
 	uint32_t   storage;
+	uint8_t    genesis_only;
 } model_foreach_state;
 void model_iter(char *key, tern_val val, uint8_t valtype, void *data)
 {
 	if (valtype != TVAL_NODE) {
 		return;
 	}
+	if (!strcmp(tern_find_ptr_default(val.ptrval, "show", "yes"), "no")) {
+		return;
+	}
 	model_foreach_state *state = data;
+	if (state->genesis_only && strcmp(tern_find_ptr_default(val.ptrval, "vdp", "genesis"), "genesis")) {
+		return;
+	}
 	if (state->num_models == state->storage) {
 		state->storage *= 2;
 		state->models = realloc(state->models, state->storage * sizeof(char *));
@@ -1965,14 +1972,15 @@ typedef struct {
 	const char **names;
 } models;
 
-models get_models(uint32_t *num_out)
+models get_models(uint32_t *num_out, uint8_t genesis_only)
 {
 	tern_node *systems = get_systems_config();
 	model_foreach_state state = {
 		.models = calloc(4, sizeof(char *)),
 		.names = calloc(4, sizeof(char *)),
 		.num_models = 0,
-		.storage = 4
+		.storage = 4,
+		.genesis_only = genesis_only
 	};
 	tern_foreach(systems, model_iter, &state);
 	*num_out = state.num_models;
@@ -2004,19 +2012,29 @@ void view_system_settings(struct nk_context *context)
 	if (selected_region < 0) {
 		selected_region = find_match(region_codes, num_regions, "system\0default_region\0", "U");
 	}
-	static const char **model_opts;
-	static const char **model_names;
-	static uint32_t num_models;
+	static const char **model_opts, **sms_model_opts;
+	static const char **model_names, **sms_model_names;
+	static uint32_t num_models, num_sms_models;
 	if (!model_opts) {
-		models m = get_models(&num_models);
+		models m = get_models(&num_models, 1);
 		model_opts = m.models;
 		model_names = m.names;
+		m = get_models(&num_sms_models, 0);
+		sms_model_opts = m.models;
+		sms_model_names = m.names;
 	}
+	static uint8_t old_show_sms;
+	uint8_t show_sms = current_system && current_system->type == SYSTEM_SMS;
+
 	static int32_t selected_model = -1;
-	if (selected_model < 0) {
-		selected_model = find_match(model_opts, num_models, "system\0model\0", "md1va3");
+	if (selected_model < 0 || show_sms != old_show_sms) {
+		if (show_sms) {
+			selected_model = find_match(sms_model_opts, num_sms_models, "sms\0system\0model\0", "md1va3");
+		} else {
+			selected_model = find_match(model_opts, num_models, "system\0model\0", "md1va3");
+		}
 	}
-	
+
 	const char *formats[] = {
 		"native",
 		"gst"
@@ -2056,29 +2074,41 @@ void view_system_settings(struct nk_context *context)
 	static int32_t selected_io_1 = -1;
 	static int32_t selected_io_2 = -1;
 	const uint32_t num_io = sizeof(io_opts_1)/sizeof(*io_opts_1);
-	if (selected_io_1 < 0 || selected_io_2 < 0) {
-		selected_io_1 = find_match(io_opts_1, num_io, "io\0devices\0""1\0", "gamepad6.1");
-		selected_io_2 = find_match(io_opts_2, num_io, "io\0devices\0""2\0", "gamepad6.2");
+	if (selected_io_1 < 0 || selected_io_2 < 0 || show_sms != old_show_sms) {
+		if (show_sms) {
+			selected_io_1 = find_match(io_opts_1, num_io, "sms\0io\0devices\0""1\0", "gamepad2.1");
+			selected_io_2 = find_match(io_opts_2, num_io, "sms\0io\0devices\0""2\0", "gamepad2.2");
+		} else {
+			selected_io_1 = find_match(io_opts_1, num_io, "io\0devices\0""1\0", "gamepad6.1");
+			selected_io_2 = find_match(io_opts_2, num_io, "io\0devices\0""2\0", "gamepad6.2");
+		}
 	}
-	
+	old_show_sms = show_sms;
+
 	uint32_t width = render_width();
 	uint32_t height = render_height();
 	uint32_t desired_width = context->style.font->height * 10;
 	if (nk_begin(context, "System Settings", nk_rect(0, 0, width, height), 0)) {
 		nk_layout_row_static(context, context->style.font->height, desired_width, 2);
-		
-		selected_model = settings_dropdown_ex(context, "Model", model_opts, model_names, num_models, selected_model, "system\0model\0");
-		selected_io_1 = settings_dropdown_ex(context, "IO Port 1 Device", io_opts_1, device_type_names, num_io, selected_io_1, "io\0devices\0""1\0");
-		selected_io_2 = settings_dropdown_ex(context, "IO Port 2 Device", io_opts_2, device_type_names, num_io, selected_io_2, "io\0devices\0""2\0");
+
+		if (show_sms) {
+			selected_model = settings_dropdown_ex(context, "Model", sms_model_opts, sms_model_names, num_sms_models, selected_model, "sms\0system\0model\0");
+		} else {
+			selected_model = settings_dropdown_ex(context, "Model", model_opts, model_names, num_models, selected_model, "system\0model\0");
+		}
+		selected_io_1 = settings_dropdown_ex(context, "IO Port 1 Device", io_opts_1, device_type_names, num_io, selected_io_1, show_sms ? "sms\0io\0devices\0""1\0" : "io\0devices\0""1\0");
+		selected_io_2 = settings_dropdown_ex(context, "IO Port 2 Device", io_opts_2, device_type_names, num_io, selected_io_2, show_sms ? "sms\0io\0devices\0""2\0" : "io\0devices\0""2\0");
 		selected_region = settings_dropdown_ex(context, "Default Region", region_codes, regions, num_regions, selected_region, "system\0default_region\0");
 		selected_sync = settings_dropdown(context, "Sync Source", sync_opts, num_sync_opts, selected_sync, "system\0sync_source\0");
-		settings_int_property(context, "68000 Clock Divider", "", "clocks\0m68k_divider\0", 7, 1, 53);
-		selected_format = settings_dropdown(context, "Save State Format", formats, num_formats, selected_format, "ui\0state_format\0");
+		if (!show_sms) {
+			settings_int_property(context, "68000 Clock Divider", "", "clocks\0m68k_divider\0", 7, 1, 53);
+			selected_format = settings_dropdown(context, "Save State Format", formats, num_formats, selected_format, "ui\0state_format\0");
+		}
 		selected_init = settings_dropdown(context, "Initial RAM Value", ram_inits, num_inits, selected_init, "system\0ram_init\0");
 		settings_toggle(context, "Remember ROM Path", "ui\0remember_path\0", 1);
 		settings_toggle(context, "Save config with EXE", "ui\0config_in_exe_dir\0", 0);
 		settings_string(context, "Game Save Path", "ui\0save_path\0", "$USERDATA/blastem/$ROMNAME");
-		
+
 		if (nk_button_label(context, "Back")) {
 			pop_view();
 		}
@@ -2145,7 +2175,7 @@ void view_settings(struct nk_context *context)
 		{"Reset to Defaults", view_confirm_reset},
 		{"Back", view_back}
 	};
-	
+
 	if (nk_begin(context, "Settings Menu", nk_rect(0, 0, render_width(), render_height()), 0)) {
 		menu(context, sizeof(items)/sizeof(*items), items, NULL);
 		nk_end(context);
@@ -2168,7 +2198,7 @@ void view_pause(struct nk_context *context)
 		{"Settings", view_settings},
 		{"Exit", NULL}
 	};
-	
+
 	if (nk_begin(context, "Main Menu", nk_rect(0, 0, render_width(), render_height()), 0)) {
 		menu(context, sizeof(items)/sizeof(*items), items, exit_handler);
 		nk_end(context);
@@ -2183,7 +2213,7 @@ void view_menu(struct nk_context *context)
 		{"About", view_about},
 		{"Exit", NULL}
 	};
-	
+
 	if (nk_begin(context, "Main Menu", nk_rect(0, 0, render_width(), render_height()), 0)) {
 		menu(context, sizeof(items)/sizeof(*items), items, exit_handler);
 		nk_end(context);
@@ -2456,15 +2486,15 @@ void blastem_nuklear_init(uint8_t file_loaded)
 	}
 #endif
 	style_init();
-	
+
 	controller_360 = load_ui_image("images/360.png");
 	controller_ps4 = load_ui_image("images/ps4.png");
 	controller_ps4_6b = load_ui_image("images/ps4_6b.png");
 	controller_wiiu = load_ui_image("images/wiiu.png");
 	controller_gen_6b = load_ui_image("images/genesis_6b.png");
-	
+
 	texture_init();
-	
+
 	if (file_loaded) {
 		current_view = view_play;
 	} else {
@@ -2474,9 +2504,9 @@ void blastem_nuklear_init(uint8_t file_loaded)
 	render_set_ui_render_fun(blastem_nuklear_render);
 	render_set_event_handler(handle_event);
 	render_set_gl_context_handlers(context_destroyed, context_created);
-	
+
 	atexit(persist_config_exit);
-	
+
 	active = 1;
 	ui_idle_loop();
 }

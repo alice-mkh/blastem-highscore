@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include "config.h"
 #include "sms.h"
 #include "blastem.h"
 #include "render.h"
@@ -670,8 +671,26 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.info.map = malloc(sizeof(memmap_chunk) * sms->header.info.map_chunks);
 	memcpy(sms->header.info.map, memory_map, sizeof(memmap_chunk) * sms->header.info.map_chunks);
 	z80_options *zopts = malloc(sizeof(z80_options));
-	uint8_t vdp_type = strcasecmp(media->extension, "gg") ? VDP_GENESIS : VDP_GAMEGEAR;
-	if (vdp_type == VDP_GAMEGEAR) {
+	uint8_t is_gamegear = !strcasecmp(media->extension, "gg");
+	tern_node *model_def = is_gamegear ? tern_find_node(get_systems_config(), "gg") : get_model(config, SYSTEM_SMS);
+	char *vdp_str = tern_find_ptr(model_def, "vdp");
+	uint8_t vdp_type = is_gamegear ? VDP_GENESIS : VDP_GAMEGEAR;
+	if (vdp_str) {
+		if (!strcmp(vdp_str, "sms1")) {
+			vdp_type = VDP_SMS;
+		} else if (!strcmp(vdp_str, "sms2")) {
+			vdp_type = VDP_SMS2;
+		} else if (!strcmp(vdp_str, "tms9918a")) {
+			vdp_type = VDP_TMS9918A;
+		} else if (!strcmp(vdp_str, "gamegear")) {
+			vdp_type = VDP_GAMEGEAR;
+		} else if (!strcmp(vdp_str, "genesis")) {
+			vdp_type = VDP_GENESIS;
+		} else {
+			warning("Unrecognized VDP type %s\n", vdp_str);
+		}
+	}
+	if (is_gamegear) {
 		init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_gg, 6, 15, 0xFF);
 		sms->start_button_region = 0xC0;
 	} else {

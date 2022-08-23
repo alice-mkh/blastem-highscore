@@ -140,7 +140,7 @@ static void serialize_config_int(tern_node *config, serialize_state *state)
 	ensure_buf_capacity(1, state);
 	state->buf[state->size++] = '{';
 	state->indent++;
-	
+
 	tern_foreach(config, serialize_iter, state);
 
 	--state->indent;
@@ -239,7 +239,7 @@ tern_node *load_overrideable_config(char *name, char *bundled_name, uint8_t *use
 	if (used_config_dir) {
 		*used_config_dir = ret != NULL;
 	}
-	
+
 	if (!ret) {
 		ret = parse_bundled_config(name);
 		if (!ret) {
@@ -285,7 +285,7 @@ static void migrate_pads(char *key, tern_val val, uint8_t valtype, void *data)
 	*pads = tern_insert_node(*pads, key, dupe_tree(val.ptrval));
 }
 
-#define CONFIG_VERSION 2
+#define CONFIG_VERSION 3
 static tern_node *migrate_config(tern_node *config, int from_version)
 {
 	tern_node *def_config = parse_bundled_config("default.cfg");
@@ -324,14 +324,22 @@ static tern_node *migrate_config(tern_node *config, int from_version)
 		tern_node *def_pads = tern_find_path(def_config, "bindings\0pads\0", TVAL_NODE).ptrval;
 		tern_foreach(def_pads, migrate_pads, &pads);
 		config = tern_insert_path(config, "bindings\0pads\0", (tern_val){.ptrval = pads}, TVAL_NODE);
-		break;
 	}
 	case 1: {
 		char *l_bind = tern_find_path(config, "bindings\0keys\0l\0", TVAL_PTR).ptrval;
 		if (!l_bind) {
 			config = tern_insert_path(config, "bindings\0keys\0l\0", (tern_val){.ptrval = strdup("ui.load_state")}, TVAL_PTR);
 		}
-		break;
+	}
+	case 2: {
+		tern_node *sms = tern_find_node(config, "sms");
+		char *model = tern_find_path_default(sms, "system\0model\0", (tern_val){.ptrval = "md1va3"}, TVAL_PTR).ptrval;
+		char *io1 = tern_find_path_default(sms, "io\0devices\0""1\0", (tern_val){.ptrval = "gamepad2.1"}, TVAL_PTR).ptrval;
+		char *io2 = tern_find_path_default(sms, "io\0devices\0""1\0", (tern_val){.ptrval = "gamepad2.2"}, TVAL_PTR).ptrval;
+		sms = tern_insert_path(sms, "system\0model\0", (tern_val){.ptrval = strdup(model)}, TVAL_PTR);
+		sms = tern_insert_path(sms, "io\0devices\0""1\0", (tern_val){.ptrval = strdup(io1)}, TVAL_PTR);
+		sms = tern_insert_path(sms, "io\0devices\0""2\0", (tern_val){.ptrval = strdup(io2)}, TVAL_PTR);
+		config = tern_insert_node(config, "sms", sms);
 	}
 	}
 	char buffer[16];
@@ -343,7 +351,7 @@ static uint8_t app_config_in_config_dir;
 tern_node *load_config()
 {
 	tern_node *ret = load_overrideable_config("blastem.cfg", "default.cfg", &app_config_in_config_dir);
-	
+
 	if (!ret) {
 		if (get_config_dir()) {
 			fatal_error("Failed to find a config file at %s or in the blastem executable directory\n", get_config_dir());
@@ -443,6 +451,6 @@ tern_node *get_systems_config(void)
 
 tern_node *get_model(tern_node *config, system_type stype)
 {
-	char *model = tern_find_path_default(config, "system\0model\0", (tern_val){.ptrval = "md1va3"}, TVAL_PTR).ptrval;
+	char *model = tern_find_path_default(config, stype == SYSTEM_SMS ? "sms\0system\0model\0" : "system\0model\0", (tern_val){.ptrval = "md1va3"}, TVAL_PTR).ptrval;
 	return tern_find_node(get_systems_config(), model);
 }
