@@ -702,9 +702,6 @@ static void scan_sprite_table_mode4(vdp_context * context)
 		uint32_t size = (context->regs[REG_MODE_2] & BIT_SPRITE_SZ) ? 16 : 8;
 		uint32_t ysize = size;
 		uint8_t zoom = context->type != VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_SPRITE_ZM);
-		if (context->type == VDP_SMS && context->slot_counter <= 4) {
-			zoom = 0;
-		}
 		if (zoom) {
 			ysize *= 2;
 		}
@@ -814,9 +811,6 @@ static void read_sprite_x_mode4(vdp_context * context)
 		address = mode4_address_map[address];
 		--context->sprite_draws;
 		uint8_t zoom = context->type != VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_SPRITE_ZM);
-		if (context->type == VDP_SMS && context->sprite_draws < 4) {
-			zoom = 0;
-		}
 		uint32_t tile_address = context->vdpmem[address] * 32 + (context->regs[REG_STILE_BASE] << 11 & 0x2000);
 		if (context->regs[REG_MODE_2] & BIT_SPRITE_SZ) {
 			tile_address &= ~32;
