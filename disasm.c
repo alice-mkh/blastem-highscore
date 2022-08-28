@@ -3,14 +3,14 @@
 label_def *find_label(disasm_context *context, uint32_t address)
 {
 	char key[MAX_INT_KEY_SIZE];
-	tern_int_key(address & context->address_mask, key);
+	tern_sortable_int_key(address & context->address_mask, key);
 	return tern_find_ptr(context->labels, key);
 }
 
 label_def *add_find_label(disasm_context *context, uint32_t address)
 {
 	char key[MAX_INT_KEY_SIZE];
-	tern_int_key(address & context->address_mask, key);
+	tern_sortable_int_key(address & context->address_mask, key);
 	label_def *def = tern_find_ptr(context->labels, key);
 	if (!def)
 	{

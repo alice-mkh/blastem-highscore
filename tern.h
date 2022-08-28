@@ -53,6 +53,7 @@ tern_node *tern_insert_path(tern_node *head, char const *key, tern_val val, uint
 uint32_t tern_count(tern_node *head);
 void tern_foreach(tern_node *head, iter_fun fun, void *data);
 char * tern_int_key(uint32_t key, char * buf);
+char * tern_sortable_int_key(uint32_t key, char * buf);
 void tern_free(tern_node *head);
 
 #endif //TERN_H_
