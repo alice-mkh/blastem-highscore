@@ -1,6 +1,6 @@
 /*
  Copyright 2013 Michael Pavone
- This file is part of BlastEm. 
+ This file is part of BlastEm.
  BlastEm is free software distributed under the terms of the GNU General Public License version 3 or greater. See COPYING for full license text.
 */
 #include "z80inst.h"
@@ -135,7 +135,7 @@ int main(int argc, char ** argv)
 	if (!def || !only) {
 		def = defer(start, def);
 	}
-	uint16_t address;
+	uint32_t address;
 	while(def) {
 		do {
 			encoded = NULL;
@@ -158,7 +158,7 @@ int main(int argc, char ** argv)
 			next = z80_decode(encoded, &instbuf);
 			address += (next-encoded);
 			encoded = next;
-			
+
 			//z80_disasm(&instbuf, disbuf);
 			//printf("%X: %s\n", address, disbuf);
 			switch (instbuf.op)
@@ -173,6 +173,7 @@ int main(int argc, char ** argv)
 				break;
 			case Z80_JP:
 				address = instbuf.immed;
+				reference(address);
 				encoded = filebuf + address - offset;
 				break;
 			case Z80_JPCC:
@@ -197,20 +198,24 @@ int main(int argc, char ** argv)
 		}
 		puts("");
 	}
-	for (address = offset; address < filesize + offset; address++) {
+	uint32_t end = filesize + offset;
+	if (end > 0xFFFF) {
+		end = 0x10000;
+	}
+	for (address = offset; address < end; address++) {
 		if (is_visited(address)) {
 			encoded = filebuf + address - offset;
 			z80_decode(encoded, &instbuf);
 			if (labels) {
-				/*m68k_disasm_labels(&instbuf, disbuf);
-				if (is_label(instbuf.address)) {
-					printf("ADR_%X:\n", instbuf.address);
+				z80_disasm(&instbuf, disbuf, address);
+				if (is_label(address)) {
+					printf("ADR_%X:\n", address);
 				}
 				if (addr) {
-					printf("\t%s\t;%X\n", disbuf, instbuf.address);
+					printf("\t%s\t;%X\n", disbuf, address);
 				} else {
 					printf("\t%s\n", disbuf);
-				}*/
+				}
 			} else {
 				z80_disasm(&instbuf, disbuf, address);
 				printf("%X: %s\n", address, disbuf);
