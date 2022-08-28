@@ -12,138 +12,35 @@
 #include "vos_program_module.h"
 #include "tern.h"
 #include "util.h"
+#include "disasm.h"
 
-uint8_t visited[(16*1024*1024)/16];
-uint16_t label[(16*1024*1024)/8];
+int headless;
+void render_errorbox(char *title, char *message) {}
+void render_warnbox(char *title, char *message) {}
+void render_infobox(char *title, char *message) {}
 
-void fatal_error(char *format, ...)
-{
-	va_list args;
-	va_start(args, format);
-	vfprintf(stderr, format, args);
-	va_end(args);
-	exit(1);
-}
-
-
-void visit(uint32_t address)
-{
-	address &= 0xFFFFFF;
-	visited[address/16] |= 1 << ((address / 2) % 8);
-}
-
-void reference(uint32_t address)
-{
-	address &= 0xFFFFFF;
-	//printf("referenced: %X\n", address);
-	label[address/16] |= 1 << (address % 16);
-}
-
-uint8_t is_visited(uint32_t address)
-{
-	address &= 0xFFFFFF;
-	return visited[address/16] & (1 << ((address / 2) % 8));
-}
-
-uint16_t is_label(uint32_t address)
-{
-	address &= 0xFFFFFF;
-	return label[address/16] & (1 << (address % 16));
-}
-
-typedef struct {
-	uint32_t num_labels;
-	uint32_t storage;
-	uint32_t full_address;
-	char     *labels[];
-} label_names;
-
-tern_node * weak_label(tern_node * head, const char *name, uint32_t address)
-{
-	char key[MAX_INT_KEY_SIZE];
-	tern_int_key(address & 0xFFFFFF, key);
-	label_names * names = tern_find_ptr(head, key);
-	if (names)
-	{
-		if (names->num_labels == names->storage)
-		{
-			names->storage = names->storage + (names->storage >> 1);
-			names = realloc(names, sizeof(label_names) + names->storage * sizeof(char *));
-		}
-	} else {
-		names = malloc(sizeof(label_names) + 4 * sizeof(char *));
-		names->num_labels = 0;
-		names->storage = 4;
-		head = tern_insert_ptr(head, key, names);
-	}
-	names->labels[names->num_labels++] = strdup(name);
-	names->full_address = address;
-	return head;
-}
-tern_node *add_label(tern_node * head, const char *name, uint32_t address)
-{
-	reference(address);
-	return weak_label(head, name, address);
-}
-
-typedef struct deferred {
-	uint32_t address;
-	struct deferred *next;
-} deferred;
-
-deferred * defer(uint32_t address, deferred * next)
-{
-	if (is_visited(address) || address & 1) {
-		return next;
-	}
-	//printf("deferring %X\n", address);
-	deferred * d = malloc(sizeof(deferred));
-	d->address = address;
-	d->next = next;
-	return d;
-}
-
-void check_reference(m68kinst * inst, m68k_op_info * op)
+void check_reference(disasm_context *context, m68kinst * inst, m68k_op_info * op)
 {
 	switch(op->addr_mode)
 	{
 	case MODE_PC_DISPLACE:
-		reference(inst->address + 2 + op->params.regs.displacement);
+		reference(context, inst->address + 2 + op->params.regs.displacement);
 		break;
 	case MODE_ABSOLUTE:
 	case MODE_ABSOLUTE_SHORT:
-		reference(op->params.immed);
+		reference(context, op->params.immed);
 		break;
 	}
 }
 
 int label_fun(char *dst, uint32_t address, void * data)
 {
-	tern_node * labels = data;
-	char key[MAX_INT_KEY_SIZE];
-	label_names * names = tern_find_ptr(labels, tern_int_key(address & 0xFFFFFF, key));
-	if (names)
-	{
-		return sprintf(dst, "%s", names->labels[0]);
-	} else {
-		return m68k_default_label_fun(dst, address, NULL);
+	disasm_context *context = data;
+	label_def *def = find_label(context, address);
+	if (def && def->num_labels) {
+		return sprintf(dst, "%s", def->labels[0]);
 	}
-}
-
-char * strip_ws(char * text)
-{
-	while (*text && (!isprint(*text) || isblank(*text)))
-	{
-		text++;
-	}
-	char * ret = text;
-	text = ret + strlen(ret) - 1;
-	while (text > ret && (!isprint(*text) || isblank(*text)))
-	{
-		*text = 0;
-		text--;
-	}
-	return ret;
+	return m68k_default_label_fun(dst, address, NULL);
 }
 
 typedef struct {
@@ -161,6 +58,27 @@ uint16_t fetch(uint32_t address, void *data)
 	return 0;
 }
 
+void print_label_def(char *key, tern_val val, uint8_t valtype, void *data)
+{
+	rom_def *rom = data;
+	label_def *label = val.ptrval;
+	uint32_t address = label->full_address & 0xFFFFFFF;
+	if (address >= rom->address_off && address < rom->address_end) {
+		return;
+	}
+	if (!label->referenced) {
+		return;
+	}
+	if (label->num_labels) {
+		for (int i = 0; i < label->num_labels; i++)
+		{
+			printf("%s equ $%X\n", label->labels[i], label->full_address);
+		}
+	} else {
+		printf("ADR_%X equ $%X\n", label->full_address, label->full_address);
+	}
+}
+
 int main(int argc, char ** argv)
 {
 	long filesize;
@@ -168,10 +86,10 @@ int main(int argc, char ** argv)
 	char disbuf[1024];
 	m68kinst instbuf;
 	unsigned short * cur;
-	deferred *def = NULL, *tmpd;
 
 	uint8_t labels = 0, addr = 0, only = 0, vos = 0, reset = 0;
-	tern_node * named_labels = NULL;
+	disasm_context *context = create_68000_disasm();
+
 
 	uint32_t address_off = 0, address_end;
 	uint8_t do_cd_labels = 0, main_cpu = 0;
@@ -225,10 +143,11 @@ int main(int argc, char ** argv)
 						char *end;
 						uint32_t address = strtol(disbuf, &end, 16);
 						if (address) {
-							def = defer(address, def);
-							reference(address);
+							defer_disasm(context, address);
 							if (*end == '=') {
-								named_labels = add_label(named_labels, strip_ws(end+1), address);
+								add_label(context, strip_ws(end+1), address);
+							} else {
+								reference(context, address);
 							}
 						}
 					}
@@ -238,10 +157,11 @@ int main(int argc, char ** argv)
 		} else {
 			char *end;
 			uint32_t address = strtol(argv[opt], &end, 16);
-			def = defer(address, def);
-			reference(address);
+			defer_disasm(context, address);
 			if (*end == '=') {
-				named_labels = add_label(named_labels, end+1, address);
+				add_label(context, end+1, address);
+			} else {
+				reference(context, address);
 			}
 		}
 	}
@@ -252,7 +172,7 @@ int main(int argc, char ** argv)
 
 	char int_key[MAX_INT_KEY_SIZE];
 	uint8_t is_scd_iso = 0;
-	uint8_t has_manual_defs = !!def;
+	uint8_t has_manual_defs = !!context->deferred;
 	if (vos)
 	{
 		vos_program_module header;
@@ -260,15 +180,15 @@ int main(int argc, char ** argv)
 		vos_read_alloc_module_map(f, &header);
 		address_off = header.user_boundary;
 		address_end = address_off + filesize - 0x1000;
-		def = defer(header.main_entry_link.code_address, def);
-		named_labels = add_label(named_labels, "main_entry_link", header.main_entry_link.code_address);
+		defer_disasm(context, header.main_entry_link.code_address);
+		add_label(context, "main_entry_link", header.main_entry_link.code_address);
 		for (int i = 0; i < header.n_modules; i++)
 		{
 			if (!reset || header.module_map_entries[i].code_address != header.user_boundary)
 			{
-				def = defer(header.module_map_entries[i].code_address, def);
+				defer_disasm(context, header.module_map_entries[i].code_address);
 			}
-			named_labels = add_label(named_labels, header.module_map_entries[i].name.str, header.module_map_entries[i].code_address);
+			add_label(context, header.module_map_entries[i].name.str, header.module_map_entries[i].code_address);
 		}
 		fseek(f, 0x1000, SEEK_SET);
 		filebuf = malloc(filesize - 0x1000);
@@ -283,8 +203,8 @@ int main(int argc, char ** argv)
 		}
 		if (reset)
 		{
-			def = defer(filebuf[2] << 16 | filebuf[3], def);
-			named_labels = add_label(named_labels, "reset", filebuf[2] << 16 | filebuf[3]);
+			defer_disasm(context, filebuf[2] << 16 | filebuf[3]);
+			add_label(context, "reset", filebuf[2] << 16 | filebuf[3]);
 		}
 	} else if (filesize > 0x1000) {
 		long boot_size = filesize > (32*1024) ? 32*1024 : filesize;
@@ -322,9 +242,9 @@ int main(int argc, char ** argv)
 				address_off = 0xFF0000;
 				address_end = address_off + main_end-main_start;
 				filebuf += main_start / 2;
-				named_labels = add_label(named_labels, "start", 0xFF0000);
+				add_label(context, "start", 0xFF0000);
 				if (!has_manual_defs || !only) {
-					def = defer(0xFF0000, def);
+					defer_disasm(context, 0xFF0000);
 				}
 				uint32_t user_start;
 				if (filebuf[0xA/2] == 0x57A) {
@@ -337,7 +257,7 @@ int main(int argc, char ** argv)
 					//JP
 					user_start = 0xFF0156;
 				}
-				named_labels = add_label(named_labels, "user_start", user_start);
+				add_label(context, "user_start", user_start);
 				do_cd_labels = 1;
 			} else {
 				uint32_t sub_start =filebuf[0x40/2] << 16 | filebuf[0x42/2];
@@ -370,9 +290,9 @@ int main(int argc, char ** argv)
 						sprintf(namebuf, "usercall%u", index);
 					}
 					uint32_t address = 0x6000 + offset - sub_start;
-					named_labels = add_label(named_labels, name, address);
+					add_label(context, name, address);
 					if (!has_manual_defs || !only) {
-						def = defer(address, def);
+						defer_disasm(context, address);
 					}
 				}
 
@@ -408,182 +328,14 @@ int main(int argc, char ** argv)
 			*cur = (*cur >> 8) | (*cur << 8);
 		}
 		if (!address_off) {
-			uint32_t start = filebuf[2] << 16 | filebuf[3];
-			uint32_t int_2 = filebuf[0x68/2] << 16 | filebuf[0x6A/2];
-			uint32_t int_4 = filebuf[0x70/2] << 16 | filebuf[0x72/2];
-			uint32_t int_6 = filebuf[0x78/2] << 16 | filebuf[0x7A/2];
-			named_labels = add_label(named_labels, "start", start);
-			named_labels = add_label(named_labels, "int_2", int_2);
-			named_labels = add_label(named_labels, "int_4", int_4);
-			named_labels = add_label(named_labels, "int_6", int_6);
-			if (!def || !only) {
-				def = defer(start, def);
-				def = defer(int_2, def);
-				def = defer(int_4, def);
-				def = defer(int_6, def);
-			}
-			named_labels = weak_label(named_labels, "illegal_inst", filebuf[0x10/2] << 16 | filebuf[0x12/2]);
-			named_labels = weak_label(named_labels, "div_zero", filebuf[0x14/2] << 16 | filebuf[0x16/2]);
-			named_labels = weak_label(named_labels, "chk_exception", filebuf[0x18/2] << 16 | filebuf[0x1A/2]);
-			named_labels = weak_label(named_labels, "trapv", filebuf[0x1C/2] << 16 | filebuf[0x1E/2]);
-			named_labels = weak_label(named_labels, "line_a_trap", filebuf[0x28/2] << 16 | filebuf[0x2A/2]);
-			named_labels = weak_label(named_labels, "line_f_trap", filebuf[0x2C/2] << 16 | filebuf[0x2E/2]);
+			process_m68k_vectors(context, filebuf, context->deferred && only);
 		}
 	}
 	if (do_cd_labels) {
 		if (main_cpu) {
-			named_labels = weak_label(named_labels, "_bios_reset", 0x280);
-			named_labels = weak_label(named_labels, "_bios_entry", 0x284);
-			named_labels = weak_label(named_labels, "_bios_init", 0x288);
-			named_labels = weak_label(named_labels, "_bios_init_sp", 0x28C);
-			named_labels = weak_label(named_labels, "_bios_vint", 0x290);
-			named_labels = weak_label(named_labels, "_bios_set_hint", 0x294);
-			named_labels = weak_label(named_labels, "_bios_poll_io", 0x298);
-			named_labels = weak_label(named_labels, "_bios_detect_io", 0x29C);
-			named_labels = weak_label(named_labels, "_bios_clear_vram", 0x2A0);
-			named_labels = weak_label(named_labels, "_bios_clear_nmtbl", 0x2A4);
-			named_labels = weak_label(named_labels, "_bios_clear_vsram", 0x2A8);
-			named_labels = weak_label(named_labels, "_bios_init_vdp", 0x2AC);
-			named_labels = weak_label(named_labels, "_bios_vdp_loadregs", 0x2B0);
-			named_labels = weak_label(named_labels, "_bios_vdp_fill", 0x2B4);
-			named_labels = weak_label(named_labels, "_bios_clear_vram_range", 0x2B8);
-			named_labels = weak_label(named_labels, "_bios_clear_vram_range_dma", 0x2BC);
-			named_labels = weak_label(named_labels, "_bios_vram_dma_fill", 0x2C0);
-			named_labels = weak_label(named_labels, "_bios_update_nmtbl", 0x2C4);
-			named_labels = weak_label(named_labels, "_bios_update_nmtbl_template", 0x2C8);
-			named_labels = weak_label(named_labels, "_bios_fill_nmtbl", 0x2CC);
-			named_labels = weak_label(named_labels, "_bios_vdp_dma", 0x2D0);
-			named_labels = weak_label(named_labels, "_bios_vdp_dma_wordram", 0x2D4);
-			named_labels = weak_label(named_labels, "_bios_vdp_display_enable", 0x2D8);
-			named_labels = weak_label(named_labels, "_bios_vdp_display_disable", 0x2DC);
-			named_labels = weak_label(named_labels, "_bios_pal_buffer", 0x2E0);
-			named_labels = weak_label(named_labels, "_bios_pal_buffer_update", 0x2E4);
-			named_labels = weak_label(named_labels, "_bios_pal_dma", 0x2E8);
-			named_labels = weak_label(named_labels, "_bios_gfx_decomp", 0x2EC);
-			named_labels = weak_label(named_labels, "_bios_gfx_decomp_ram", 0x2F0);
-			named_labels = weak_label(named_labels, "_bios_update_sprites", 0x2F4);
-			named_labels = weak_label(named_labels, "_bios_clear_ram", 0x2F8);
-			named_labels = weak_label(named_labels, "_bios_display_sprite", 0x300);
-			named_labels = weak_label(named_labels, "_bios_wait_vint", 0x304);
-			named_labels = weak_label(named_labels, "_bios_wait_vint_flags", 0x308);
-			named_labels = weak_label(named_labels, "_bios_dma_sat", 0x30C);
-			named_labels = weak_label(named_labels, "_bios_set_hint_direct", 0x314);
-			named_labels = weak_label(named_labels, "_bios_disable_hint", 0x318);
-			named_labels = weak_label(named_labels, "_bios_print", 0x31C);
-			named_labels = weak_label(named_labels, "_bios_load_user_font", 0x320);
-			named_labels = weak_label(named_labels, "_bios_load_bios_font", 0x324);
-			named_labels = weak_label(named_labels, "_bios_load_bios_font_default", 0x328);
-			//TODO: more functions in the middle here
-			named_labels = weak_label(named_labels, "_bios_prng_mod", 0x338);
-			named_labels = weak_label(named_labels, "_bios_prng", 0x33C);
-			named_labels = weak_label(named_labels, "_bios_clear_comm", 0x340);
-			named_labels = weak_label(named_labels, "_bios_comm_update", 0x344);
-			//TODO: more functions in the middle here
-			named_labels = weak_label(named_labels, "_bios_sega_logo", 0x364);
-			named_labels = weak_label(named_labels, "_bios_set_vint", 0x368);
-			//TODO: more functions at the end here
-
-			named_labels = weak_label(named_labels, "WORD_RAM", 0x200000);
-			named_labels = weak_label(named_labels, "CD_RESET_IFL2", 0xA12000);
-			named_labels = weak_label(named_labels, "CD_RESET_IFL2_BYTE", 0xA12001);
-			named_labels = weak_label(named_labels, "CD_WRITE_PROTECT", 0xA12002);
-			named_labels = weak_label(named_labels, "CD_MEM_MODE", 0xA12003);
-			named_labels = weak_label(named_labels, "CDC_CTRL", 0xA12004);
-			named_labels = weak_label(named_labels, "HINT_VECTOR", 0xA12006);
-			named_labels = weak_label(named_labels, "CDC_HOST_DATA", 0xA12008);
-			named_labels = weak_label(named_labels, "STOP_WATCH", 0xA1200C);
-			named_labels = weak_label(named_labels, "COMM_MAIN_FLAG", 0xA1200E);
-			named_labels = weak_label(named_labels, "COMM_SUB_FLAG", 0xA1200F);
-			named_labels = weak_label(named_labels, "COMM_CMD0", 0xA12010);
-			named_labels = weak_label(named_labels, "COMM_CMD1", 0xA12012);
-			named_labels = weak_label(named_labels, "COMM_CMD2", 0xA12014);
-			named_labels = weak_label(named_labels, "COMM_CMD3", 0xA12016);
-			named_labels = weak_label(named_labels, "COMM_CMD4", 0xA12018);
-			named_labels = weak_label(named_labels, "COMM_CMD5", 0xA1201A);
-			named_labels = weak_label(named_labels, "COMM_CMD6", 0xA1201C);
-			named_labels = weak_label(named_labels, "COMM_CMD7", 0xA1201E);
-			named_labels = weak_label(named_labels, "COMM_STATUS0", 0xA12020);
-			named_labels = weak_label(named_labels, "COMM_STATUS1", 0xA12022);
-			named_labels = weak_label(named_labels, "COMM_STATUS2", 0xA12024);
-			named_labels = weak_label(named_labels, "COMM_STATUS3", 0xA12026);
-			named_labels = weak_label(named_labels, "COMM_STATUS4", 0xA12028);
-			named_labels = weak_label(named_labels, "COMM_STATUS5", 0xA1202A);
-			named_labels = weak_label(named_labels, "COMM_STATUS6", 0xA1202C);
-			named_labels = weak_label(named_labels, "COMM_STATUS7", 0xA1202E);
+			add_segacd_maincpu_labels(context);
 		} else {
-			named_labels = weak_label(named_labels, "bios_common_work", 0x5E80);
-			named_labels = weak_label(named_labels, "_setjmptbl", 0x5F0A);
-			named_labels = weak_label(named_labels, "_waitvsync", 0x5F10);
-			named_labels = weak_label(named_labels, "_buram", 0x5F16);
-			named_labels = weak_label(named_labels, "_cdboot", 0x5F1C);
-			named_labels = weak_label(named_labels, "_cdbios", 0x5F22);
-			named_labels = weak_label(named_labels, "_usercall0", 0x5F28);
-			named_labels = weak_label(named_labels, "_usercall1", 0x5F2E);
-			named_labels = weak_label(named_labels, "_usercall2", 0x5F34);
-			named_labels = weak_label(named_labels, "_usercall2Address", 0x5F36);
-			named_labels = weak_label(named_labels, "_usercall3", 0x5F3A);
-			named_labels = weak_label(named_labels, "_adrerr", 0x5F40);
-			named_labels = weak_label(named_labels, "_adrerrAddress", 0x5F42);
-			named_labels = weak_label(named_labels, "_coderr", 0x5F46);
-			named_labels = weak_label(named_labels, "_coderrAddress", 0x5F48);
-			named_labels = weak_label(named_labels, "_diverr", 0x5F4C);
-			named_labels = weak_label(named_labels, "_diverrAddress", 0x5F4E);
-			named_labels = weak_label(named_labels, "_chkerr", 0x5F52);
-			named_labels = weak_label(named_labels, "_chkerrAddress", 0x5F54);
-			named_labels = weak_label(named_labels, "_trperr", 0x5F58);
-			named_labels = weak_label(named_labels, "_trperrAddress", 0x5F5A);
-			named_labels = weak_label(named_labels, "_spverr", 0x5F5E);
-			named_labels = weak_label(named_labels, "_spverrAddress", 0x5F60);
-			named_labels = weak_label(named_labels, "_trace", 0x5F64);
-			named_labels = weak_label(named_labels, "_traceAddress", 0x5F66);
-			named_labels = weak_label(named_labels, "_nocod0", 0x5F6A);
-			named_labels = weak_label(named_labels, "_nocod0Address", 0x5F6C);
-			named_labels = weak_label(named_labels, "_nocod0", 0x5F70);
-			named_labels = weak_label(named_labels, "_nocod0Address", 0x5F72);
-			named_labels = weak_label(named_labels, "_slevel1", 0x5F76);
-			named_labels = weak_label(named_labels, "_slevel1Address", 0x5F78);
-			named_labels = weak_label(named_labels, "_slevel2", 0x5F7C);
-			named_labels = weak_label(named_labels, "_slevel2Address", 0x5F7E);
-			named_labels = weak_label(named_labels, "_slevel3", 0x5F82);
-			named_labels = weak_label(named_labels, "_slevel3Address", 0x5F84);
-			named_labels = weak_label(named_labels, "WORD_RAM_2M", 0x80000);
-			named_labels = weak_label(named_labels, "WORD_RAM_1M", 0xC0000);
-			named_labels = weak_label(named_labels, "LED_CONTROL", 0xFFFF8000);
-			named_labels = weak_label(named_labels, "VERSION_RESET", 0xFFFF8001);
-			named_labels = weak_label(named_labels, "MEM_MODE_WORD", 0xFFFF8002);
-			named_labels = weak_label(named_labels, "MEM_MODE_BYTE", 0xFFFF8003);
-			named_labels = weak_label(named_labels, "CDC_CTRL", 0xFFFF8004);
-			named_labels = weak_label(named_labels, "CDC_AR", 0xFFFF8005);
-			named_labels = weak_label(named_labels, "CDC_REG_DATA_WORD", 0xFFFF8006);
-			named_labels = weak_label(named_labels, "CDC_REG_DATA", 0xFFFF8007);
-			named_labels = weak_label(named_labels, "CDC_HOST_DATA", 0xFFFF8008);
-			named_labels = weak_label(named_labels, "CDC_DMA_ADDR", 0xFFFF800A);
-			named_labels = weak_label(named_labels, "STOP_WATCH", 0xFFFF800C);
-			named_labels = weak_label(named_labels, "COMM_MAIN_FLAG", 0xFFFF800E);
-			named_labels = weak_label(named_labels, "COMM_SUB_FLAG", 0xFFFF800F);
-			named_labels = weak_label(named_labels, "COMM_CMD0", 0xFFFF8010);
-			named_labels = weak_label(named_labels, "COMM_CMD1", 0xFFFF8012);
-			named_labels = weak_label(named_labels, "COMM_CMD2", 0xFFFF8014);
-			named_labels = weak_label(named_labels, "COMM_CMD3", 0xFFFF8016);
-			named_labels = weak_label(named_labels, "COMM_CMD4", 0xFFFF8018);
-			named_labels = weak_label(named_labels, "COMM_CMD5", 0xFFFF801A);
-			named_labels = weak_label(named_labels, "COMM_CMD6", 0xFFFF801C);
-			named_labels = weak_label(named_labels, "COMM_CMD7", 0xFFFF801E);
-			named_labels = weak_label(named_labels, "COMM_STATUS0", 0xFFFF8020);
-			named_labels = weak_label(named_labels, "COMM_STATUS1", 0xFFFF8022);
-			named_labels = weak_label(named_labels, "COMM_STATUS2", 0xFFFF8024);
-			named_labels = weak_label(named_labels, "COMM_STATUS3", 0xFFFF8026);
-			named_labels = weak_label(named_labels, "COMM_STATUS4", 0xFFFF8028);
-			named_labels = weak_label(named_labels, "COMM_STATUS5", 0xFFFF802A);
-			named_labels = weak_label(named_labels, "COMM_STATUS6", 0xFFFF802C);
-			named_labels = weak_label(named_labels, "COMM_STATUS7", 0xFFFF802E);
-			named_labels = weak_label(named_labels, "TIMER_WORD", 0xFFFF8030);
-			named_labels = weak_label(named_labels, "TIMER", 0xFFFF8031);
-			named_labels = weak_label(named_labels, "INT_MASK_WORD", 0xFFFF8032);
-			named_labels = weak_label(named_labels, "INT_MASK", 0xFFFF8033);
-			named_labels = weak_label(named_labels, "CDD_FADER", 0xFFFF8034);
-			named_labels = weak_label(named_labels, "CDD_CTRL_WORD", 0xFFFF8036);
-			named_labels = weak_label(named_labels, "CDD_CTRL_BYTE", 0xFFFF8037);
+			add_segacd_subcpu_labels(context);
 		}
 	}
 	uint32_t size, tmp_addr;
@@ -594,57 +346,57 @@ int main(int argc, char ** argv)
 		.buffer = filebuf
 	};
 	uint8_t valid_address;
-	while(def) {
+	while(context->deferred) {
 		do {
 			valid_address = 0;
-			address = def->address;
-			if (!is_visited(address)) {
-				address &= 0xFFFFFF;
+			address = context->deferred->address;
+			if (!is_visited(context, address)) {
+				address &= context->address_mask;
 				if (address < address_end && address >= address_off) {
 					valid_address = 1;
+					address = context->deferred->address;
 				}
 			}
-			tmpd = def;
-			def = def->next;
+			deferred_addr *tmpd = context->deferred;
+			context->deferred = context->deferred->next;
 			free(tmpd);
-		} while(def && !valid_address);
+		} while(context->deferred && !valid_address);
 		if (!valid_address) {
 			break;
 		}
 		for(;;) {
-			if ((address & 0xFFFFFF) > address_end || address < address_off) {
+			if ((address & context->address_mask) > address_end || address < address_off) {
 				break;
 			}
-			visit(address);
+			visit(context, address);
 			address = m68k_decode(fetch, &rom, &instbuf, address);
 			//m68k_disasm(&instbuf, disbuf);
 			//printf("%X: %s\n", instbuf.address, disbuf);
-			check_reference(&instbuf, &(instbuf.src));
-			check_reference(&instbuf, &(instbuf.dst));
+			check_reference(context, &instbuf, &(instbuf.src));
+			check_reference(context, &instbuf, &(instbuf.dst));
 			if (instbuf.op == M68K_ILLEGAL || instbuf.op == M68K_RTS || instbuf.op == M68K_RTE || instbuf.op == M68K_INVALID) {
 				break;
 			}
 			if (instbuf.op == M68K_BCC || instbuf.op == M68K_DBCC || instbuf.op == M68K_BSR) {
+				tmp_addr = instbuf.address + 2 + instbuf.src.params.immed;
+				reference(context, tmp_addr);
 				if (instbuf.op == M68K_BCC && instbuf.extra.cond == COND_TRUE) {
-					address = instbuf.address + 2 + instbuf.src.params.immed;
-					reference(address);
-					if (is_visited(address)) {
+					address = tmp_addr;
+					if (is_visited(context, address)) {
 						break;
 					}
 				} else {
-					tmp_addr = instbuf.address + 2 + instbuf.src.params.immed;
-					reference(tmp_addr);
-					def = defer(tmp_addr, def);
+					defer_disasm(context, tmp_addr);
 				}
 			} else if(instbuf.op == M68K_JMP) {
 				if (instbuf.src.addr_mode == MODE_ABSOLUTE || instbuf.src.addr_mode == MODE_ABSOLUTE_SHORT) {
 					address = instbuf.src.params.immed;
-					if (is_visited(address)) {
+					if (is_visited(context, address)) {
 						break;
 					}
 				} else if (instbuf.src.addr_mode == MODE_PC_DISPLACE) {
 					address = instbuf.src.params.regs.displacement + instbuf.address + 2;
-					if (is_visited(address)) {
+					if (is_visited(context, address)) {
 						break;
 					}
 				} else {
@@ -652,61 +404,32 @@ int main(int argc, char ** argv)
 				}
 			} else if(instbuf.op == M68K_JSR) {
 				if (instbuf.src.addr_mode == MODE_ABSOLUTE || instbuf.src.addr_mode == MODE_ABSOLUTE_SHORT) {
-					def = defer(instbuf.src.params.immed, def);
+					defer_disasm(context, instbuf.src.params.immed);
 				} else if (instbuf.src.addr_mode == MODE_PC_DISPLACE) {
-					def = defer(instbuf.src.params.regs.displacement + instbuf.address + 2, def);
+					defer_disasm(context, instbuf.src.params.regs.displacement + instbuf.address + 2);
 				}
 			}
 		}
 	}
 	if (labels) {
-		for (address = 0; address < address_off; address++) {
-			if (is_label(address)) {
-				char key[MAX_INT_KEY_SIZE];
-				tern_int_key(address, key);
-				label_names *names = tern_find_ptr(named_labels, key);
-				if (names) {
-					for (int i = 0; i < names->num_labels; i++)
-					{
-						printf("%s equ $%X\n", names->labels[i], address);
-					}
-				} else  {
-					printf("ADR_%X equ $%X\n", address, address);
-				}
-			}
-		}
-		for (address = address_end; address < (16*1024*1024); address++) {
-			if (is_label(address)) {
-				char key[MAX_INT_KEY_SIZE];
-				tern_int_key(address, key);
-				label_names *names = tern_find_ptr(named_labels, key);
-				if (names) {
-					for (int i = 0; i < names->num_labels; i++)
-					{
-						printf("%s equ $%X\n", names->labels[i], names->full_address);
-					}
-				} else  {
-					printf("ADR_%X equ $%X\n", address, address);
-				}
-			}
-		}
+		tern_foreach(context->labels, print_label_def, &rom);
 		puts("");
 	}
 	for (address = address_off; address < address_end; address+=2) {
-		if (is_visited(address)) {
+		if (is_visited(context, address)) {
 			m68k_decode(fetch, &rom, &instbuf, address);
 			if (labels) {
-				m68k_disasm_labels(&instbuf, disbuf, label_fun, named_labels);
-				char keybuf[MAX_INT_KEY_SIZE];
-				label_names * names = tern_find_ptr(named_labels, tern_int_key(address, keybuf));
-				if (names)
-				{
-					for (int i = 0; i < names->num_labels; i++)
-					{
-						printf("%s:\n", names->labels[i]);
+				m68k_disasm_labels(&instbuf, disbuf, label_fun, context);
+				label_def *label = find_label(context, address);
+				if (label) {
+					if (label->num_labels) {
+						for (int i = 0; i < label->num_labels; i++)
+						{
+							printf("%s:\n", label->labels[i]);
+						}
+					} else {
+						printf("ADR_%X:\n", label->full_address);
 					}
-				} else if (is_label(instbuf.address)) {
-					printf("ADR_%X:\n", instbuf.address);
 				}
 				if (addr) {
 					printf("\t%s\t;%X\n", disbuf, instbuf.address);

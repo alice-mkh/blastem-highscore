@@ -287,7 +287,7 @@ blastjag$(EXE) : jaguar.o jag_video.o $(RENDEROBJS) serialize.o $(M68KOBJS) $(TR
 termhelper : termhelper.o
 	$(CC) -o $@ $^ $(LDFLAGS)
 
-dis$(EXE) : dis.o 68kinst.o tern.o vos_program_module.o
+dis$(EXE) : dis.o disasm.o backend.o 68kinst.o tern.o vos_program_module.o util.o
 	$(CC) -o $@ $^ $(OPT)
 
 jagdis : jagdis.o jagcpu.o tern.o
