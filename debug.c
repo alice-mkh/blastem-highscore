@@ -2765,7 +2765,7 @@ static uint8_t resolve_z80(debug_root *root, const char *name, uint32_t *out)
 			*out = context->regs[Z80_H];
 		} else if (name[1] == '\'' && !name[2]) {
 			*out = context->alt_regs[Z80_H];
-		} else if (tolower(name[1]) == 'e') {
+		} else if (tolower(name[1]) == 'l') {
 			if (!name[2]) {
 				*out = context->regs[Z80_H] << 8 | context->regs[Z80_L];
 			} else if (name[2] == '\'' && !name[3]) {
@@ -3180,7 +3180,16 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 				(*this_bp)->condition = NULL;
 			}
 		}
-		printf("Z80 Breakpoint %d hit\n", (*this_bp)->index);
+		int debugging = 1;
+		for (uint32_t i = 0; debugging && i < (*this_bp)->num_commands; i++)
+		{
+			debugging = run_command(root, (*this_bp)->commands + i);
+		}
+		if (debugging) {
+			printf("Z80 Breakpoint %d hit\n", (*this_bp)->index);
+		} else {
+			return context;
+		}
 	} else {
 		zremove_breakpoint(context, address);
 	}
