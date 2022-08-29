@@ -103,7 +103,7 @@ void psg_run(psg_context * context, uint32_t cycles)
 					context->lsfr = (context->lsfr >> 1) | (context->lsfr << 15);
 					if (context->noise_type) {
 						//white noise
-						if (context->lsfr & 0x40) {
+						if (context->lsfr & 0x4) {
 							context->lsfr ^= 0x8000;
 						}
 					}
