@@ -194,11 +194,24 @@ uint32_t load_media(const char * filename, system_media *dst, system_type *stype
 		}
 		return make_iso_media(dst, filename);
 	}
-	free(ext);
+
 	ROMFILE f = romopen(filename, "rb");
 	if (!f) {
+		free(ext);
 		return 0;
 	}
+#ifndef DISABLE_ZLIB
+	char *to_free = NULL;
+	if (!gzdirect(f) && ext && !strcasecmp(ext, "gz")) {
+		size_t without_gz = strlen(filename) - 2;
+		to_free = calloc(1, without_gz);
+		memcpy(to_free, filename, without_gz - 1);
+		to_free[without_gz - 1] = 0;
+		free(ext);
+		filename = to_free;
+		ext = path_extension(filename);
+	}
+#endif //DISABLE_ZLIB
 
 	if (sizeof(header) != romread(header, 1, sizeof(header), f)) {
 		fatal_error("Error reading from %s\n", filename);
@@ -241,7 +254,7 @@ uint32_t load_media(const char * filename, system_media *dst, system_type *stype
 	}
 	dst->dir = path_dirname(filename);
 	dst->name = basename_no_extension(filename);
-	dst->extension = path_extension(filename);
+	dst->extension = ext;
 	dst->size = ret;
 	romclose(f);
 	if (!strcasecmp(dst->extension, "cue")) {
@@ -257,6 +270,11 @@ uint32_t load_media(const char * filename, system_media *dst, system_type *stype
 			}
 		}
 	}
+#ifndef DISABLE_ZLIB
+	if (to_free) {
+		free(to_free);
+	}
+#endif
 
 	return ret;
 }
