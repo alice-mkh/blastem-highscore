@@ -178,7 +178,7 @@ endif
 endif
 
 TRANSOBJS=gen.o backend.o $(MEM) arena.o tern.o
-M68KOBJS=68kinst.o
+M68KOBJS=68kinst.o disasm.o
 
 ifdef NEW_CORE
 Z80OBJS=z80.o z80inst.o

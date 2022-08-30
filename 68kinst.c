@@ -4,6 +4,7 @@
  BlastEm is free software distributed under the terms of the GNU General Public License version 3 or greater. See COPYING for full license text.
 */
 #include "68kinst.h"
+#include "disasm.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -2590,12 +2591,7 @@ int m68k_disasm_movem_op(m68k_op_info *decoded, m68k_op_info *other, char *dst, 
 	}
 }
 
-int m68k_default_label_fun(char * dst, uint32_t address, void * data)
-{
-	return sprintf(dst, "ADR_%X", address);
-}
-
-int m68k_disasm_ex(m68kinst * decoded, char * dst, uint8_t labels, format_label_fun label_fun, void * data)
+int m68k_disasm_ex(m68kinst * decoded, char * dst, uint8_t labels, format_label_fun label_fun, disasm_context *data)
 {
 	int ret,op1len;
 	uint8_t size;
@@ -2707,11 +2703,7 @@ int m68k_disasm(m68kinst * decoded, char * dst)
 	return m68k_disasm_ex(decoded, dst, 0, NULL, NULL);
 }
 
-int m68k_disasm_labels(m68kinst * decoded, char * dst, format_label_fun label_fun, void * data)
+int m68k_disasm_labels(m68kinst * decoded, char * dst, disasm_context *disasm)
 {
-	if (!label_fun)
-	{
-		label_fun = m68k_default_label_fun;
-	}
-	return m68k_disasm_ex(decoded, dst, 1, label_fun, data);
+	return m68k_disasm_ex(decoded, dst, 1, format_label, disasm);
 }

@@ -1,10 +1,22 @@
 #include "disasm.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stddef.h>
 
 label_def *find_label(disasm_context *context, uint32_t address)
 {
 	char key[MAX_INT_KEY_SIZE];
 	tern_sortable_int_key(address & context->address_mask, key);
 	return tern_find_ptr(context->labels, key);
+}
+
+int format_label(char *dst, uint32_t address, disasm_context *context)
+{
+	label_def *def = find_label(context, address);
+	if (def && def->num_labels) {
+		return sprintf(dst, "%s", def->labels[0]);
+	}
+	return sprintf(dst, "ADR_%X", address);
 }
 
 label_def *add_find_label(disasm_context *context, uint32_t address)

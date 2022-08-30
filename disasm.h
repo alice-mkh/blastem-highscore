@@ -22,7 +22,10 @@ typedef struct {
 	uint32_t      visit_preshift;
 } disasm_context;
 
+typedef int (*format_label_fun)(char * dst, uint32_t address, disasm_context * context);
+
 label_def *find_label(disasm_context *context, uint32_t address);
+int format_label(char *dst, uint32_t address, disasm_context *context);
 void weak_label(disasm_context *context, const char *name, uint32_t address);
 void reference(disasm_context *context, uint32_t address);
 void add_label(disasm_context *context, const char *name, uint32_t address);

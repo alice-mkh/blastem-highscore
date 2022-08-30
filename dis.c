@@ -33,16 +33,6 @@ void check_reference(disasm_context *context, m68kinst * inst, m68k_op_info * op
 	}
 }
 
-int label_fun(char *dst, uint32_t address, void * data)
-{
-	disasm_context *context = data;
-	label_def *def = find_label(context, address);
-	if (def && def->num_labels) {
-		return sprintf(dst, "%s", def->labels[0]);
-	}
-	return m68k_default_label_fun(dst, address, NULL);
-}
-
 typedef struct {
 	uint32_t address_off;
 	uint32_t address_end;
@@ -419,7 +409,7 @@ int main(int argc, char ** argv)
 		if (is_visited(context, address)) {
 			m68k_decode(fetch, &rom, &instbuf, address);
 			if (labels) {
-				m68k_disasm_labels(&instbuf, disbuf, label_fun, context);
+				m68k_disasm_labels(&instbuf, disbuf, context);
 				label_def *label = find_label(context, address);
 				if (label) {
 					if (label->num_labels) {

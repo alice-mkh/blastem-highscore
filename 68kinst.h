@@ -7,6 +7,7 @@
 #define M68KINST_H_
 
 #include <stdint.h>
+#include "disasm.h"
 
 #ifdef M68030
 #define M68020
@@ -333,7 +334,6 @@ typedef enum {
 	VECTOR_USER0 = 64
 } m68k_vector;
 
-typedef int (*format_label_fun)(char * dst, uint32_t address, void * data);
 typedef uint16_t (*m68k_fetch_fun)(uint32_t address, void *data);
 
 uint32_t m68k_decode(m68k_fetch_fun fetch, void *data, m68kinst * dst, uint32_t address);
@@ -341,8 +341,7 @@ uint32_t m68k_branch_target(m68kinst * inst, uint32_t *dregs, uint32_t *aregs);
 uint8_t m68k_is_branch(m68kinst * inst);
 uint8_t m68k_is_noncall_branch(m68kinst * inst);
 int m68k_disasm(m68kinst * decoded, char * dst);
-int m68k_disasm_labels(m68kinst * decoded, char * dst, format_label_fun label_fun, void * data);
-int m68k_default_label_fun(char * dst, uint32_t address, void * data);
+int m68k_disasm_labels(m68kinst * decoded, char * dst, disasm_context *disasm);
 
 #endif
 
