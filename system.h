@@ -37,7 +37,7 @@ typedef void (*system_ptr8_sizet_fun)(system_header *, uint8_t *, size_t);
 
 #include "arena.h"
 #include "romdb.h"
-#include "event_log.h"
+typedef struct event_reader event_reader;
 
 struct system_header {
 	system_header     *next_context;

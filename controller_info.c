@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdlib.h>
+#include "render.h"
 #ifndef USE_FBDEV
 #include "render_sdl.h"
 #endif
@@ -204,7 +205,7 @@ void save_controller_info(int joystick, controller_info *info)
 	info_config = tern_insert_node(info_config, guid_string, existing);
 	persist_config_at(config, info_config, "controller_types.cfg");
 	handle_joy_added(joystick);
-#endif	
+#endif
 }
 
 void save_controller_mapping(int joystick, char *mapping_string)

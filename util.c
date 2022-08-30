@@ -28,9 +28,12 @@
 #define fatal_printf(msg, args) vfprintf(stderr, msg, args)
 #endif
 
-#include "blastem.h" //for headless global
-#include "render.h" //for render_errorbox
 #include "util.h"
+
+void render_errorbox(char *title, char *message);
+void render_warnbox(char *title, char *message);
+void render_infobox(char *title, char *message);
+extern int headless;
 
 char * alloc_concat(char const * first, char const * second)
 {
@@ -349,7 +352,7 @@ char * basename_no_extension(const char *path)
 	char *barename = malloc(lastdot-lastslash+1);
 	memcpy(barename, lastslash, lastdot-lastslash);
 	barename[lastdot-lastslash] = 0;
-	
+
 	return barename;
 }
 
@@ -407,7 +410,7 @@ char * path_dirname(const char *path)
 	char *dir = malloc(lastslash-path+1);
 	memcpy(dir, path, lastslash-path);
 	dir[lastslash-path] = 0;
-	
+
 	return dir;
 }
 
@@ -630,18 +633,18 @@ dir_entry *get_dir_list(char *path, size_t *numret)
 			}
 			return NULL;
 		}
-		
+
 		size_t storage = 64;
 		ret = malloc(sizeof(dir_entry) * storage);
 		size_t pos = 0;
-		
+
 		if (path[1] == ':' && (!path[2] || (path[2] == PATH_SEP[0] && !path[3]))) {
 			//we are in the root of a drive, add a virtual .. entry
 			//for navigating to the virtual root directory
 			ret[pos].name = strdup("..");
 			ret[pos++].is_dir = 1;
 		}
-		
+
 		do {
 			if (pos == storage) {
 				storage = storage * 2;
@@ -650,7 +653,7 @@ dir_entry *get_dir_list(char *path, size_t *numret)
 			ret[pos].name = strdup(file.cFileName);
 			ret[pos++].is_dir = (file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 		} while (FindNextFile(dir, &file));
-		
+
 		FindClose(dir);
 		if (numret) {
 			*numret = pos;
@@ -1074,7 +1077,7 @@ char const *get_config_dir()
 	static char* confdir;
 	if (!confdir) {
 		char const *base = get_userdata_dir();
-		if (base) {	
+		if (base) {
 			confdir = alloc_concat(base,  PATH_SEP "blastem");
 		}
 	}

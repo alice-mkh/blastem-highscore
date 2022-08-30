@@ -21,7 +21,7 @@ enum {
 
 #include "serialize.h"
 #include "zlib/zlib.h"
-typedef struct {
+typedef struct event_reader {
 	size_t storage;
 	uint8_t *socket_buffer;
 	size_t socket_buffer_size;

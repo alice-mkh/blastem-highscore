@@ -1,3 +1,5 @@
+#include <stdlib.h>
+#include <string.h>
 #include "cdd_mcu.h"
 #include "backend.h"
 
