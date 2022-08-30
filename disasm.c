@@ -51,7 +51,7 @@ void reference(disasm_context *context, uint32_t address)
 
 void add_label(disasm_context *context, const char *name, uint32_t address)
 {
-	reference(context, address);;
+	reference(context, address);
 	weak_label(context, name, address);
 }
 

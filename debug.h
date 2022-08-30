@@ -9,6 +9,7 @@
 #else
 #include "z80_to_x86.h"
 #endif
+#include "disasm.h"
 
 typedef enum {
 	TOKEN_NONE,
@@ -115,6 +116,8 @@ struct debug_root {
 	bp_def         *breakpoints;
 	disp_def       *displays;
 	tern_node      *commands;
+	tern_node      *symbols;
+	disasm_context *disasm;
 	resolver       resolve;
 	reader         read_mem;
 	setter         set;

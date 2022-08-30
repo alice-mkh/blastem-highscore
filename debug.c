@@ -625,7 +625,15 @@ uint8_t eval_expr(debug_root *root, expr *e, uint32_t *out)
 	{
 	case EXPR_SCALAR:
 		if (e->op.type == TOKEN_NAME) {
-			return root->resolve(root, e->op.v.str, out);
+			if (root->resolve(root, e->op.v.str, out)) {
+				return 1;
+			}
+			tern_val v;
+			if (tern_find(root->symbols, e->op.v.str, &v)) {
+				*out = v.intval;
+				return 1;
+			}
+			return 0;
 		} else {
 			*out = e->op.v.num;
 			return 1;
@@ -1654,6 +1662,62 @@ static uint8_t cmd_condition(debug_root *root, parsed_command *cmd)
 	return 1;
 }
 
+static void symbol_max_len(char *key, tern_val val, uint8_t valtype, void *data)
+{
+	size_t *max_len = data;
+	size_t len = strlen(key);
+	if (len > *max_len) {
+		*max_len = len;
+	}
+}
+
+static void print_symbol(char *key, tern_val val, uint8_t valtype, void *data)
+{
+	size_t *padding = data;
+	size_t len = strlen(key);
+	fputs(key, stdout);
+	while (len < *padding)
+	{
+		putchar(' ');
+		len++;
+	}
+	printf("%X\n", (uint32_t)val.intval);
+}
+
+static uint8_t cmd_symbols(debug_root *root, parsed_command *cmd)
+{
+	char *filename = cmd->raw ? strip_ws(cmd->raw) : NULL;
+	if (filename && *filename) {
+		FILE *f = fopen(filename, "r");
+		if (!f) {
+			fprintf(stderr, "Failed to open %s for reading\n", filename);
+			return 1;
+		}
+		char linebuf[1024];
+		while (fgets(linebuf, sizeof(linebuf), f))
+		{
+			char *line = strip_ws(linebuf);
+			if (*line) {
+				char *end;
+				uint32_t address = strtol(line, &end, 16);
+				if (end != line) {
+					if (*end == '=') {
+						char *name = strip_ws(end + 1);
+						add_label(root->disasm, name, address);
+						root->symbols = tern_insert_int(root->symbols, name, address);
+					}
+				}
+			}
+		}
+	} else {
+		size_t max_len = 0;
+		tern_foreach(root->symbols, symbol_max_len, &max_len);
+		max_len += 2;
+		tern_foreach(root->symbols, print_symbol, &max_len);
+	}
+	return 1;
+}
+
 static uint8_t cmd_delete_m68k(debug_root *root, parsed_command *cmd)
 {
 	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, cmd->args[0].value);
@@ -2116,6 +2180,17 @@ command_def common_commands[] = {
 		.max_args = 1,
 		.has_block = 1,
 		.accepts_else = 1
+	},
+	{
+		.names = (const char *[]){
+			"symbols", NULL
+		},
+		.usage = "symbols [FILENAME]",
+		.desc = "Loads a list of symbols from the file indicated by FILENAME or lists currently loaded symbols if FILENAME is omitted",
+		.impl = cmd_symbols,
+		.min_args = 0,
+		.max_args = 1,
+		.raw_args = 1
 	}
 };
 #define NUM_COMMON (sizeof(common_commands)/sizeof(*common_commands))
@@ -2603,6 +2678,16 @@ void add_commands(debug_root *root, command_def *defs, uint32_t num_commands)
 	}
 }
 
+static void symbol_map(char *key, tern_val val, uint8_t valtype, void *data)
+{
+	debug_root *root = data;
+	label_def *label = val.ptrval;
+	for (uint32_t i = 0; i < label->num_labels; i++)
+	{
+		root->symbols = tern_insert_int(root->symbols, label->labels[i], label->full_address);
+	}
+}
+
 debug_root *find_m68k_root(m68k_context *context)
 {
 	debug_root *root = find_root(context);
@@ -2612,6 +2697,7 @@ debug_root *find_m68k_root(m68k_context *context)
 		root->read_mem = read_m68k;
 		root->write_mem = write_m68k;
 		root->set = set_m68k;
+		root->disasm = create_68000_disasm();
 		switch (current_system->type)
 		{
 		case SYSTEM_GENESIS:
@@ -2621,15 +2707,18 @@ debug_root *find_m68k_root(m68k_context *context)
 				root->resolve = resolve_genesis;
 				add_commands(root, genesis_commands, NUM_GENESIS);
 				if (current_system->type == SYSTEM_SEGACD) {
+					add_segacd_maincpu_labels(root->disasm);
 					add_commands(root, scd_main_commands, NUM_SCD_MAIN);
 				}
 				break;
 			} else {
+				add_segacd_subcpu_labels(root->disasm);
 				add_commands(root, scd_sub_commands, NUM_SCD_SUB);
 			}
 		default:
 			root->resolve = resolve_m68k;
 		}
+		tern_foreach(root->disasm->labels, symbol_map, root);
 	}
 	return root;
 }
@@ -3293,7 +3382,7 @@ void debugger(m68k_context * context, uint32_t address)
 			do_print(root, format_str, cur->args[i].raw, cur->args[i].value);
 		}
 	}
-	m68k_disasm(&inst, input_buf);
+	m68k_disasm_labels(&inst, input_buf, root->disasm);
 	printf("%X: %s\n", address, input_buf);
 	debugger_repl(root);
 	return;
