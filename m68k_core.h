@@ -10,7 +10,7 @@
 #include "backend.h"
 #include "serialize.h"
 //#include "68kinst.h"
-struct m68kinst;
+typedef struct m68kinst m68kinst;
 
 #define NUM_MEM_AREAS 10
 #define NATIVE_MAP_CHUNKS (64*1024)
@@ -122,6 +122,7 @@ void m68k_invalidate_code_range(m68k_context *context, uint32_t start, uint32_t 
 void m68k_serialize(m68k_context *context, uint32_t pc, serialize_buffer *buf);
 void m68k_deserialize(deserialize_buffer *buf, void *vcontext);
 uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext);
+uint8_t m68k_is_terminal(m68kinst * inst);
 
 #endif //M68K_CORE_H_
 

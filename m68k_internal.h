@@ -50,7 +50,6 @@ void m68k_save_result(m68kinst * inst, m68k_options * opts);
 void jump_m68k_abs(m68k_options * opts, uint32_t address);
 void swap_ssp_usp(m68k_options * opts);
 code_ptr get_native_address(m68k_options *opts, uint32_t address);
-uint8_t m68k_is_terminal(m68kinst * inst);
 code_ptr get_native_address_trans(m68k_context * context, uint32_t address);
 void * m68k_retranslate_inst(uint32_t address, m68k_context * context);
 m68k_context *m68k_bp_dispatcher(m68k_context *context, uint32_t address);

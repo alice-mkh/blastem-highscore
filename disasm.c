@@ -304,3 +304,11 @@ disasm_context *create_68000_disasm(void)
 	return context;
 }
 
+disasm_context *create_z80_disasm(void)
+{
+	disasm_context *context = calloc(1, sizeof(disasm_context));
+	context->address_mask = 0xFFFF;
+	context->invalid_inst_addr_mask = 0;
+	context->visit_preshift = 0;
+	return context;
+}

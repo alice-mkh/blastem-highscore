@@ -1884,6 +1884,31 @@ static uint8_t cmd_backtrace_m68k(debug_root *root, parsed_command *cmd)
 	return 1;
 }
 
+static uint8_t cmd_disassemble_m68k(debug_root *root, parsed_command *cmd)
+{
+	m68k_context *context = root->cpu_context;
+	uint32_t address = root->address;
+	if (cmd->num_args) {
+		address = cmd->args[0].value;
+	}
+	char disasm_buf[1024];
+	m68kinst inst;
+	do {
+		label_def *def = find_label(root->disasm, address);
+		if (def) {
+			for (uint32_t i = 0; i < def->num_labels; i++)
+			{
+				printf("%s:\n", def->labels[i]);
+			}
+		}
+		
+		address = m68k_decode(m68k_instruction_fetch, context, &inst, address);
+		m68k_disasm_labels(&inst, disasm_buf, root->disasm);
+		printf("\t%s\n", disasm_buf);
+	} while(!m68k_is_terminal(&inst));
+	return 1;
+}
+
 static uint8_t cmd_vdp_sprites(debug_root *root, parsed_command *cmd)
 {
 	m68k_context *context = root->cpu_context;
@@ -2265,6 +2290,16 @@ command_def m68k_commands[] = {
 		.impl = cmd_delete_m68k,
 		.min_args = 1,
 		.max_args = 1
+	},
+	{
+		.names = (const char *[]){
+			"disassemble", "disasm", NULL
+		},
+		.usage = "disassemble [ADDRESS]",
+		.desc = "Disassemble code starting at ADDRESS if provided or the current address if not",
+		.impl = cmd_disassemble_m68k,
+		.min_args = 0,
+		.max_args = 1
 	}
 };
 
@@ -2505,6 +2540,32 @@ static uint8_t cmd_backtrace_z80(debug_root *root, parsed_command *cmd)
 	return 1;
 }
 
+static uint8_t cmd_disassemble_z80(debug_root *root, parsed_command *cmd)
+{
+	z80_context *context = root->cpu_context;
+	uint32_t address = root->address;
+	if (cmd->num_args) {
+		address = cmd->args[0].value;
+	}
+	char disasm_buf[1024];
+	z80inst inst;
+	do {
+		label_def *def = find_label(root->disasm, address);
+		if (def) {
+			for (uint32_t i = 0; i < def->num_labels; i++)
+			{
+				printf("%s:\n", def->labels[i]);
+			}
+		}
+		uint8_t *pc = get_native_pointer(address, (void **)context->mem_pointers, &context->Z80_OPTS->gen);
+		uint8_t *after = z80_decode(pc, &inst);
+		z80_disasm(&inst, disasm_buf, address);
+		address += after - pc;
+		printf("\t%s\n", disasm_buf);
+	} while(!z80_is_terminal(&inst));
+	return 1;
+}
+
 static uint8_t cmd_gen_m68k(debug_root *root, parsed_command *cmd)
 {
 	char *param = cmd->raw;
@@ -2618,6 +2679,16 @@ command_def z80_commands[] = {
 		.desc = "Remove breakpoint identified by BREAKPOINT",
 		.impl = cmd_delete_z80,
 		.min_args = 1,
+		.max_args = 1
+	},
+	{
+		.names = (const char *[]){
+			"disassemble", "disasm", NULL
+		},
+		.usage = "disassemble [ADDRESS]",
+		.desc = "Disassemble code starting at ADDRESS if provided or the current address if not",
+		.impl = cmd_disassemble_z80,
+		.min_args = 0,
 		.max_args = 1
 	}
 };
@@ -3238,6 +3309,7 @@ debug_root *find_z80_root(z80_context *context)
 		root->read_mem = read_z80;
 		root->write_mem = write_z80;
 		root->set = set_z80;
+		root->disasm = create_z80_disasm();
 	}
 	return root;
 }

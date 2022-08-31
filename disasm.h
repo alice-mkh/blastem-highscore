@@ -36,5 +36,6 @@ void process_m68k_vectors(disasm_context *context, uint16_t *table, uint8_t labe
 void add_segacd_maincpu_labels(disasm_context *context);
 void add_segacd_subcpu_labels(disasm_context *context);
 disasm_context *create_68000_disasm(void);
+disasm_context *create_z80_disasm(void);
 
 #endif //DISASM_H_
