@@ -286,6 +286,9 @@ void tern_foreach_int(tern_node *head, iter_fun fun, void *data, char *keybuf, i
 
 void tern_foreach(tern_node *head, iter_fun fun, void *data)
 {
+	if (!head) {
+		return;
+	}
 	//lame, but good enough for my purposes
 	char key[MAX_ITER_KEY+1];
 	tern_foreach_int(head, fun, data, key, 0);
