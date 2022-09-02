@@ -1122,7 +1122,7 @@ void view_controller_bindings(struct nk_context *context)
 			});
 		} else {
 			binding_box(context, bindings, "Right Shoulder", bind_box_left, font->height/2, bind_box_width,
-				selected_controller_info.variant == VARIANT_6B_BUMPERS ? 1 : 2,
+				selected_controller_info.variant == VARIANT_6B_RIGHT ? 2 : 1,
 				(int[]){
 				selected_controller_info.variant == VARIANT_6B_RIGHT ? SDL_CONTROLLER_BUTTON_LEFTSHOULDER : AXIS | SDL_CONTROLLER_AXIS_TRIGGERRIGHT,
 				AXIS | SDL_CONTROLLER_AXIS_TRIGGERLEFT
