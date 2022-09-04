@@ -1491,3 +1491,20 @@ T-172186 {
 		}
 	}
 }
+T-172176 {
+	name NHL 98
+	SRAM {
+		size 32768
+		bus odd
+	}
+	map {
+		0 {
+			device ROM
+			last 1FFFFF
+		}
+		200000 {
+			device SRAM
+			last 3FFFFF
+		}
+	}
+}
