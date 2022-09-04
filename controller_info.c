@@ -18,6 +18,7 @@ typedef struct {
 static heuristic heuristics[] = {
 	//TODO: Add more heuristic rules
 	{"DualShock 4", {.type = TYPE_PSX, .subtype = SUBTYPE_PS4}},
+	{"PS5", {.type = TYPE_PSX, .subtype = SUBTYPE_PS5}},
 	{"PS4", {.type = TYPE_PSX, .subtype = SUBTYPE_PS4}},
 	{"PS3", {.type = TYPE_PSX, .subtype = SUBTYPE_PS3}},
 	{"X360", {.type = TYPE_XBOX, .subtype = SUBTYPE_X360}},
@@ -39,9 +40,11 @@ static const char *subtype_names[] = {
 	"xbox",
 	"xbox 360",
 	"xbone",
+	"xbox elite",
 	"ps2",
 	"ps3",
 	"ps4",
+	"ps5",
 	"wiiu",
 	"switch",
 	"genesis",
@@ -51,10 +54,12 @@ static const char *subtype_human_names[] = {
 	"unknown",
 	"Xbos",
 	"Xbox 360",
-	"Xbox One",
+	"Xbox One/Series",
+	"Xbox Elite",
 	"PS2",
 	"PS3",
 	"PS4",
+	"PS5",
 	"Wii-U",
 	"Switch",
 	"Genesis",
@@ -272,13 +277,13 @@ static const char** label_source(controller_info *info)
 	} else if (info->type == TYPE_NINTENDO) {
 		return labels_nintendo;
 	} else if (info->type == TYPE_PSX) {
-		if (info->subtype == SUBTYPE_PS4) {
+		if (info->subtype >= SUBTYPE_PS4) {
 			return labels_ps4;
 		} else {
 			return labels_ps3;
 		}
 	} else if (info->type == TYPE_XBOX) {
-		if (info->subtype == SUBTYPE_XBONE) {
+		if (info->subtype >= SUBTYPE_XBONE) {
 			return labels_xbone;
 		} else {
 			return labels_xbox;
@@ -301,9 +306,33 @@ static const char** label_source(controller_info *info)
 const char *get_button_label(controller_info *info, int button)
 {
 #ifndef USE_FBDEV
+#if SDL_VERSION_ATLEAST(2,0,12)
+	if (info->subtype == SUBTYPE_XBOX_ELITE && button >= SDL_CONTROLLER_BUTTON_PADDLE1 && button <= SDL_CONTROLLER_BUTTON_PADDLE4) {
+		static char const * names[] = {"Paddle 1", "Paddle 2", "Paddle 3", "Paddle 4"};
+		return names[button - SDL_CONTROLLER_BUTTON_PADDLE1];
+	}
+	if (button == SDL_CONTROLLER_BUTTON_TOUCHPAD && (info->subtype == SUBTYPE_PS4 || info->subtype == SUBTYPE_PS5)) {
+		return "Touchpad";
+	}
+	if (button == SDL_CONTROLLER_BUTTON_MISC1) {
+		switch (info->subtype)
+		{
+		case SUBTYPE_XBONE:
+		case SUBTYPE_XBOX_ELITE:
+			return "Share";
+		case SUBTYPE_PS5:
+			return "Microphone";
+		case SUBTYPE_SWITCH:
+			return "Capture";
+		}
+	}
+#endif
 	if (button >= SDL_CONTROLLER_BUTTON_DPAD_UP) {
-		static char const * dirs[] = {"Up", "Down", "Left", "Right"};
-		return dirs[button - SDL_CONTROLLER_BUTTON_DPAD_UP];
+		if (button <= SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+			static char const * dirs[] = {"Up", "Down", "Left", "Right"};
+			return dirs[button - SDL_CONTROLLER_BUTTON_DPAD_UP];
+		}
+		return NULL;
 	}
 #endif
 	return label_source(info)[button];

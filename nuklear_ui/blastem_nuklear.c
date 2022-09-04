@@ -1467,11 +1467,11 @@ void view_controller_type(struct nk_context *context)
 {
 	if (nk_begin(context, "Controller Type", nk_rect(0, 0, render_width(), render_height()), 0)) {
 		controller_type_group(context, "Xbox", TYPE_XBOX, SUBTYPE_XBOX, (const char *[]){
-			"Original", "Xbox 360", "Xbox One"
-		}, 3);
+			"Original", "Xbox 360", "Xbox One/Series", "Xbox Elite"
+		}, 4);
 		controller_type_group(context, "Playstation", TYPE_PSX, SUBTYPE_PS3, (const char *[]){
-			"PS3", "PS4"
-		}, 2);
+			"PS3", "PS4", "PS5"
+		}, 3);
 		controller_type_group(context, "Sega", TYPE_SEGA, SUBTYPE_GENESIS, (const char *[]){
 			"Genesis", "Saturn"
 		}, 2);
