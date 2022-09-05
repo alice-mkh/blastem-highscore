@@ -1040,7 +1040,7 @@ static void external_slot(vdp_context * context)
 
 			context->flags |= FLAG_READ_FETCHED;
 		}
-	} else if (!(context->cd & 1) && !(context->flags & FLAG_READ_FETCHED)) {
+	} else if (!(context->cd & 1) && !(context->flags & (FLAG_READ_FETCHED|FLAG_PENDING))) {
 		switch(context->cd & 0xF)
 		{
 		case VRAM_READ:
@@ -3785,19 +3785,6 @@ uint16_t vdp_hv_counter_read(vdp_context * context)
 	return hv;
 }
 
-static void clear_pending(vdp_context *context)
-{
-	context->flags &= ~FLAG_PENDING;
-	context->address = context->address_latch;
-	//It seems like the DMA enable bit doesn't so much enable DMA so much
-	//as it enables changing CD5 from control port writes
-	if (context->regs[REG_MODE_2] & BIT_DMA_ENABLE) {
-		context->cd = context->cd_latch;
-	} else {
-		context->cd = (context->cd & 0x20) | (context->cd_latch & 0x1F);
-	}
-}
-
 int vdp_control_port_write(vdp_context * context, uint16_t value)
 {
 	//printf("control port write: %X at %d\n", value, context->cycles);
@@ -3805,9 +3792,16 @@ int vdp_control_port_write(vdp_context * context, uint16_t value)
 		return -1;
 	}
 	if (context->flags & FLAG_PENDING) {
-		context->address_latch = (context->address_latch & 0x3FFF) | (value << 14 & 0x1C000);
-		context->cd_latch = (context->cd_latch & 0x3) | ((value >> 2) & ~0x3 & 0xFF);
-		clear_pending(context);
+		context->address_latch = value << 14 & 0x1C000;
+		context->address = (context->address & 0x3FFF) | context->address_latch;
+		//It seems like the DMA enable bit doesn't so much enable DMA so much
+		//as it enables changing CD5 from control port writes
+		if (context->regs[REG_MODE_2] & BIT_DMA_ENABLE) {
+			context->cd = (context->cd & 0x3) | ((value >> 2) & ~0x3 & 0xFF);
+		} else {
+			context->cd = (context->cd & 0x23) | ((value >> 2) & ~0x23 & 0xFF);
+		}
+		context->flags &= ~FLAG_PENDING;
 		//Should these be taken care of here or after the first write?
 		context->flags &= ~FLAG_READ_FETCHED;
 		context->flags2 &= ~FLAG2_READ_PENDING;
@@ -3836,15 +3830,11 @@ int vdp_control_port_write(vdp_context * context, uint16_t value)
 		}
 	} else {
 		uint8_t mode_5 = context->regs[REG_MODE_2] & BIT_MODE_5;
-		context->address_latch = (context->address_latch & 0x1C000) | (value & 0x3FFF);
-		context->cd_latch = (context->cd_latch & 0x3C) | (value >> 14);
+		context->address = context->address_latch | (value & 0x3FFF);
+		context->cd = (context->cd & 0x3C) | (value >> 14);
 		if ((value & 0xC000) == 0x8000) {
 			//Register write
 			uint8_t reg = (value >> 8) & 0x1F;
-			// The fact that this is needed seems to pour some cold water on my theory
-			// about how the address latch actually works. Needs more search to definitively confirm
-			context->address = (context->address & 0x1C000) | (value & 0x3FFF);
-			context->cd = (context->cd & 0x3C) | (value >> 14);
 			if (reg < (mode_5 ? VDP_REGS : 0xB)) {
 				//printf("register %d set to %X\n", reg, value & 0xFF);
 				if (reg == REG_MODE_1 && (value & BIT_HVC_LATCH) && !(context->regs[reg] & BIT_HVC_LATCH)) {
@@ -3915,7 +3905,6 @@ int vdp_control_port_write(vdp_context * context, uint16_t value)
 			//context->flags &= ~FLAG_READ_FETCHED;
 			//context->flags2 &= ~FLAG2_READ_PENDING;
 		} else {
-			clear_pending(context);
 			context->flags &= ~FLAG_READ_FETCHED;
 			context->flags2 &= ~FLAG2_READ_PENDING;
 		}
@@ -3946,7 +3935,7 @@ int vdp_data_port_write(vdp_context * context, uint16_t value)
 		return -1;
 	}
 	if (context->flags & FLAG_PENDING) {
-		clear_pending(context);
+		context->flags &= ~FLAG_PENDING;
 		//Should these be cleared here?
 		context->flags &= ~FLAG_READ_FETCHED;
 		context->flags2 &= ~FLAG2_READ_PENDING;
@@ -3981,7 +3970,7 @@ int vdp_data_port_write(vdp_context * context, uint16_t value)
 void vdp_data_port_write_pbc(vdp_context * context, uint8_t value)
 {
 	if (context->flags & FLAG_PENDING) {
-		clear_pending(context);
+		context->flags &= ~FLAG_PENDING;
 		//Should these be cleared here?
 		context->flags &= ~FLAG_READ_FETCHED;
 		context->flags2 &= ~FLAG2_READ_PENDING;
@@ -4020,9 +4009,7 @@ void vdp_test_port_write(vdp_context * context, uint16_t value)
 
 uint16_t vdp_control_port_read(vdp_context * context)
 {
-	if (context->flags & FLAG_PENDING) {
-		clear_pending(context);
-	}
+	context->flags &= ~FLAG_PENDING;
 	context->flags2 &= ~FLAG2_BYTE_PENDING;
 	//Bits 15-10 are not fixed like Charles MacDonald's doc suggests, but instead open bus values that reflect 68K prefetch
 	uint16_t value = context->system->get_open_bus_value(context->system) & 0xFC00;
@@ -4072,7 +4059,7 @@ uint16_t vdp_control_port_read(vdp_context * context)
 uint16_t vdp_data_port_read(vdp_context * context)
 {
 	if (context->flags & FLAG_PENDING) {
-		clear_pending(context);
+		context->flags &= ~FLAG_PENDING;
 		//Should these be cleared here?
 		context->flags &= ~FLAG_READ_FETCHED;
 		context->flags2 &= ~FLAG2_READ_PENDING;
@@ -4103,10 +4090,7 @@ uint16_t vdp_data_port_read(vdp_context * context)
 
 uint8_t vdp_data_port_read_pbc(vdp_context * context)
 {
-	if (context->flags & FLAG_PENDING) {
-		clear_pending(context);
-	}
-	context->flags &= ~FLAG_READ_FETCHED;
+	context->flags &= ~(FLAG_PENDING | FLAG_READ_FETCHED);
 	context->flags2 &= ~FLAG2_BYTE_PENDING;
 
 	context->cd = VRAM_READ8;
@@ -4486,7 +4470,8 @@ void vdp_serialize(vdp_context *context, serialize_buffer *buf)
 	save_int32(buf, context->pending_vint_start);
 	save_int32(buf, context->pending_hint_start);
 	save_int32(buf, context->address_latch);
-	save_int8(buf, context->cd_latch);
+	//was cd_latch, for compatibility with older builds that expect it
+	save_int8(buf, context->cd);
 }
 
 void vdp_deserialize(deserialize_buffer *buf, void *vcontext)
@@ -4623,10 +4608,10 @@ void vdp_deserialize(deserialize_buffer *buf, void *vcontext)
 	context->pending_hint_start = load_int32(buf);
 	if (version > 2) {
 		context->address_latch = load_int32(buf);
-		context->cd_latch = load_int8(buf);
+		//was cd_latch, no longer used
+		load_int8(buf);
 	} else {
 		context->address_latch = context->address;
-		context->cd_latch = context->cd;
 	}
 	update_video_params(context);
 }

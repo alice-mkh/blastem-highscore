@@ -198,7 +198,6 @@ typedef struct {
 	uint32_t       frame;
 	uint32_t       vsram_size;
 	uint8_t        cd;
-	uint8_t        cd_latch;
 	uint8_t	       flags;
 	uint8_t        regs[VDP_REGS];
 	//cycle count in MCLKs
