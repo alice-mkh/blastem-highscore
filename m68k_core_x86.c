@@ -2393,7 +2393,6 @@ void translate_m68k_stop(m68k_options *opts, m68kinst *inst)
 void translate_m68k_trapv(m68k_options *opts, m68kinst *inst)
 {
 	code_info *code = &opts->gen.code;
-	cycles(&opts->gen, BUS);
 	flag_to_carry(opts, FLAG_V);
 	code_ptr no_trap = code->cur + 1;
 	jcc(code, CC_NC, no_trap);
@@ -2401,6 +2400,7 @@ void translate_m68k_trapv(m68k_options *opts, m68kinst *inst)
 	ldi_native(opts, inst->address+2, opts->gen.scratch1);
 	jmp(code, opts->trap);
 	*no_trap = code->cur - (no_trap + 1);
+	cycles(&opts->gen, BUS);
 }
 
 void translate_m68k_odd(m68k_options *opts, m68kinst *inst)

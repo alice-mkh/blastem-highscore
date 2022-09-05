@@ -1157,7 +1157,7 @@ void imul_irr(code_info *code, int32_t val, uint8_t src, uint8_t dst, uint8_t si
 	if (size == SZ_B) {
 		fatal_error("imul immediate only supports 16-bit sizes and up");
 	}
-	
+
 	x86_ir(code, OP_IMUL, dst, 0, val, src, size);
 }
 
@@ -1713,6 +1713,9 @@ void bit_rr(code_info *code, uint8_t op2, uint8_t src, uint8_t dst, uint8_t size
 {
 	check_alloc_code(code, 5);
 	code_ptr out = code->cur;
+	if (src >= AH && src <= BH || dst >= AH && dst <= BH) {
+		fatal_error("attempt to use *H reg in a bit instruction with bit number in register. opcode = %X\n", op2);
+	}
 	if (size == SZ_W) {
 		*(out++) = PRE_SIZE;
 	}
@@ -1741,6 +1744,9 @@ void bit_rrdisp(code_info *code, uint8_t op2, uint8_t src, uint8_t dst_base, int
 {
 	check_alloc_code(code, 9);
 	code_ptr out = code->cur;
+	if (src >= AH && src <= BH) {
+		fatal_error("attempt to use *H reg in a bit instruction with bit number in register. opcode = %X\n", op2);
+	}
 	if (size == SZ_W) {
 		*(out++) = PRE_SIZE;
 	}
@@ -1778,6 +1784,12 @@ void bit_ir(code_info *code, uint8_t op_ex, uint8_t val, uint8_t dst, uint8_t si
 {
 	check_alloc_code(code, 6);
 	code_ptr out = code->cur;
+	if (dst >= AH && dst <= BH) {
+		//bit instructions are never 8-bit so we can't directly specify the high byte regs
+		//but we can simulate that by adjusting the bit we're testing
+		dst -= AH;
+		val += 8;
+	}
 	if (size == SZ_W) {
 		*(out++) = PRE_SIZE;
 	}
@@ -2163,7 +2175,7 @@ uint32_t prep_args(code_info *code, uint32_t num_args, va_list args)
 	code->stack_off += 32;
 	adjust += 32;
 #endif
-	
+
 	return stack_args * sizeof(void *) + adjust;
 }
 
