@@ -1708,7 +1708,7 @@ void translate_m68k_bit(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 void translate_m68k_chk(m68k_options *opts, m68kinst *inst, host_ea *src_op, host_ea *dst_op)
 	{
 	code_info *code = &opts->gen.code;
-	cycles(&opts->gen, 6);
+	cycles(&opts->gen, 4);
 	if (dst_op->mode == MODE_REG_DIRECT) {
 		cmp_ir(code, 0, dst_op->base, inst->extra.size);
 	} else {
@@ -1762,7 +1762,7 @@ void translate_m68k_chk(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 	mov_ir(code, inst->address+isize, opts->gen.scratch1, SZ_D);
 	jmp(code, opts->trap);
 	*passed = code->cur - (passed+1);
-	cycles(&opts->gen, 4);
+	cycles(&opts->gen, 6);
 }
 
 static uint32_t divu(uint32_t dividend, m68k_context *context, uint32_t divisor_shift)
@@ -3207,7 +3207,7 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	shl_ir(code, 2, opts->gen.scratch1, SZ_D);
 	call(code, opts->read_32);
 	call(code, opts->native_addr_and_sync);
-	cycles(&opts->gen, 18);
+	cycles(&opts->gen, 14);
 	jmp_r(code, opts->gen.scratch1);
 
 	opts->retrans_stub = code->cur;
