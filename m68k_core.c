@@ -231,7 +231,7 @@ static void translate_m68k_jmp_jsr(m68k_options * opts, m68kinst * inst)
 		jmp_r(code, opts->gen.scratch1);
 		break;
 	case MODE_AREG_DISPLACE:
-		cycles(&opts->gen, BUS*2);
+		cycles(&opts->gen, BUS*2 + 2);
 		if (is_jsr) {
 			push_const(opts, inst->address+4);
 		}
@@ -240,7 +240,7 @@ static void translate_m68k_jmp_jsr(m68k_options * opts, m68kinst * inst)
 		jmp_r(code, opts->gen.scratch1);
 		break;
 	case MODE_AREG_INDEX_DISP8:
-		cycles(&opts->gen, BUS*3);//TODO: CHeck that this is correct
+		cycles(&opts->gen, BUS*3 + 2);
 		if (is_jsr) {
 			push_const(opts, inst->address+4);
 		}
@@ -257,7 +257,7 @@ static void translate_m68k_jmp_jsr(m68k_options * opts, m68kinst * inst)
 		jump_m68k_abs(opts, inst->src.params.regs.displacement + inst->address + 2);
 		break;
 	case MODE_PC_INDEX_DISP8:
-		cycles(&opts->gen, BUS*3);//TODO: CHeck that this is correct
+		cycles(&opts->gen, BUS*3 + 2);
 		if (is_jsr) {
 			push_const(opts, inst->address+4);
 		}
@@ -332,6 +332,7 @@ static void translate_m68k_rtr(m68k_options *opts, m68kinst * inst)
 	areg_to_native(opts, 7, opts->gen.scratch1);
 	call(code, opts->read_32);
 	addi_areg(opts, 4, 7);
+	cycles(&opts->gen, 2*BUS);
 	//Get native address and jump to it
 	call(code, opts->native_addr);
 	jmp_r(code, opts->gen.scratch1);

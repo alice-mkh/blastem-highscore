@@ -854,7 +854,7 @@ void translate_m68k_scc(m68k_options * opts, m68kinst * inst)
 	inst->extra.size = OPSIZE_BYTE;
 	translate_m68k_op(inst, &dst_op, opts, 1);
 	if (cond == COND_TRUE || cond == COND_FALSE) {
-		if ((inst->dst.addr_mode == MODE_REG || inst->dst.addr_mode == MODE_AREG) && inst->extra.cond == COND_TRUE) {
+		if ((inst->dst.addr_mode == MODE_REG || inst->dst.addr_mode == MODE_AREG) && cond == COND_TRUE) {
 			cycles(&opts->gen, 6);
 		} else {
 			cycles(&opts->gen, BUS);
@@ -1317,8 +1317,6 @@ void translate_m68k_arith(m68k_options *opts, m68kinst * inst, uint32_t flag_mas
 	} else if (size == OPSIZE_LONG) {
 		if (inst->op == M68K_CMP) {
 			numcycles = inst->src.addr_mode > MODE_AREG && inst->dst.addr_mode > MODE_AREG ? 4 : 6;
-		} else if (inst->op == M68K_AND && inst->variant == VAR_IMMEDIATE && inst->dst.addr_mode == MODE_REG) {
-			numcycles = 6;
 		} else if (inst->dst.addr_mode == MODE_REG) {
 			numcycles = inst->src.addr_mode <= MODE_AREG || inst->src.addr_mode == MODE_IMMEDIATE ? 8 : 6;
 		} else if (inst->dst.addr_mode == MODE_AREG) {
@@ -1616,12 +1614,15 @@ void translate_m68k_lsr(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 void translate_m68k_bit(m68k_options *opts, m68kinst *inst, host_ea *src_op, host_ea *dst_op)
 {
 	code_info *code = &opts->gen.code;
-	cycles(&opts->gen, inst->extra.size == OPSIZE_BYTE ? 4 : (
-			inst->op == M68K_BTST ? 6 : (inst->op == M68K_BCLR ? 10 : 8))
+	cycles(&opts->gen, inst->extra.size == OPSIZE_BYTE ? (dst_op->mode == MODE_IMMED ? 6 : 4) : (
+			inst->op == M68K_BCLR ? 8 : 6)
 	);
 	if (src_op->mode == MODE_IMMED) {
 		if (inst->extra.size == OPSIZE_BYTE) {
 			src_op->disp &= 0x7;
+		} else if (inst->op != M68K_BTST && src_op->disp > 15) {
+			//bit operations that need to save the result have a 2 cycle penalty when operating on the upper word
+			cycles(&opts->gen, 2);
 		}
 		if (dst_op->mode == MODE_REG_DIRECT) {
 			op_ir(code, inst, src_op->disp, dst_op->base, inst->extra.size);
@@ -1668,6 +1669,19 @@ void translate_m68k_bit(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 			//so we fake it by forcing the bit number to be modulo 8
 			and_ir(code, 7, src_op->base, SZ_D);
 			size = SZ_D;
+		}
+		if (inst->op != M68K_BTST && inst->extra.size != OPSIZE_BYTE) {
+			//bit operations that need to save the result have a 2 cycle penalty when operating on the upper word
+
+			if (src_op->mode == MODE_REG_DISPLACE8) {
+				cmp_irdisp(code, 16, src_op->base, src_op->disp, SZ_B);
+			} else {
+				cmp_ir(code, 16, src_op->base, SZ_B);
+			}
+			code_ptr jmp_off = code->cur + 1;
+			jcc(code, CC_C, jmp_off + 1);
+			cycles(&opts->gen, 2);
+			*jmp_off = code->cur - (jmp_off + 1);
 		}
 		if (dst_op->mode == MODE_IMMED) {
 			dst_op->base = src_op->base == opts->gen.scratch1 ? opts->gen.scratch2 : opts->gen.scratch1;
@@ -1795,7 +1809,7 @@ static uint32_t divs(uint32_t dividend, m68k_context *context, uint32_t divisor_
 		context->flags[FLAG_V] = 1;
 		context->flags[FLAG_N] = 1;
 		context->flags[FLAG_Z] = 0;
-		cycles += 2;
+		cycles += 4;
 		context->current_cycle += cycles * context->options->gen.clock_divider;
 		return orig_dividend;
 	}

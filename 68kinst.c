@@ -1154,7 +1154,6 @@ uint32_t m68k_decode(m68k_fetch_fun fetch, void *data, m68kinst * decoded, uint3
 #endif
 			} else {
 				decoded->op = M68K_SCC;
-				decoded->extra.cond = (opcode >> 8) & 0xF;
 				address = m68k_decode_op(opcode, address, fetch, data, OPSIZE_BYTE, &(decoded->dst));
 				if (address == INVALID_ADDRESS || !m68k_valid_immed_limited_dst(&decoded->dst)) {
 					decoded->op = M68K_INVALID;
