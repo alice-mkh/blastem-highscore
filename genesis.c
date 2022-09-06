@@ -1107,6 +1107,7 @@ static uint8_t io_read(uint32_t location, m68k_context * context)
 	//no refresh delays during IO access
 	refresh_counter += context->current_cycle - last_sync_cycle;
 	refresh_counter = refresh_counter % (MCLKS_PER_68K * REFRESH_INTERVAL);
+	last_sync_cycle = context->current_cycle;
 #endif
 	return value;
 }
@@ -1220,6 +1221,17 @@ static uint16_t unused_read(uint32_t location, void *vcontext)
 {
 	m68k_context *context = vcontext;
 	genesis_context *gen = context->system;
+#ifdef REFRESH_EMULATION
+	if (location >= 0x800000) {
+		//do refresh check here so we can avoid adding a penalty for a refresh that happens during an IO area access
+		refresh_counter += context->current_cycle - 4*MCLKS_PER_68K - last_sync_cycle;
+		context->current_cycle += REFRESH_DELAY * MCLKS_PER_68K * (refresh_counter / (MCLKS_PER_68K * REFRESH_INTERVAL));
+		refresh_counter += 4*MCLKS_PER_68K;
+		refresh_counter = refresh_counter % (MCLKS_PER_68K * REFRESH_INTERVAL);
+		last_sync_cycle = context->current_cycle;
+	}
+#endif
+
 	if (location < 0x800000 || (location >= 0xA13000 && location < 0xA13100) || (location >= 0xA12000 && location < 0xA12100)) {
 		//Only called if the cart/exp doesn't have a more specific handler for this region
 		return get_open_bus_value(&gen->header);
@@ -1274,6 +1286,16 @@ static void *unused_write(uint32_t location, void *vcontext, uint16_t value)
 {
 	m68k_context *context = vcontext;
 	genesis_context *gen = context->system;
+#ifdef REFRESH_EMULATION
+	if (location >= 0x800000) {
+		//do refresh check here so we can avoid adding a penalty for a refresh that happens during an IO area access
+		refresh_counter += context->current_cycle - 4*MCLKS_PER_68K - last_sync_cycle;
+		context->current_cycle += REFRESH_DELAY * MCLKS_PER_68K * (refresh_counter / (MCLKS_PER_68K * REFRESH_INTERVAL));
+		refresh_counter += 4*MCLKS_PER_68K;
+		refresh_counter = refresh_counter % (MCLKS_PER_68K * REFRESH_INTERVAL);
+		last_sync_cycle = context->current_cycle;
+	}
+#endif
 	uint8_t has_tmss = gen->version_reg & 0xF;
 	if (has_tmss && (location == 0xA14000 || location == 0xA14002)) {
 		gen->tmss_lock[location >> 1 & 1] = value;
