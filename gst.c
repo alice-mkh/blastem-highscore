@@ -95,7 +95,7 @@ uint32_t m68k_load_gst(m68k_context * context, FILE * gstfile)
 	} else {
 		context->aregs[8] = read_le_32(buffer + GST_68K_SSP_OFFSET);
 	}
-	
+
 	return pc;
 }
 
@@ -234,7 +234,7 @@ uint8_t vdp_load_gst(vdp_context * context, FILE * state_file)
 	}
 	for (uint16_t i = 0; i < VDP_REGS; i++)
 	{
-		vdp_control_port_write(context, 0x8000 | (i << 8) | tmp_buf[i]);
+		vdp_control_port_write(context, 0x8000 | (i << 8) | tmp_buf[i], context->cycles);
 	}
 	if (fread(tmp_buf, 1, CRAM_SIZE*2, state_file) != CRAM_SIZE*2) {
 		fputs("Failed to read CRAM from savestate\n", stderr);
@@ -433,7 +433,7 @@ uint32_t load_gst(genesis_context * gen, char * fname)
 	if (!pc) {
 		goto error_close;
 	}
-	
+
 	if (!vdp_load_gst(gen->vdp, gstfile)) {
 		goto error_close;
 	}
@@ -445,7 +445,7 @@ uint32_t load_gst(genesis_context * gen, char * fname)
 	}
 	gen->io.ports[0].control = 0x40;
 	gen->io.ports[1].control = 0x40;
-	
+
 	fseek(gstfile, GST_68K_RAM, SEEK_SET);
 	for (int i = 0; i < (32*1024);) {
 		if (fread(buffer, 1, sizeof(buffer), gstfile) != sizeof(buffer)) {
