@@ -634,7 +634,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 		} else if(vdp_port < 8) {
 			vdp_run_context_full(v_context, context->current_cycle);
 			before_cycle = v_context->cycles;
-			blocked = vdp_control_port_write(v_context, value);
+			blocked = vdp_control_port_write(v_context, value, context->current_cycle);
 			if (blocked) {
 				while (blocked) {
 					while(v_context->flags & FLAG_DMA_RUN) {
@@ -653,7 +653,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 					}
 
 					if (blocked < 0) {
-						blocked = vdp_control_port_write(v_context, value);
+						blocked = vdp_control_port_write(v_context, value, context->current_cycle);
 					} else {
 						blocked = 0;
 					}
@@ -719,7 +719,7 @@ static void * z80_vdp_port_write(uint32_t vdp_port, void * vcontext, uint8_t val
 			vdp_data_port_write(gen->vdp, value << 8 | value);
 		} else if (vdp_port < 8) {
 			vdp_run_context_full(gen->vdp, context->Z80_CYCLE);
-			vdp_control_port_write(gen->vdp, value << 8 | value);
+			vdp_control_port_write(gen->vdp, value << 8 | value, context->Z80_CYCLE);
 		} else {
 			fatal_error("Illegal write to HV Counter port %X\n", vdp_port);
 		}
@@ -752,10 +752,10 @@ static uint16_t vdp_port_read(uint32_t vdp_port, m68k_context * context)
 #endif
 	sync_components(context, 0);
 	vdp_context * v_context = gen->vdp;
-	uint32_t before_cycle = v_context->cycles;
+	uint32_t before_cycle = context->current_cycle;
 	if (vdp_port < 0x10) {
 		if (vdp_port < 4) {
-			value = vdp_data_port_read(v_context);
+			value = vdp_data_port_read(v_context, &context->current_cycle, MCLKS_PER_68K);
 		} else if(vdp_port < 8) {
 			value = vdp_control_port_read(v_context);
 		} else {
@@ -767,13 +767,12 @@ static uint16_t vdp_port_read(uint32_t vdp_port, m68k_context * context)
 	} else {
 		value = get_open_bus_value(&gen->header);
 	}
-	if (v_context->cycles != before_cycle) {
+	if (context->current_cycle != before_cycle) {
 		//printf("68K paused for %d (%d) cycles at cycle %d (%d) for read\n", v_context->cycles - context->current_cycle, v_context->cycles - before_cycle, context->current_cycle, before_cycle);
-		context->current_cycle = v_context->cycles;
 		//Lock the Z80 out of the bus until the VDP access is complete
 		genesis_context *gen = context->system;
 		gen->bus_busy = 1;
-		sync_z80(gen, v_context->cycles);
+		sync_z80(gen, context->current_cycle);
 		gen->bus_busy = 0;
 	}
 #ifdef REFRESH_EMULATION
@@ -818,12 +817,16 @@ static uint8_t z80_vdp_port_read(uint32_t vdp_port, void * vcontext)
 	if (vdp_port < 0x10) {
 		//These probably won't currently interact well with the 68K accessing the VDP
 		vdp_run_context(gen->vdp, context->Z80_CYCLE);
+		uint32_t before = context->Z80_CYCLE;
 		if (vdp_port < 4) {
-			ret = vdp_data_port_read(gen->vdp);
+			ret = vdp_data_port_read(gen->vdp, &context->Z80_CYCLE, MCLKS_PER_Z80);
 		} else if (vdp_port < 8) {
 			ret = vdp_control_port_read(gen->vdp);
 		} else {
 			ret = vdp_hv_counter_read(gen->vdp);
+		}
+		if (context->Z80_CYCLE != before) {
+			gen->m68k->current_cycle += context->Z80_CYCLE - before;
 		}
 	} else {
 		//TODO: Figure out the correct value today

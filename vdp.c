@@ -40,6 +40,7 @@
 #define VBLANK_START_H40 (LINE_CHANGE_H40+2)
 #define VBLANK_START_H32 (LINE_CHANGE_H32+2)
 #define FIFO_LATENCY    3
+#define READ_LATENCY    3
 
 #define BORDER_TOP_V24     27
 #define BORDER_TOP_V28     11
@@ -1019,6 +1020,11 @@ static void external_slot(vdp_context * context)
 			}
 
 			break;
+		default:
+			if (!(context->cd & 4) && !start->partial && (context->regs[REG_MODE_2] & (BIT_128K_VRAM|BIT_MODE_5)) != (BIT_128K_VRAM|BIT_MODE_5)) {
+				start->partial = 1;
+				return;
+			}
 		}
 		context->fifo_read = (context->fifo_read+1) & (FIFO_SIZE-1);
 		if (context->fifo_read == context->fifo_write) {
@@ -1040,7 +1046,7 @@ static void external_slot(vdp_context * context)
 
 			context->flags |= FLAG_READ_FETCHED;
 		}
-	} else if (!(context->cd & 1) && !(context->flags & (FLAG_READ_FETCHED|FLAG_PENDING))) {
+	} else if (!(context->cd & 1) && !(context->flags & (FLAG_READ_FETCHED|FLAG_PENDING)) && context->read_latency <= context->cycles) {
 		switch(context->cd & 0xF)
 		{
 		case VRAM_READ:
@@ -3785,7 +3791,7 @@ uint16_t vdp_hv_counter_read(vdp_context * context)
 	return hv;
 }
 
-int vdp_control_port_write(vdp_context * context, uint16_t value)
+int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_cycle)
 {
 	//printf("control port write: %X at %d\n", value, context->cycles);
 	if (context->flags & FLAG_DMA_RUN) {
@@ -3805,6 +3811,9 @@ int vdp_control_port_write(vdp_context * context, uint16_t value)
 		//Should these be taken care of here or after the first write?
 		context->flags &= ~FLAG_READ_FETCHED;
 		context->flags2 &= ~FLAG2_READ_PENDING;
+		if (!(context->cd & 1)) {
+			context->read_latency = cpu_cycle + ((context->regs[REG_MODE_4] & BIT_H40) ? 16 : 20)*READ_LATENCY;
+		}
 		//printf("New Address: %X, New CD: %X\n", context->address, context->cd);
 		if (context->cd & 0x20) {
 			//
@@ -3918,7 +3927,7 @@ void vdp_control_port_write_pbc(vdp_context *context, uint8_t value)
 		uint16_t full_val = value << 8 | context->pending_byte;
 		context->flags2 &= ~FLAG2_BYTE_PENDING;
 		//TODO: Deal with fact that Vbus->VDP DMA doesn't do anything in PBC mode
-		vdp_control_port_write(context, full_val);
+		vdp_control_port_write(context, full_val, context->cycles);
 		if (context->cd == VRAM_READ) {
 			context->cd = VRAM_READ8;
 		}
@@ -4056,7 +4065,7 @@ uint16_t vdp_control_port_read(vdp_context * context)
 	return value;
 }
 
-uint16_t vdp_data_port_read(vdp_context * context)
+uint16_t vdp_data_port_read(vdp_context * context, uint32_t *cpu_cycle, uint32_t cpu_divider)
 {
 	if (context->flags & FLAG_PENDING) {
 		context->flags &= ~FLAG_PENDING;
@@ -4081,10 +4090,27 @@ uint16_t vdp_data_port_read(vdp_context * context)
 		context->system->enter_debugger = 1;
 		return context->prefetch;
 	}
+	uint32_t starting_cycle = context->cycles;
 	while (!(context->flags & FLAG_READ_FETCHED)) {
 		vdp_run_context_full(context, context->cycles + ((context->regs[REG_MODE_4] & BIT_H40) ? 16 : 20));
 	}
 	context->flags &= ~FLAG_READ_FETCHED;
+	//TODO: Make some logic analyzer captures to better characterize what's happening with read latency here
+	if (context->cycles != starting_cycle) {
+		uint32_t delta = context->cycles - *cpu_cycle;
+		uint32_t cpu_delta = delta / cpu_divider;
+		if (delta % cpu_divider) {
+			cpu_delta++;
+		}
+		*cpu_cycle += cpu_delta * cpu_divider;
+		if (*cpu_cycle - context->cycles < 2) {
+			context->read_latency = context->cycles + ((context->regs[REG_MODE_4] & BIT_H40) ? 16 : 20)*(READ_LATENCY - 1);
+		} else {
+			context->read_latency = context->cycles + ((context->regs[REG_MODE_4] & BIT_H40) ? 16 : 20)*READ_LATENCY;
+		}
+	} else {
+		context->read_latency = *cpu_cycle + ((context->regs[REG_MODE_4] & BIT_H40) ? 16 : 20)*(READ_LATENCY - 1);
+	}
 	return context->prefetch;
 }
 
@@ -4120,6 +4146,11 @@ void vdp_adjust_cycles(vdp_context * context, uint32_t deduction)
 			}
 			idx = (idx+1) & (FIFO_SIZE-1);
 		} while(idx != context->fifo_write);
+	}
+	if (context->read_latency >= deduction) {
+		context->read_latency -= deduction;
+	} else {
+		context->read_latency = 0;
 	}
 }
 
