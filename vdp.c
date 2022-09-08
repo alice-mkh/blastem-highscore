@@ -654,7 +654,7 @@ static void scan_sprite_table(uint32_t line, vdp_context * context)
 		}
 		context->sprite_index &= 0x7F;
 		//TODO: Implement squirelly behavior documented by Kabuto
-		if (context->sprite_index >= context->max_sprites_frame) {
+		if (context->sprite_index >= MAX_SPRITES_FRAME) {
 			context->sprite_index = 0;
 			return;
 		}
@@ -673,7 +673,7 @@ static void scan_sprite_table(uint32_t line, vdp_context * context)
 		if (context->sprite_index && ((uint8_t)context->slot_counter) < context->max_sprites_line)
 		{
 			//TODO: Implement squirelly behavior documented by Kabuto
-			if (context->sprite_index >= context->max_sprites_frame) {
+			if (context->sprite_index >= MAX_SPRITES_FRAME) {
 				context->sprite_index = 0;
 				return;
 			}
@@ -774,7 +774,11 @@ static void read_sprite_x(uint32_t line, vdp_context * context)
 				ymask = 0x1FF;
 				ymin = 128;
 			}
-			uint16_t att_addr = mode5_sat_address(context) + context->sprite_info_list[context->cur_slot].index * 8 + 4;
+			uint8_t index = context->sprite_info_list[context->cur_slot].index;
+			if (!(context->regs[REG_MODE_4] & BIT_H40)) {
+				index &= MAX_SPRITES_FRAME_H32 - 1;
+			}
+			uint16_t att_addr = mode5_sat_address(context) + index * 8 + 4;
 			uint16_t tileinfo = (context->vdpmem[att_addr] << 8) | context->vdpmem[att_addr+1];
 			uint8_t pal_priority = (tileinfo >> 9) & 0x70;
 			uint8_t row;
