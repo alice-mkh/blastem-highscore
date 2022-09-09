@@ -1046,7 +1046,7 @@ static void scd_peripherals_run(segacd_context *cd, uint32_t cycle)
 
 //TODO: do some logic analyzer captuers to get actual values
 #define REFRESH_INTERVAL 256
-#define REFRESH_DELAY 4
+#define REFRESH_DELAY 2
 
 static m68k_context *sync_components(m68k_context * context, uint32_t address)
 {
