@@ -29,6 +29,7 @@ typedef struct {
 	uint8_t  ctrl1;
 	uint8_t  ar;
 	uint8_t  ar_mask;
+	uint8_t  triggered;
 	uint8_t  sync_counter;
 } lc8951;
 

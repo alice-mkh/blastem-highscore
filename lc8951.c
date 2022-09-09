@@ -143,6 +143,7 @@ void lc8951_reg_write(lc8951 *context, uint8_t value)
 			uint16_t transfer_size = context->regs[DBCL] | (context->regs[DBCH] << 8);
 			context->transfer_end = context->cycle + transfer_size * context->cycles_per_byte;
 			context->next_byte_cycle = context->cycle;
+			context->triggered = 1;
 			printf("DTTRG: size %u, cycle %u, end %u\n", transfer_size, context->cycle, context->transfer_end);
 		}
 		break;
@@ -278,6 +279,7 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 						}
 						context->transfer_end = CYCLE_NEVER;
 						context->next_byte_cycle = CYCLE_NEVER;
+						context->triggered = 0;
 					}
 				}
 			} else {
@@ -291,19 +293,17 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 
 void lc8951_resume_transfer(lc8951 *context, uint32_t cycle)
 {
-	if (context->transfer_end == CYCLE_NEVER && (context->ifctrl & BIT_DOUTEN)) {
+	if (context->triggered && context->transfer_end == CYCLE_NEVER && (context->ifctrl & BIT_DOUTEN)) {
 		uint16_t transfer_size = context->regs[DBCL] | (context->regs[DBCH] << 8);
-		if (transfer_size != 0xFFFF) {
-			//HACK!!! Work around Sub CPU running longer than we would like and dragging other components with it
-			uint32_t step_diff = (context->cycle - cycle) / context->clock_step;
-			if (step_diff) {
-				context->cycle -= step_diff * context->clock_step;
-			}
-			context->transfer_end = context->cycle + transfer_size * context->cycles_per_byte;
-			context->next_byte_cycle = context->cycle;
-			if (step_diff) {
-				lc8951_run(context, cycle);
-			}
+		//HACK!!! Work around Sub CPU running longer than we would like and dragging other components with it
+		uint32_t step_diff = (context->cycle - cycle) / context->clock_step;
+		if (step_diff) {
+			context->cycle -= step_diff * context->clock_step;
+		}
+		context->transfer_end = context->cycle + transfer_size * context->cycles_per_byte;
+		context->next_byte_cycle = context->cycle;
+		if (step_diff) {
+			lc8951_run(context, cycle);
 		}
 	}
 }
