@@ -2991,9 +2991,12 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	*code = tmp_code;
 
 	opts->gen.handle_cycle_limit_int = code->cur;
-	//calculate stack adjust size
-	add_ir(code, 16-sizeof(void*), RSP, SZ_PTR);
+	//calculate address adjust for sync return
+	check_cycles_int(&opts->gen, 0);
 	uint32_t adjust_size = code->cur - opts->gen.handle_cycle_limit_int;
+	code->cur = opts->gen.handle_cycle_limit_int;
+	add_ir(code, 16-sizeof(void *), RSP, SZ_PTR);
+	adjust_size -= code->cur - opts->gen.handle_cycle_limit_int;
 	code->cur = opts->gen.handle_cycle_limit_int;
 	//handle trace mode
 	cmp_irdisp(code, 0, opts->gen.context_reg, offsetof(m68k_context, trace_pending), SZ_B);
@@ -3026,7 +3029,7 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	//fetch return address and adjust RSP
 	pop_r(code, opts->gen.scratch1);
 	add_ir(code, 16-sizeof(void *), RSP, SZ_PTR);
-	add_ir(code, adjust_size, opts->gen.scratch1, SZ_PTR);
+	sub_ir(code, adjust_size, opts->gen.scratch1, SZ_PTR);
 	//save return address for restoring later
 	mov_rrdisp(code, opts->gen.scratch1, opts->gen.context_reg, offsetof(m68k_context, resume_pc), SZ_PTR);
 	retn(code);
