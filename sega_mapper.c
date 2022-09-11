@@ -5,10 +5,11 @@ uint16_t read_sram_w(uint32_t address, m68k_context * context)
 {
 	genesis_context * gen = context->system;
 	address &= gen->save_ram_mask;
+	uint16_t *word_storage = (uint16_t *)gen->save_storage;
 	switch(gen->save_type)
 	{
 	case RAM_FLAG_BOTH:
-		return gen->save_storage[address] << 8 | gen->save_storage[address+1];
+		return word_storage[address >> 1];
 	case RAM_FLAG_EVEN:
 		return gen->save_storage[address >> 1] << 8 | 0xFF;
 	case RAM_FLAG_ODD:
@@ -24,7 +25,7 @@ uint8_t read_sram_b(uint32_t address, m68k_context * context)
 	switch(gen->save_type)
 	{
 	case RAM_FLAG_BOTH:
-		return gen->save_storage[address];
+		return gen->save_storage[address ^ 1];
 	case RAM_FLAG_EVEN:
 		if (address & 1) {
 			return 0xFF;
@@ -53,12 +54,12 @@ m68k_context * write_sram_area_w(uint32_t address, m68k_context * context, uint1
 		return context;
 	}
 	if ((gen->bank_regs[0] & 0x3) == 1) {
+		uint16_t *word_storage = (uint16_t *)gen->save_storage;
 		address &= gen->save_ram_mask;
 		switch(gen->save_type)
 		{
 		case RAM_FLAG_BOTH:
-			gen->save_storage[address] = value >> 8;
-			gen->save_storage[address+1] = value;
+			word_storage[address >> 1] = value;
 			break;
 		case RAM_FLAG_EVEN:
 			gen->save_storage[address >> 1] = value >> 8;
@@ -79,7 +80,7 @@ m68k_context * write_sram_area_b(uint32_t address, m68k_context * context, uint8
 		switch(gen->save_type)
 		{
 		case RAM_FLAG_BOTH:
-			gen->save_storage[address] = value;
+			gen->save_storage[address ^ 1] = value;
 			break;
 		case RAM_FLAG_EVEN:
 			if (!(address & 1)) {
