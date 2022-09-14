@@ -29,7 +29,8 @@ enum {
 	IO_HEARTBEAT_TRAINER
 };
 
-typedef struct {
+typedef struct io_port io_port;
+struct io_port {
 	union {
 		struct {
 			uint32_t timeout_cycle;
@@ -76,6 +77,17 @@ typedef struct {
 			uint8_t  cmd;
 			uint8_t  remaining_bytes;
 		} heartbeat_trainer;
+		struct {
+			io_port  *ports;
+			uint32_t ready_cycle;
+			uint8_t  tr_counter;
+			uint8_t  tap_num;
+			uint8_t  device_ids[4];
+			uint8_t  data[4];
+			uint8_t  cur_port;
+			uint8_t  port_start;
+			uint8_t  reset_state;
+		} multitap;
 	} device;
 	uint8_t  output;
 	uint8_t  control;
@@ -92,7 +104,7 @@ typedef struct {
 	uint8_t  serial_receiving;
 	uint8_t  serial_ctrl;
 	uint8_t  device_type;
-} io_port;
+};
 
 typedef struct {
 	io_port	ports[3];

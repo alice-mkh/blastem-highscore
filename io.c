@@ -35,7 +35,7 @@ const char * device_type_names[] = {
 	"XBAND Keyboard",
 	"Menacer",
 	"Justifier",
-	"Sega multi-tap",
+	"Sega Multi-tap",
 	"EA 4-way Play cable A",
 	"EA 4-way Play cable B",
 	"Sega Parallel Transfer Board",
@@ -97,7 +97,16 @@ static io_port *find_gamepad(sega_io *io, uint8_t gamepad_num)
 		}
 		if (port->device_type == IO_HEARTBEAT_TRAINER && port->device.heartbeat_trainer.device_num == gamepad_num) {
 			return port;
-		} 
+		}
+		if (port->device_type == IO_SEGA_MULTI) {
+			for (int j = 0; j < 4; j++)
+			{
+				io_port *tap_port = port->device.multitap.ports + j;
+				if (tap_port->device_type < IO_MOUSE && tap_port->device.pad.gamepad_num == gamepad_num) {
+					return tap_port;
+				}
+			}
+		}
 	}
 	return NULL;
 }
@@ -241,6 +250,10 @@ void process_device(char * device_type, io_port * port)
 	{
 		return;
 	}
+	io_port *old_ports = NULL;
+	if (port->device_type == IO_SEGA_MULTI) {
+		old_ports = port->device.multitap.ports;
+	}
 
 	const int gamepad_len = strlen("gamepad");
 	if (startswith(device_type, "gamepad"))
@@ -306,7 +319,20 @@ void process_device(char * device_type, io_port * port)
 			port->device.stream.data_fd = -1;
 			port->device.stream.listen_fd = -1;
 		}
+	} else if(startswith(device_type, "sega_multitap.")) {
+		if (port->device_type != IO_SEGA_MULTI) {
+			port->device_type = IO_SEGA_MULTI;
+			port->device.multitap.ports = old_ports ? old_ports : calloc(4, sizeof(io_port));
+			port->device.multitap.tap_num = device_type[strlen("sega_multitap.")] - '0';
+			if (!old_ports) {
+				port->device.multitap.tr_counter = 0;
+				port->device.multitap.ready_cycle = CYCLE_NEVER;
+				port->input[0] = 0x13;
+			}
+			old_ports = NULL;
+		}
 	}
+	free(old_ports);
 }
 
 char * io_name(int i)
@@ -450,6 +476,23 @@ cleanup_sock:
 				memset(ports[i].device.heartbeat_trainer.nv_memory, 0xFF, bufsize);
 			}
 			ports[i].device.heartbeat_trainer.state = HBPT_NEED_INIT;
+		} else if (ports[i].device_type == IO_SEGA_MULTI) {
+			char path[] = "io\0sega_multitap.1\0";
+			path[17] = '0' + ports[i].device.multitap.tap_num;
+			tern_node *port_defs = tern_find_path(config, path, TVAL_NODE).ptrval;
+			debug_message("IO port %s connected to Sega multitap %d\n", io_name(i), ports[i].device.multitap.tap_num);
+			for (int j = 0; j < 4; j++)
+			{
+				char port_num[] = {'1' + j, 0, 0};
+				char *dev_type = tern_find_ptr(port_defs, port_num);
+				process_device(dev_type, ports[i].device.multitap.ports + j);
+				debug_message("\tTap port %d connected to device '%s'\n", j + 1, device_type_names[ports[i].device.multitap.ports[j].device_type]);
+				if (ports[i].control & ports[i].output & 0x40) {
+					io_control_write(ports[i].device.multitap.ports + j, 0x40, 0);
+					io_data_write(ports[i].device.multitap.ports + j, 0x40, 0);
+				}
+			}
+			
 		} else {
 			debug_message("IO port %s connected to device '%s'\n", io_name(i), device_type_names[ports[i].device_type]);
 		}
@@ -459,7 +502,28 @@ cleanup_sock:
 
 #define TH 0x40
 #define TR 0x20
+#define TL 0x10
 #define TH_TIMEOUT 56000
+#define SLOW_RISE_DEVICE (30*7)
+#define SLOW_RISE_INPUT (12*7)
+
+static uint8_t get_output_value(io_port *port, uint32_t current_cycle, uint32_t slow_rise_delay)
+{
+	uint8_t output = (port->control | 0x80) & port->output;
+	for (int i = 0; i < 8; i++)
+	{
+		if (!(port->control & 1 << i)) {
+			if (port->slow_rise_start[i] != CYCLE_NEVER) {
+				if (current_cycle - port->slow_rise_start[i] >= slow_rise_delay) {
+					output |= 1 << i;
+				}
+			} else {
+				output |= 1 << i;
+			}
+		}
+	}
+	return output;
+}
 
 void mouse_check_ready(io_port *port, uint32_t current_cycle)
 {
@@ -485,6 +549,145 @@ void mouse_check_ready(io_port *port, uint32_t current_cycle)
 	}
 }
 
+void multitap_check_ready(io_port *port, uint32_t current_cycle)
+{
+	if (current_cycle >= port->device.multitap.ready_cycle) {
+		if (port->device.multitap.reset_state) {
+			uint8_t output = get_output_value(port, current_cycle, SLOW_RISE_DEVICE);
+			if (output & TR) {
+				port->input[0] |= TL;
+				port->device.multitap.reset_state = 0;
+			} else {
+				port->input[0] &= TR;
+			}
+			port->device.multitap.ready_cycle = CYCLE_NEVER;
+			return;
+		}
+		port->device.multitap.tr_counter++;
+		port->device.multitap.ready_cycle = CYCLE_NEVER;
+		switch (port->device.multitap.tr_counter)
+		{
+		case 1:
+			for (int i = 0; i < 4; i++)
+			{
+				uint8_t id = io_data_read(port->device.multitap.ports + i, current_cycle);
+				io_data_write(port->device.multitap.ports + i, 0, current_cycle);
+				uint8_t value = io_data_read(port->device.multitap.ports + i, current_cycle);
+				uint8_t pad_data = (id & 0x3F) | (value << 2 & 0xC0);
+				id = (id & 0xA) | (id << 1 & 0xA);
+				id |= (value & 0x5) | (value >> 1 & 0x5);
+				id = (id & 0x9) | (id << 1 & 0x4) | (id >> 1 & 0x2);
+				if (id == 0xD || id == 0xC) {
+					port->device.multitap.data[i] = pad_data;
+					io_data_write(port->device.multitap.ports + i, 0x40, current_cycle);
+				} else if (id == 0x3) {
+					//set TR to output for mouse
+					io_control_write(port->device.multitap.ports + i, 0x60, current_cycle);
+				}
+				port->device.multitap.device_ids[i] = id;
+			}
+			port->input[0] = 0;
+			break;
+		case 2:
+			for (int i = 0; i < 4; i++)
+			{
+				if (port->device.multitap.device_ids[i] == 0xC || port->device.multitap.device_ids[i] == 0xD) {
+					io_data_write(port->device.multitap.ports + i, 0, current_cycle);
+				} else if (port->device.multitap.device_ids[i] == 0x3) {
+					//TODO: Fix delays so mouse has enough time to respond
+					io_data_write(port->device.multitap.ports + i, 0x20, current_cycle);
+				}
+			}
+			port->input[0] = 0x10;
+			break;
+		case 3:
+			for (int i = 0; i < 4; i++)
+			{
+				if (port->device.multitap.device_ids[i] == 0xC || port->device.multitap.device_ids[i] == 0xD) {
+					io_data_write(port->device.multitap.ports + i, 0x40, current_cycle);
+					io_data_write(port->device.multitap.ports + i, 0, current_cycle);
+					uint8_t value = io_data_read(port->device.multitap.ports + i, current_cycle);
+					if (value & 0xF) {
+						//3 button
+						port->device.multitap.device_ids[i] = 0;
+					} else {
+						port->device.multitap.device_ids[i] = 1;
+					}
+				} else if (port->device.multitap.device_ids[i] == 0xC) {
+					//TODO: Fix delays so mouse has enough time to respond
+					io_data_write(port->device.multitap.ports + i, 0, current_cycle);
+					port->device.multitap.device_ids[i] = 2;
+				} else {
+					port->device.multitap.device_ids[i] = 0xF;
+				}
+			}
+			port->input[0] = port->device.multitap.device_ids[0];
+			break;
+		case 4:
+			port->input[0] = 0x10 | port->device.multitap.device_ids[1];
+			break;
+		case 5:
+			port->input[0] = port->device.multitap.device_ids[2];
+			break;
+		case 6:
+			port->input[0] = 0x10 | port->device.multitap.device_ids[3];
+			port->device.multitap.cur_port = 0;
+			port->device.multitap.port_start = 7;
+			break;
+		default: {
+			port->input[0] = (port->input[0] & ~TL) | ((~port->input[0]) & TL);
+			uint8_t tr_diff = port->device.multitap.tr_counter - port->device.multitap.port_start;
+			for (;;)
+			{
+				if (port->device.multitap.cur_port > 3) {
+					return;
+				}
+				switch (port->device.multitap.device_ids[port->device.multitap.cur_port])
+				{
+				case 0:
+					if (tr_diff) {
+						port->input[0] = (port->input[0] & 0xF0) | (port->device.multitap.data[port->device.multitap.cur_port] >> 4);
+						port->device.multitap.cur_port++;
+						port->device.multitap.port_start = port->device.multitap.tr_counter + 1;
+					} else {
+						port->input[0] = (port->input[0] & 0xF0) | (port->device.multitap.data[port->device.multitap.cur_port] & 0xF);
+					}
+					return;
+				case 1:
+					if (tr_diff == 2) {
+						uint8_t value = io_data_read(port->device.multitap.ports + port->device.multitap.cur_port, current_cycle);
+						port->input[0] = (port->input[0] & 0xF0) | (value & 0xF);
+						//finish 6-button cycle
+						io_data_write(port->device.multitap.ports + port->device.multitap.cur_port, 0, current_cycle);
+						port->device.multitap.cur_port++;
+						port->device.multitap.port_start = port->device.multitap.tr_counter + 1;
+					} else if (tr_diff) {
+						io_data_write(port->device.multitap.ports + port->device.multitap.cur_port, 0x40, current_cycle);
+						port->input[0] = (port->input[0] & 0xF0) | (port->device.multitap.data[port->device.multitap.cur_port] >> 4);
+					} else {
+						port->input[0] = (port->input[0] & 0xF0) | (port->device.multitap.data[port->device.multitap.cur_port] & 0xF);
+					}
+					return;
+				case 2: {
+					io_port *dst_port = port->device.multitap.ports + port->device.multitap.cur_port;
+					uint8_t value = io_data_read(dst_port, current_cycle);
+					io_data_write(dst_port, (~dst_port->output) & TR, current_cycle);
+					if (tr_diff == 5) {
+						port->device.multitap.cur_port++;
+						port->device.multitap.port_start = port->device.multitap.tr_counter + 1;
+					}
+					return;
+				}
+				default:
+					port->device.multitap.cur_port++;
+					port->device.multitap.port_start = port->device.multitap.tr_counter;
+				}
+			}
+		}
+		}
+	}
+}
+
 void io_adjust_cycles(io_port * port, uint32_t current_cycle, uint32_t deduction)
 {
 	/*uint8_t control = pad->control | 0x80;
@@ -504,6 +707,15 @@ void io_adjust_cycles(io_port * port, uint32_t current_cycle, uint32_t deduction
 		mouse_check_ready(port, current_cycle);
 		if (port->device.mouse.ready_cycle != CYCLE_NEVER) {
 			port->device.mouse.ready_cycle -= deduction;
+		}
+	} else if (port->device_type == IO_SEGA_MULTI) {
+		multitap_check_ready(port, current_cycle);
+		if (port->device.multitap.ready_cycle != CYCLE_NEVER) {
+			port->device.multitap.ready_cycle -= deduction;
+		}
+		for (int i = 0; i < 4; i++)
+		{
+			io_adjust_cycles(port->device.multitap.ports + i, current_cycle, deduction);
 		}
 	}
 	for (int i = 0; i < 8; i++)
@@ -1021,8 +1233,9 @@ void io_control_write(io_port *port, uint8_t value, uint32_t current_cycle)
 
 void io_data_write(io_port * port, uint8_t value, uint32_t current_cycle)
 {
-	uint8_t old_output = (port->control & port->output) | (~port->control & 0xFF);
-	uint8_t output = (port->control & value) | (~port->control & 0xFF);
+	uint8_t old_output = get_output_value(port, current_cycle, SLOW_RISE_DEVICE);
+	port->output = value;
+	uint8_t output = get_output_value(port, current_cycle, SLOW_RISE_DEVICE);
 	switch (port->device_type)
 	{
 	case IO_GAMEPAD6:
@@ -1135,6 +1348,33 @@ void io_data_write(io_port * port, uint8_t value, uint32_t current_cycle)
 			}
 		}
 		break;
+	case IO_SEGA_MULTI:
+		multitap_check_ready(port, current_cycle);
+		if (output & TH) {
+			//request is over
+			port->device.multitap.tr_counter = 0;
+			if ((output & TR) != (old_output & TR)) {
+				port->device.multitap.ready_cycle = current_cycle + 16 * 7;
+				port->device.multitap.reset_state = 1;
+			} else if (!port->device.multitap.reset_state) {
+				port->device.multitap.ready_cycle = CYCLE_NEVER;
+				port->input[0] = 0x13;
+			}
+			for (int i = 0; i < 4; i++)
+			{
+				io_control_write(port->device.multitap.ports + i, 0x40, current_cycle);
+				io_data_write(port->device.multitap.ports + i, 0x40, current_cycle);
+			}
+		} else {
+			if (old_output & TH) {
+				port->input[0] = 0x1F;
+			}
+			if ((output & TR) != (old_output & TR)) {
+				//TODO: measure actual delays
+				port->device.multitap.ready_cycle = current_cycle + 16 * 7;
+			}
+		}
+		break;
 #ifndef _WIN32
 	case IO_GENERIC:
 		wait_for_connection(port);
@@ -1174,27 +1414,6 @@ uint8_t get_scancode_bytes(io_port *port)
 	} while (read_pos != port->device.keyboard.write_pos);
 	
 	return bytes;
-}
-
-#define SLOW_RISE_DEVICE (30*7)
-#define SLOW_RISE_INPUT (12*7)
-
-static uint8_t get_output_value(io_port *port, uint32_t current_cycle, uint32_t slow_rise_delay)
-{
-	uint8_t output = (port->control | 0x80) & port->output;
-	for (int i = 0; i < 8; i++)
-	{
-		if (!(port->control & 1 << i)) {
-			if (port->slow_rise_start[i] != CYCLE_NEVER) {
-				if (current_cycle - port->slow_rise_start[i] >= slow_rise_delay) {
-					output |= 1 << i;
-				}
-			} else {
-				output |= 1 << i;
-			}
-		}
-	}
-	return output;
 }
 
 uint8_t io_data_read(io_port * port, uint32_t current_cycle)
@@ -1450,6 +1669,11 @@ uint8_t io_data_read(io_port * port, uint32_t current_cycle)
 		device_driven = 0x1F;
 		break;
 	}
+	case IO_SEGA_MULTI:
+		multitap_check_ready(port, current_cycle);
+		device_driven = 0x1F;
+		input = port->input[0];
+		break;
 #ifndef _WIN32
 	case IO_SEGA_PARALLEL:
 		if (!th)

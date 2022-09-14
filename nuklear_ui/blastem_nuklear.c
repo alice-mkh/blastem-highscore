@@ -2035,7 +2035,7 @@ void view_system_settings(struct nk_context *context)
 		}
 	}
 
-	const char *formats[] = {
+	static const char *formats[] = {
 		"native",
 		"gst"
 	};
@@ -2044,7 +2044,7 @@ void view_system_settings(struct nk_context *context)
 	if (selected_format < 0) {
 		selected_format = find_match(formats, num_formats, "ui\0state_format\0", "native");
 	}
-	const char *ram_inits[] = {
+	static const char *ram_inits[] = {
 		"zero",
 		"random"
 	};
@@ -2053,28 +2053,39 @@ void view_system_settings(struct nk_context *context)
 	if (selected_init < 0) {
 		selected_init = find_match(ram_inits, num_inits, "system\0ram_init\0", "zero");
 	}
-	const char *io_opts_1[] = {
+	static const char *io_opts_1[] = {
 		"none",
 		"gamepad2.1",
 		"gamepad3.1",
 		"gamepad6.1",
+		"sega_multitap.1",
 		"mouse.1",
 		"saturn keyboard",
 		"xband keyboard"
 	};
-	const char *io_opts_2[] = {
+	static const char *io_opts_2[] = {
 		"none",
 		"gamepad2.2",
 		"gamepad3.2",
 		"gamepad6.2",
+		"sega_multitap.1",
 		"mouse.1",
 		"saturn keyboard",
 		"xband keyboard"
 	};
+	static const char *type_names[sizeof(io_opts_1)/sizeof(*io_opts_1)];
 	static int32_t selected_io_1 = -1;
 	static int32_t selected_io_2 = -1;
 	const uint32_t num_io = sizeof(io_opts_1)/sizeof(*io_opts_1);
 	if (selected_io_1 < 0 || selected_io_2 < 0 || show_sms != old_show_sms) {
+		type_names[0] = device_type_names[IO_NONE];
+		type_names[1] = device_type_names[IO_GAMEPAD2];
+		type_names[2] = device_type_names[IO_GAMEPAD3];
+		type_names[3] = device_type_names[IO_GAMEPAD6];
+		type_names[4] = device_type_names[IO_SEGA_MULTI];
+		type_names[5] = device_type_names[IO_MOUSE];
+		type_names[6] = device_type_names[IO_SATURN_KEYBOARD];
+		type_names[7] = device_type_names[IO_XBAND_KEYBOARD];
 		if (show_sms) {
 			selected_io_1 = find_match(io_opts_1, num_io, "sms\0io\0devices\0""1\0", "gamepad2.1");
 			selected_io_2 = find_match(io_opts_2, num_io, "sms\0io\0devices\0""2\0", "gamepad2.2");
@@ -2096,8 +2107,8 @@ void view_system_settings(struct nk_context *context)
 		} else {
 			selected_model = settings_dropdown_ex(context, "Model", model_opts, model_names, num_models, selected_model, "system\0model\0");
 		}
-		selected_io_1 = settings_dropdown_ex(context, "IO Port 1 Device", io_opts_1, device_type_names, num_io, selected_io_1, show_sms ? "sms\0io\0devices\0""1\0" : "io\0devices\0""1\0");
-		selected_io_2 = settings_dropdown_ex(context, "IO Port 2 Device", io_opts_2, device_type_names, num_io, selected_io_2, show_sms ? "sms\0io\0devices\0""2\0" : "io\0devices\0""2\0");
+		selected_io_1 = settings_dropdown_ex(context, "IO Port 1 Device", io_opts_1, type_names, num_io, selected_io_1, show_sms ? "sms\0io\0devices\0""1\0" : "io\0devices\0""1\0");
+		selected_io_2 = settings_dropdown_ex(context, "IO Port 2 Device", io_opts_2, type_names, num_io, selected_io_2, show_sms ? "sms\0io\0devices\0""2\0" : "io\0devices\0""2\0");
 		selected_region = settings_dropdown_ex(context, "Default Region", region_codes, regions, num_regions, selected_region, "system\0default_region\0");
 		selected_sync = settings_dropdown(context, "Sync Source", sync_opts, num_sync_opts, selected_sync, "system\0sync_source\0");
 		if (!show_sms) {
