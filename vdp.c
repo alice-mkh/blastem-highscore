@@ -60,7 +60,6 @@ enum {
 	ACTIVE
 };
 
-static int32_t color_map[1 << 12];
 static uint16_t mode4_address_map[0x4000];
 static uint32_t planar_to_chunky[256];
 static uint8_t levels[] = {0, 27, 49, 71, 87, 103, 119, 130, 146, 157, 174, 190, 206, 228, 255};
@@ -145,7 +144,7 @@ static void update_video_params(vdp_context *context)
 	context->top_offset = border_top - context->border_top;
 }
 
-static uint8_t color_map_init_done;
+static uint8_t static_table_init_done;
 
 vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t type)
 {
@@ -163,34 +162,35 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t
 	context->regs[REG_HINT] = context->hint_counter = 0xFF;
 	context->vsram_size = has_max_vsram ? MAX_VSRAM_SIZE : MIN_VSRAM_SIZE;
 	context->type = type;
-
-	if (!color_map_init_done) {
-		uint8_t b,g,r;
-		for (uint16_t color = 0; color < (1 << 12); color++) {
-			if (type == VDP_GAMEGEAR) {
-				b = (color >> 8 & 0xF) * 0x11;
-				g = (color >> 4 & 0xF) * 0x11;
-				r = (color & 0xF) * 0x11;
-			}else if (color & FBUF_SHADOW) {
-				b = levels[(color >> 9) & 0x7];
-				g = levels[(color >> 5) & 0x7];
-				r = levels[(color >> 1) & 0x7];
-			} else if(color & FBUF_HILIGHT) {
-				b = levels[((color >> 9) & 0x7) + 7];
-				g = levels[((color >> 5) & 0x7) + 7];
-				r = levels[((color >> 1) & 0x7) + 7];
-			} else if(color & FBUF_MODE4) {
-				//TODO: Mode 4 has a separate DAC tap so this isn't quite correct
-				b = levels[(color >> 4 & 0xC) | (color >> 6 & 0x2)];
-				g = levels[(color >> 2 & 0x8) | (color >> 1 & 0x4) | (color >> 4 & 0x2)];
-				r = levels[(color << 1 & 0xC) | (color >> 1 & 0x2)];
-			} else {
-				b = levels[(color >> 8) & 0xE];
-				g = levels[(color >> 4) & 0xE];
-				r = levels[color & 0xE];
-			}
-			color_map[color] = render_map_color(r, g, b);
+	uint8_t b,g,r;
+	for (uint16_t color = 0; color < (1 << 12); color++) {
+		if (type == VDP_GAMEGEAR) {
+			b = (color >> 8 & 0xF) * 0x11;
+			g = (color >> 4 & 0xF) * 0x11;
+			r = (color & 0xF) * 0x11;
+		}else if (color & FBUF_SHADOW) {
+			b = levels[(color >> 9) & 0x7];
+			g = levels[(color >> 5) & 0x7];
+			r = levels[(color >> 1) & 0x7];
+		} else if(color & FBUF_HILIGHT) {
+			b = levels[((color >> 9) & 0x7) + 7];
+			g = levels[((color >> 5) & 0x7) + 7];
+			r = levels[((color >> 1) & 0x7) + 7];
+		} else if(color & FBUF_MODE4) {
+			//TODO: Mode 4 has a separate DAC tap so this isn't quite correct
+			b = levels[(color >> 4 & 0xC) | (color >> 6 & 0x2)];
+			g = levels[(color >> 2 & 0x8) | (color >> 1 & 0x4) | (color >> 4 & 0x2)];
+			r = levels[(color << 1 & 0xC) | (color >> 1 & 0x2)];
+		} else {
+			b = levels[(color >> 8) & 0xE];
+			g = levels[(color >> 4) & 0xE];
+			r = levels[color & 0xE];
 		}
+		context->color_map[color] = render_map_color(r, g, b);
+	}
+
+	if (!static_table_init_done) {
+		
 		for (uint16_t mode4_addr = 0; mode4_addr < 0x4000; mode4_addr++)
 		{
 			uint16_t mode5_addr = mode4_addr & 0x3DFD;
@@ -208,7 +208,7 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t
 			}
 			planar_to_chunky[planar] = chunky;
 		}
-		color_map_init_done = 1;
+		static_table_init_done = 1;
 	}
 	for (uint8_t color = 0; color < (1 << (3 + 1 + 1 + 1)); color++)
 	{
@@ -840,13 +840,13 @@ static void read_sprite_x_mode4(vdp_context * context)
 
 static void update_color_map(vdp_context *context, uint16_t index, uint16_t value)
 {
-	context->colors[index] = color_map[value & CRAM_BITS];
-	context->colors[index + SHADOW_OFFSET] = color_map[(value & CRAM_BITS) | FBUF_SHADOW];
-	context->colors[index + HIGHLIGHT_OFFSET] = color_map[(value & CRAM_BITS) | FBUF_HILIGHT];
+	context->colors[index] = context->color_map[value & CRAM_BITS];
+	context->colors[index + SHADOW_OFFSET] = context->color_map[(value & CRAM_BITS) | FBUF_SHADOW];
+	context->colors[index + HIGHLIGHT_OFFSET] = context->color_map[(value & CRAM_BITS) | FBUF_HILIGHT];
 	if (context->type == VDP_GAMEGEAR) {
-		context->colors[index + MODE4_OFFSET] = color_map[value & 0xFFF];
+		context->colors[index + MODE4_OFFSET] = context->color_map[value & 0xFFF];
 	} else {
-		context->colors[index + MODE4_OFFSET] = color_map[(value & CRAM_BITS) | FBUF_MODE4];
+		context->colors[index + MODE4_OFFSET] = context->color_map[(value & CRAM_BITS) | FBUF_MODE4];
 	}
 }
 

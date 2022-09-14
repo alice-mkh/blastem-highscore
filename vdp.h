@@ -256,6 +256,7 @@ typedef struct {
 	uint8_t        pushed_frame;
 	uint8_t        type;
 	uint8_t        cram_latch;
+	int32_t        color_map[1 << 12];
 	uint8_t        vdpmem[];
 } vdp_context;
 
