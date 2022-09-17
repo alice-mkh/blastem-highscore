@@ -220,6 +220,7 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 			cfun = NULL;
 		}
 		if(memmap[chunk].flags & access_flag) {
+			uint8_t tmp_size = size;
 			if (memmap[chunk].flags & MMAP_PTR_IDX) {
 				if (memmap[chunk].flags & MMAP_FUNC_NULL) {
 					cmp_irdisp(code, 0, opts->context_reg, opts->mem_ptr_off + sizeof(void*) * memmap[chunk].ptr_index, SZ_PTR);
@@ -239,8 +240,26 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 
 					*not_null = code->cur - (not_null + 1);
 				}
-				if ((opts->byte_swap || memmap[chunk].flags & MMAP_BYTESWAP) && size == SZ_B) {
-					xor_ir(code, 1, adr_reg, opts->address_size);
+				if (size == SZ_B) {
+					if ((memmap[chunk].flags & MMAP_ONLY_ODD) || (memmap[chunk].flags & MMAP_ONLY_EVEN)) {
+						bt_ir(code, 0, adr_reg, opts->address_size);
+						code_ptr good_addr = code->cur + 1;
+						jcc(code, (memmap[chunk].flags & MMAP_ONLY_ODD) ? CC_C : CC_NC, code->cur + 2);
+						if (!is_write) {
+							mov_ir(code, 0xFF, opts->scratch1, SZ_B);
+						}
+						retn(code);
+						*good_addr = code->cur - (good_addr + 1);
+						shr_ir(code, 1, adr_reg, opts->address_size);
+					} else if (opts->byte_swap || memmap[chunk].flags & MMAP_BYTESWAP) {
+						xor_ir(code, 1, adr_reg, opts->address_size);
+					}
+				} else if ((memmap[chunk].flags & MMAP_ONLY_ODD) || (memmap[chunk].flags & MMAP_ONLY_EVEN)) {
+					tmp_size = SZ_B;
+					shr_ir(code, 1, adr_reg, opts->address_size);
+					if ((memmap[chunk].flags & MMAP_ONLY_EVEN) && is_write) {
+						shr_ir(code, 8, opts->scratch1, SZ_W);
+					}
 				}
 				if (opts->address_size != SZ_D) {
 					movzx_rr(code, adr_reg, adr_reg, opts->address_size, SZ_D);
@@ -251,12 +270,19 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 				}
 				add_rdispr(code, opts->context_reg, opts->mem_ptr_off + sizeof(void*) * memmap[chunk].ptr_index, adr_reg, SZ_PTR);
 				if (is_write) {
-					mov_rrind(code, opts->scratch1, opts->scratch2, size);
+					mov_rrind(code, opts->scratch1, opts->scratch2, tmp_size);
 				} else {
-					mov_rindr(code, opts->scratch1, opts->scratch1, size);
+					mov_rindr(code, opts->scratch1, opts->scratch1, tmp_size);
+				}
+				if (size != tmp_size && !is_write) {
+					if (memmap[chunk].flags & MMAP_ONLY_EVEN) {
+						shl_ir(code, 8, opts->scratch1, SZ_W);
+						mov_ir(code, 0xFF, opts->scratch1, SZ_B);
+					} else {
+						or_ir(code, 0xFF00, opts->scratch1, SZ_W);
+					}
 				}
 			} else {
-				uint8_t tmp_size = size;
 				if (size == SZ_B) {
 					if ((memmap[chunk].flags & MMAP_ONLY_ODD) || (memmap[chunk].flags & MMAP_ONLY_EVEN)) {
 						bt_ir(code, 0, adr_reg, opts->address_size);
