@@ -798,7 +798,7 @@ int lock_joystick_index(int joystick, int desired_index)
 	int tmp_index = joystick_sdl_index[joystick];
 	joysticks[joystick] = joysticks[desired_index];
 	joystick_sdl_index[joystick] = joystick_sdl_index[desired_index];
-	joystick_index_locked[joystick] = joystick_sdl_index[desired_index];
+	joystick_index_locked[joystick] = joystick_index_locked[desired_index];
 	joysticks[desired_index] = tmp_joy;
 	joystick_sdl_index[desired_index] = tmp_index;
 	joystick_index_locked[desired_index] = 1;
