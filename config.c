@@ -285,7 +285,7 @@ static void migrate_pads(char *key, tern_val val, uint8_t valtype, void *data)
 	*pads = tern_insert_node(*pads, key, dupe_tree(val.ptrval));
 }
 
-#define CONFIG_VERSION 4
+#define CONFIG_VERSION 5
 static tern_node *migrate_config(tern_node *config, int from_version)
 {
 	tern_node *def_config = parse_bundled_config("default.cfg");
@@ -350,6 +350,16 @@ static tern_node *migrate_config(tern_node *config, int from_version)
 		config = tern_insert_path(config, "io\0sega_multitap.1\0""2\0", (tern_val){.ptrval = strdup(tap12)}, TVAL_PTR);
 		config = tern_insert_path(config, "io\0sega_multitap.1\0""3\0", (tern_val){.ptrval = strdup(tap13)}, TVAL_PTR);
 		config = tern_insert_path(config, "io\0sega_multitap.1\0""4\0", (tern_val){.ptrval = strdup(tap14)}, TVAL_PTR);
+	}
+	case 4: {
+		char *tap11 = tern_find_path_default(config, "io\0ea_multitap\0""1\0", (tern_val){.ptrval = "gamepad6.1"}, TVAL_PTR).ptrval;
+		char *tap12 = tern_find_path_default(config, "io\0ea_multitap\0""2\0", (tern_val){.ptrval = "gamepad6.2"}, TVAL_PTR).ptrval;
+		char *tap13 = tern_find_path_default(config, "io\0ea_multitap\0""3\0", (tern_val){.ptrval = "gamepad6.3"}, TVAL_PTR).ptrval;
+		char *tap14 = tern_find_path_default(config, "io\0ea_multitap\0""4\0", (tern_val){.ptrval = "gamepad6.4"}, TVAL_PTR).ptrval;
+		config = tern_insert_path(config, "io\0ea_multitap\0""1\0", (tern_val){.ptrval = strdup(tap11)}, TVAL_PTR);
+		config = tern_insert_path(config, "io\0ea_multitap\0""2\0", (tern_val){.ptrval = strdup(tap12)}, TVAL_PTR);
+		config = tern_insert_path(config, "io\0ea_multitap\0""3\0", (tern_val){.ptrval = strdup(tap13)}, TVAL_PTR);
+		config = tern_insert_path(config, "io\0ea_multitap\0""4\0", (tern_val){.ptrval = strdup(tap14)}, TVAL_PTR);
 	}
 	}
 	char buffer[16];

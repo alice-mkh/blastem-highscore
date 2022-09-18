@@ -36,8 +36,8 @@ const char * device_type_names[] = {
 	"Menacer",
 	"Justifier",
 	"Sega Multi-tap",
-	"EA 4-way Play cable A",
-	"EA 4-way Play cable B",
+	"EA 4-way Play",
+	"EA 4-way Play",
 	"Sega Parallel Transfer Board",
 	"Generic Device",
 	"Generic Serial",
@@ -66,6 +66,8 @@ enum {
 	HBPT_CMD_PAYLOAD,
 	HBPT_REPLY
 };
+
+#define EA_PASSTHRU_MODE 0xFF
 
 typedef struct {
 	uint8_t states[2], value;
@@ -98,7 +100,7 @@ static io_port *find_gamepad(sega_io *io, uint8_t gamepad_num)
 		if (port->device_type == IO_HEARTBEAT_TRAINER && port->device.heartbeat_trainer.device_num == gamepad_num) {
 			return port;
 		}
-		if (port->device_type == IO_SEGA_MULTI) {
+		if (port->device_type == IO_SEGA_MULTI || port->device_type == IO_EA_MULTI_A) {
 			for (int j = 0; j < 4; j++)
 			{
 				io_port *tap_port = port->device.multitap.ports + j;
@@ -118,6 +120,15 @@ static io_port *find_mouse(sega_io *io, uint8_t mouse_num)
 		io_port *port = io->ports + i;
 		if (port->device_type == IO_MOUSE && port->device.mouse.mouse_num == mouse_num) {
 			return port;
+		}
+		if (port->device_type == IO_SEGA_MULTI) {
+			for (int j = 0; j < 4; j++)
+			{
+				io_port *tap_port = port->device.multitap.ports + j;
+				if (tap_port->device_type == IO_MOUSE && tap_port->device.mouse.mouse_num == mouse_num) {
+					return tap_port;
+				}
+			}
 		}
 	}
 	return NULL;
@@ -251,7 +262,7 @@ void process_device(char * device_type, io_port * port)
 		return;
 	}
 	io_port *old_ports = NULL;
-	if (port->device_type == IO_SEGA_MULTI) {
+	if (port->device_type == IO_SEGA_MULTI || port->device_type == IO_EA_MULTI_A) {
 		old_ports = port->device.multitap.ports;
 	}
 
@@ -331,6 +342,18 @@ void process_device(char * device_type, io_port * port)
 			}
 			old_ports = NULL;
 		}
+	} else if(!strcmp(device_type, "ea_multitap_port_a")) {
+		if (port->device_type != IO_EA_MULTI_A) {
+			port->device_type = IO_EA_MULTI_A;
+			port->device.multitap.ports = old_ports ? old_ports : calloc(4, sizeof(io_port));
+			port->device.multitap.tap_num = 1;
+			port->device.multitap.cur_port = EA_PASSTHRU_MODE;
+			old_ports = NULL;
+		}
+	} else if(!strcmp(device_type, "ea_multitap_port_b")) {
+		port->device_type = IO_EA_MULTI_B;
+		port->device.multitap.ports = NULL;
+		port->device.multitap.tap_num = 1;
 	}
 	free(old_ports);
 }
@@ -492,7 +515,28 @@ cleanup_sock:
 					io_data_write(ports[i].device.multitap.ports + j, 0x40, 0);
 				}
 			}
-			
+		} else if (ports[i].device_type == IO_EA_MULTI_A) {
+			char path[] = "io\0ea_multitap\0";
+			tern_node *port_defs = tern_find_path(config, path, TVAL_NODE).ptrval;
+			debug_message("IO port %s connected to EA 4-way Play A-side\n", io_name(i));
+			for (int j = 0; j < 4; j++)
+			{
+				char port_num[] = {'1' + j, 0, 0};
+				char *dev_type = tern_find_ptr(port_defs, port_num);
+				process_device(dev_type, ports[i].device.multitap.ports + j);
+				debug_message("\tTap port %d connected to device '%s'\n", j + 1, device_type_names[ports[i].device.multitap.ports[j].device_type]);
+				io_control_write(ports[i].device.multitap.ports + j, 0x40, 0);
+				io_data_write(ports[i].device.multitap.ports + j, 0, 0);
+			}
+		} else if (ports[i].device_type == IO_EA_MULTI_B) {
+			debug_message("IO port %s connected to EA 4-way Play B-side\n", io_name(i));
+			for (int j = 0; j < 3; j++)
+			{
+				if (ports[j].device_type == IO_EA_MULTI_A) {
+					ports[i].device.multitap.ports = ports + j;
+					break;
+				}
+			}
 		} else {
 			debug_message("IO port %s connected to device '%s'\n", io_name(i), device_type_names[ports[i].device_type]);
 		}
@@ -1375,6 +1419,37 @@ void io_data_write(io_port * port, uint8_t value, uint32_t current_cycle)
 			}
 		}
 		break;
+	case IO_EA_MULTI_A:
+		if ((output & TH) != (old_output & TH)) {
+			uint8_t port_num = port->device.multitap.cur_port == EA_PASSTHRU_MODE ? 1 : port->device.multitap.cur_port;
+			if (port_num < 4) {
+				io_data_write(port->device.multitap.ports + port_num, output & 0x40, current_cycle);
+			}
+		}
+		break;
+	case IO_EA_MULTI_B: {
+		io_port *main_port = port->device.multitap.ports;
+		io_port *passthru = main_port->device.multitap.ports + 1;
+		if (main_port->device.multitap.cur_port == EA_PASSTHRU_MODE) {
+			output &= port->control | 0x40;
+			output |= io_data_read(passthru, current_cycle) & ~(port->control | 0x40);
+		}
+		uint8_t old_port = main_port->device.multitap.cur_port;
+		if ((output & 0xF) == 0xC) {
+			main_port->device.multitap.cur_port = output >> 4 & 7;
+		} else {
+			main_port->device.multitap.cur_port = EA_PASSTHRU_MODE;
+		}
+		if (old_port == EA_PASSTHRU_MODE && main_port->device.multitap.cur_port < 4) {
+			//switched from passthru to multitap mode, set TH for selected controller to port A value
+			output = get_output_value(main_port, current_cycle, SLOW_RISE_DEVICE);
+			io_data_write(main_port->device.multitap.ports + main_port->device.multitap.cur_port, output & 0x40, current_cycle);
+		} else if (main_port->device.multitap.cur_port == EA_PASSTHRU_MODE) {
+			//in passhtru mode, set TH to controller 2 to port B value
+			io_data_write(main_port->device.multitap.ports + 1, output & 0x40, current_cycle);
+		}
+		break;
+	}
 #ifndef _WIN32
 	case IO_GENERIC:
 		wait_for_connection(port);
@@ -1674,6 +1749,27 @@ uint8_t io_data_read(io_port * port, uint32_t current_cycle)
 		device_driven = 0x1F;
 		input = port->input[0];
 		break;
+	case IO_EA_MULTI_A:
+		device_driven = 0x3F;
+		if (port->device.multitap.cur_port == EA_PASSTHRU_MODE) {
+			input = io_data_read(port->device.multitap.ports, current_cycle);
+		} else if (port->device.multitap.cur_port < 4) {
+			input = io_data_read(port->device.multitap.ports + port->device.multitap.cur_port, current_cycle);
+		} else {
+			input = 0x3C;
+		}
+		break;
+	case IO_EA_MULTI_B: {
+		io_port *main_port = port->device.multitap.ports;
+		if (main_port->device.multitap.cur_port == EA_PASSTHRU_MODE) {
+			input = io_data_read(main_port->device.multitap.ports + 1, current_cycle);
+			device_driven = 0x3F;
+		} else {
+			input = 0;
+			device_driven = 0;
+		}
+		break;
+	}
 #ifndef _WIN32
 	case IO_SEGA_PARALLEL:
 		if (!th)

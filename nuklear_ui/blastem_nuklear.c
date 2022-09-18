@@ -2059,6 +2059,7 @@ void view_system_settings(struct nk_context *context)
 		"gamepad3.1",
 		"gamepad6.1",
 		"sega_multitap.1",
+		"ea_multitap_port_a",
 		"mouse.1",
 		"saturn keyboard",
 		"xband keyboard"
@@ -2069,6 +2070,7 @@ void view_system_settings(struct nk_context *context)
 		"gamepad3.2",
 		"gamepad6.2",
 		"sega_multitap.1",
+		"ea_multitap_port_b",
 		"mouse.1",
 		"saturn keyboard",
 		"xband keyboard"
@@ -2083,9 +2085,10 @@ void view_system_settings(struct nk_context *context)
 		type_names[2] = device_type_names[IO_GAMEPAD3];
 		type_names[3] = device_type_names[IO_GAMEPAD6];
 		type_names[4] = device_type_names[IO_SEGA_MULTI];
-		type_names[5] = device_type_names[IO_MOUSE];
-		type_names[6] = device_type_names[IO_SATURN_KEYBOARD];
-		type_names[7] = device_type_names[IO_XBAND_KEYBOARD];
+		type_names[5] = device_type_names[IO_EA_MULTI_A];
+		type_names[6] = device_type_names[IO_MOUSE];
+		type_names[7] = device_type_names[IO_SATURN_KEYBOARD];
+		type_names[8] = device_type_names[IO_XBAND_KEYBOARD];
 		if (show_sms) {
 			selected_io_1 = find_match(io_opts_1, num_io, "sms\0io\0devices\0""1\0", "gamepad2.1");
 			selected_io_2 = find_match(io_opts_2, num_io, "sms\0io\0devices\0""2\0", "gamepad2.2");
@@ -2107,8 +2110,26 @@ void view_system_settings(struct nk_context *context)
 		} else {
 			selected_model = settings_dropdown_ex(context, "Model", model_opts, model_names, num_models, selected_model, "system\0model\0");
 		}
-		selected_io_1 = settings_dropdown_ex(context, "IO Port 1 Device", io_opts_1, type_names, num_io, selected_io_1, show_sms ? "sms\0io\0devices\0""1\0" : "io\0devices\0""1\0");
-		selected_io_2 = settings_dropdown_ex(context, "IO Port 2 Device", io_opts_2, type_names, num_io, selected_io_2, show_sms ? "sms\0io\0devices\0""2\0" : "io\0devices\0""2\0");
+		int32_t old_selected = selected_io_1;
+		char *config_path1, *config_path2;
+		if (show_sms) {
+			config_path1 = "sms\0io\0devices\0""1\0";
+			config_path2 = "sms\0io\0devices\0""2\0";
+		} else {
+			config_path1 = "io\0devices\0""1\0";
+			config_path2 = "io\0devices\0""2\0";
+		}
+		selected_io_1 = settings_dropdown_ex(context, "IO Port 1 Device", io_opts_1, type_names, num_io, selected_io_1, config_path1);
+		if (old_selected != selected_io_1 && selected_io_1 != selected_io_2 && !strcmp(io_opts_1[selected_io_1], "ea_multitap_port_a")) {
+			selected_io_2 = selected_io_1;
+			config = tern_insert_path(config, config_path2, (tern_val){.ptrval = strdup(io_opts_2[selected_io_2])}, TVAL_PTR);
+		}
+		old_selected = selected_io_2;
+		selected_io_2 = settings_dropdown_ex(context, "IO Port 2 Device", io_opts_2, type_names, num_io, selected_io_2, config_path2);
+		if (old_selected != selected_io_2 && selected_io_1 != selected_io_2 && !strcmp(io_opts_2[selected_io_2], "ea_multitap_port_b")) {
+			selected_io_1 = selected_io_2;
+			config = tern_insert_path(config, config_path1, (tern_val){.ptrval = strdup(io_opts_1[selected_io_1])}, TVAL_PTR);
+		}
 		selected_region = settings_dropdown_ex(context, "Default Region", region_codes, regions, num_regions, selected_region, "system\0default_region\0");
 		selected_sync = settings_dropdown(context, "Sync Source", sync_opts, num_sync_opts, selected_sync, "system\0sync_source\0");
 		if (!show_sms) {
