@@ -1672,12 +1672,7 @@ void translate_m68k_bit(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 		}
 		if (inst->op != M68K_BTST && inst->extra.size != OPSIZE_BYTE) {
 			//bit operations that need to save the result have a 2 cycle penalty when operating on the upper word
-
-			if (src_op->mode == MODE_REG_DISPLACE8) {
-				cmp_irdisp(code, 16, src_op->base, src_op->disp, SZ_B);
-			} else {
-				cmp_ir(code, 16, src_op->base, SZ_B);
-			}
+			cmp_ir(code, 16, src_op->base, SZ_B);
 			code_ptr jmp_off = code->cur + 1;
 			jcc(code, CC_C, jmp_off + 1);
 			cycles(&opts->gen, 2);
