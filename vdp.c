@@ -117,6 +117,7 @@ static void update_video_params(vdp_context *context)
 				context->state = ACTIVE;
 			} else if (context->vcounter == 0x1FF) {
 				context->state = PREPARING;
+				memset(context->compositebuf, 0, sizeof(context->compositebuf));
 			}
 		}
 	} else {
@@ -137,6 +138,7 @@ static void update_video_params(vdp_context *context)
 			}
 			else if (context->vcounter == 0x1FF) {
 				context->state = PREPARING;
+				memset(context->compositebuf, 0, sizeof(context->compositebuf));
 			}
 		}
 	}
@@ -190,7 +192,7 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t
 	}
 
 	if (!static_table_init_done) {
-		
+
 		for (uint16_t mode4_addr = 0; mode4_addr < 0x4000; mode4_addr++)
 		{
 			uint16_t mode5_addr = mode4_addr & 0x3DFD;
@@ -2351,7 +2353,9 @@ static void draw_right_border(vdp_context *context)
 		} else {\
 			*(dst++) = context->colors[(*(src++) & 0xC0) | bgindex];\
 		}\
-		if (slot != (BG_START_SLOT + LINEBUF_SIZE/2)) {\
+		if (slot == (BG_START_SLOT + LINEBUF_SIZE/2)) {\
+			context->done_composite = NULL;\
+		} else {\
 			if ((*src & 0x3F) | test_layer) {\
 				*(dst++) = context->colors[*(src++)];\
 			} else {\
@@ -2368,7 +2372,9 @@ static void draw_right_border(vdp_context *context)
 		} else {\
 			*(dst++) = context->colors[(*(src++) & 0xC0) | bgindex];\
 		}\
-		if (slot != (BG_START_SLOT + (256+HORIZ_BORDER)/2)) {\
+		if (slot == (BG_START_SLOT + (256+HORIZ_BORDER)/2)) {\
+			context->done_composite = NULL;\
+		} else {\
 			if ((*src & 0x3F) | test_layer) {\
 				*(dst++) = context->colors[*(src++)];\
 			} else {\
@@ -3526,7 +3532,7 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 	}
 	uint32_t *dst;
 	uint8_t *debug_dst;
-	if (context->output && context->hslot >= BG_START_SLOT && context->hslot < bg_end_slot) {
+	if (context->output && context->hslot >= BG_START_SLOT && context->hslot <= bg_end_slot) {
 		dst = context->output + 2 * (context->hslot - BG_START_SLOT);
 		debug_dst = context->layer_debug_buf + 2 * (context->hslot - BG_START_SLOT);
 	} else {
@@ -3541,9 +3547,6 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 		if (context->hslot == BG_START_SLOT && context->output) {
 			dst = context->output + (context->hslot - BG_START_SLOT) * 2;
 			debug_dst = context->layer_debug_buf + 2 * (context->hslot - BG_START_SLOT);
-		} else if (context->hslot == bg_end_slot) {
-			advance_output_line(context);
-			dst = NULL;
 		}
 		//this will need some tweaking to properly interact with 128K mode,
 		//but this should be good enough for now
@@ -3621,22 +3624,7 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 				*(dst++) = bg_color;
 				*(debug_dst++) = DBG_SRC_BG;
 			}
-			if (context->done_composite) {
-				uint8_t pixel = context->compositebuf[dst-context->output];
-				if (!(pixel & 0x3F | test_layer)) {
-					pixel = pixel & 0xC0 | bg_index;
-				}
-				*(dst++) = context->colors[pixel];
-				if ((dst - context->output) == (context->done_composite - context->compositebuf)) {
-					context->done_composite = NULL;
-					memset(context->compositebuf, 0, sizeof(context->compositebuf));
-				}
-			} else {
-				*(dst++) = bg_color;
-				*(debug_dst++) = DBG_SRC_BG;
-			}
-
-			if (context->hslot == (bg_end_slot-1)) {
+			if (context->hslot != bg_end_slot) {
 				if (context->done_composite) {
 					uint8_t pixel = context->compositebuf[dst-context->output];
 					if (!(pixel & 0x3F | test_layer)) {
@@ -3652,6 +3640,10 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 					*(debug_dst++) = DBG_SRC_BG;
 				}
 			}
+		}
+		if (context->hslot == bg_end_slot) {
+			advance_output_line(context);
+			dst = NULL;
 		}
 
 		if (!is_refresh(context, context->hslot)) {
@@ -3679,6 +3671,7 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 			vdp_advance_line(context);
 			if (context->vcounter == active_line) {
 				context->state = PREPARING;
+				memset(context->compositebuf, 0, sizeof(context->compositebuf));
 				return;
 			}
 		}
