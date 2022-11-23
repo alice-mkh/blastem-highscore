@@ -11,6 +11,7 @@
 #include "serialize.h"
 #include "render_audio.h"
 #include "vgm.h"
+#include "oscilloscope.h"
 
 #define NUM_PART_REGS (0xB7-0x30)
 #define NUM_CHANNELS 6
@@ -35,6 +36,7 @@ typedef struct {
 	uint8_t  env_phase;
 	uint8_t  ssg;
 	uint8_t  inverted;
+	uint8_t  phase_overflow;
 } ym_operator;
 
 typedef struct {
@@ -52,6 +54,8 @@ typedef struct {
 	uint8_t  pms;
 	uint8_t  lr;
 	uint8_t  keyon;
+	uint8_t  scope_channel;
+	uint8_t  phase_overflow;
 } ym_channel;
 
 typedef struct {
@@ -69,45 +73,46 @@ typedef struct {
 
 typedef struct {
 	audio_source *audio;
-	vgm_writer  *vgm;
-    uint32_t    clock_inc;
-	uint32_t    current_cycle;
-	uint32_t    write_cycle;
-	uint32_t    busy_start;
-	uint32_t    busy_cycles;
-	uint32_t    last_status_cycle;
-	uint32_t    invalid_status_decay;
-	uint32_t    status_address_mask;
-	int32_t     volume_mult;
-	int32_t     volume_div;
-	ym_operator operators[NUM_OPERATORS];
-	ym_channel  channels[NUM_CHANNELS];
-	int16_t     zero_offset;
-	uint16_t    timer_a;
-	uint16_t    timer_a_load;
-	uint16_t    env_counter;
-	ym_supp     ch3_supp[3];
-	uint8_t     timer_b;
-	uint8_t     sub_timer_b;
-	uint8_t     timer_b_load;
-	uint8_t     ch3_mode;
-	uint8_t     current_op;
-	uint8_t     current_env_op;
+	vgm_writer   *vgm;
+	oscilloscope *scope;
+    uint32_t     clock_inc;
+	uint32_t     current_cycle;
+	uint32_t     write_cycle;
+	uint32_t     busy_start;
+	uint32_t     busy_cycles;
+	uint32_t     last_status_cycle;
+	uint32_t     invalid_status_decay;
+	uint32_t     status_address_mask;
+	int32_t      volume_mult;
+	int32_t      volume_div;
+	ym_operator  operators[NUM_OPERATORS];
+	ym_channel   channels[NUM_CHANNELS];
+	int16_t      zero_offset;
+	uint16_t     timer_a;
+	uint16_t     timer_a_load;
+	uint16_t     env_counter;
+	ym_supp      ch3_supp[3];
+	uint8_t      timer_b;
+	uint8_t      sub_timer_b;
+	uint8_t      timer_b_load;
+	uint8_t      ch3_mode;
+	uint8_t      current_op;
+	uint8_t      current_env_op;
 
-	uint8_t     timer_control;
-	uint8_t     dac_enable;
-	uint8_t     lfo_enable;
-	uint8_t     lfo_freq;
-	uint8_t     lfo_counter;
-	uint8_t     lfo_am_step;
-	uint8_t     lfo_pm_step;
-	uint8_t     csm_keyon;
-	uint8_t     status;
-	uint8_t     last_status;
-	uint8_t     selected_reg;
-	uint8_t     selected_part;
-	uint8_t     part1_regs[YM_PART1_REGS];
-	uint8_t     part2_regs[YM_PART2_REGS];
+	uint8_t      timer_control;
+	uint8_t      dac_enable;
+	uint8_t      lfo_enable;
+	uint8_t      lfo_freq;
+	uint8_t      lfo_counter;
+	uint8_t      lfo_am_step;
+	uint8_t      lfo_pm_step;
+	uint8_t      csm_keyon;
+	uint8_t      status;
+	uint8_t      last_status;
+	uint8_t      selected_reg;
+	uint8_t      selected_part;
+	uint8_t      part1_regs[YM_PART1_REGS];
+	uint8_t      part2_regs[YM_PART2_REGS];
 } ym2612_context;
 
 enum {
@@ -154,6 +159,7 @@ void ym_print_channel_info(ym2612_context *context, int channel);
 void ym_print_timer_info(ym2612_context *context);
 void ym_serialize(ym2612_context *context, serialize_buffer *buf);
 void ym_deserialize(deserialize_buffer *buf, void *vcontext);
+void ym_enable_scope(ym2612_context *context, oscilloscope *scope);
 
 #endif //YM2612_H_
 

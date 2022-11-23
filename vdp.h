@@ -157,14 +157,6 @@ typedef struct {
 } fifo_entry;
 
 enum {
-	VDP_DEBUG_PLANE,
-	VDP_DEBUG_VRAM,
-	VDP_DEBUG_CRAM,
-	VDP_DEBUG_COMPOSITE,
-	VDP_NUM_DEBUG_TYPES
-};
-
-enum {
 	VDP_GENESIS,
 	VDP_GAMEGEAR,
 	VDP_SMS2,
@@ -179,13 +171,13 @@ typedef struct {
 	//pointer to current framebuffer
 	uint32_t       *fb;
 	uint8_t        *done_composite;
-	uint32_t       *debug_fbs[VDP_NUM_DEBUG_TYPES];
+	uint32_t       *debug_fbs[NUM_DEBUG_TYPES];
 	char           *kmod_msg_buffer;
 	uint32_t       kmod_buffer_storage;
 	uint32_t       kmod_buffer_length;
 	uint32_t       timer_start_cycle;
 	uint32_t       output_pitch;
-	uint32_t       debug_fb_pitch[VDP_NUM_DEBUG_TYPES];
+	uint32_t       debug_fb_pitch[NUM_DEBUG_TYPES];
 	fifo_entry     fifo[FIFO_SIZE];
 	int32_t        fifo_write;
 	int32_t        fifo_read;
@@ -251,8 +243,8 @@ typedef struct {
 	uint8_t        tmp_buf_a[SCROLL_BUFFER_SIZE];
 	uint8_t        tmp_buf_b[SCROLL_BUFFER_SIZE];
 	uint8_t        enabled_debuggers;
-	uint8_t        debug_fb_indices[VDP_NUM_DEBUG_TYPES];
-	uint8_t        debug_modes[VDP_NUM_DEBUG_TYPES];
+	uint8_t        debug_fb_indices[NUM_DEBUG_TYPES];
+	uint8_t        debug_modes[NUM_DEBUG_TYPES];
 	uint8_t        pushed_frame;
 	uint8_t        type;
 	uint8_t        cram_latch;

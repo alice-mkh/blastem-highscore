@@ -10,10 +10,12 @@
 #include "serialize.h"
 #include "render_audio.h"
 #include "vgm.h"
+#include "oscilloscope.h"
 
 typedef struct {
 	audio_source *audio;
 	vgm_writer   *vgm;
+	oscilloscope *scope;
 	uint32_t clock_inc;
 	uint32_t cycles;
 	uint16_t lsfr;
@@ -21,6 +23,7 @@ typedef struct {
 	uint16_t counters[4];
 	uint8_t  volume[4];
 	uint8_t  output_state[4];
+	uint8_t  scope_channel[4];
 	uint8_t  noise_out;
 	uint8_t  noise_use_tone;
 	uint8_t  noise_type;
@@ -30,6 +33,7 @@ typedef struct {
 
 
 void psg_init(psg_context * context, uint32_t master_clock, uint32_t clock_div);
+void psg_enable_scope(psg_context *context, oscilloscope *scope);
 void psg_free(psg_context *context);
 void psg_adjust_master_clock(psg_context * context, uint32_t master_clock);
 void psg_write(psg_context * context, uint8_t value);

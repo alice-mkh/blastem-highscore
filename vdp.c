@@ -264,7 +264,7 @@ void vdp_free(vdp_context *context)
 	if (headless) {
 		free(context->fb);
 	}
-	for (int i = 0; i < VDP_NUM_DEBUG_TYPES; i++)
+	for (int i = 0; i < NUM_DEBUG_TYPES; i++)
 	{
 		if (context->enabled_debuggers & (1 << i)) {
 			vdp_toggle_debug_view(context, i);
@@ -1900,7 +1900,7 @@ static void vdp_advance_line(vdp_context *context)
 		jump_end = 0x1D5;
 	}
 
-	if (context->enabled_debuggers & (1 << VDP_DEBUG_CRAM | 1 << VDP_DEBUG_COMPOSITE)) {
+	if (context->enabled_debuggers & (1 << DEBUG_CRAM | 1 << DEBUG_COMPOSITE)) {
 		uint32_t line = context->vcounter;
 		if (line >= jump_end) {
 			line -= jump_end - jump_start;
@@ -1912,8 +1912,8 @@ static void vdp_advance_line(vdp_context *context)
 		} else {
 			line += context->border_top;
 		}
-		if (context->enabled_debuggers & (1 << VDP_DEBUG_CRAM)) {
-			uint32_t *fb = context->debug_fbs[VDP_DEBUG_CRAM] + context->debug_fb_pitch[VDP_DEBUG_CRAM] * line / sizeof(uint32_t);
+		if (context->enabled_debuggers & (1 << DEBUG_CRAM)) {
+			uint32_t *fb = context->debug_fbs[DEBUG_CRAM] + context->debug_fb_pitch[DEBUG_CRAM] * line / sizeof(uint32_t);
 			if (context->regs[REG_MODE_2] & BIT_MODE_5) {
 				for (int i = 0; i < 64; i++)
 				{
@@ -1933,10 +1933,10 @@ static void vdp_advance_line(vdp_context *context)
 			}
 		}
 		if (
-			context->enabled_debuggers & (1 << VDP_DEBUG_COMPOSITE)
+			context->enabled_debuggers & (1 << DEBUG_COMPOSITE)
 			&& line < (context->inactive_start + context->border_bot + context->border_top)
 		) {
-			uint32_t *fb = context->debug_fbs[VDP_DEBUG_COMPOSITE] + context->debug_fb_pitch[VDP_DEBUG_COMPOSITE] * line / sizeof(uint32_t);
+			uint32_t *fb = context->debug_fbs[DEBUG_COMPOSITE] + context->debug_fb_pitch[DEBUG_COMPOSITE] * line / sizeof(uint32_t);
 			for (int i = 0; i < LINEBUF_SIZE; i++)
 			{
 				*(fb++) = context->debugcolors[context->layer_debug_buf[i]];
@@ -1970,9 +1970,9 @@ static void vdp_advance_line(vdp_context *context)
 
 static void vdp_update_per_frame_debug(vdp_context *context)
 {
-	if (context->enabled_debuggers & (1 << VDP_DEBUG_PLANE)) {
+	if (context->enabled_debuggers & (1 << DEBUG_PLANE)) {
 		uint32_t pitch;
-		uint32_t *fb = render_get_framebuffer(context->debug_fb_indices[VDP_DEBUG_PLANE], &pitch);
+		uint32_t *fb = render_get_framebuffer(context->debug_fb_indices[DEBUG_PLANE], &pitch);
 		uint16_t hscroll_mask;
 		uint16_t v_mul;
 		uint16_t vscroll_mask = 0x1F | (context->regs[REG_SCROLL] & 0x30) << 1;
@@ -1997,7 +1997,7 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 			break;
 		}
 		uint16_t table_address;
-		switch(context->debug_modes[VDP_DEBUG_PLANE] % 3)
+		switch(context->debug_modes[DEBUG_PLANE] % 3)
 		{
 		case 0:
 			table_address = context->regs[REG_SCROLL_A] << 10 & 0xE000;
@@ -2067,14 +2067,14 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 				}
 			}
 		}
-		render_framebuffer_updated(context->debug_fb_indices[VDP_DEBUG_PLANE], 1024);
+		render_framebuffer_updated(context->debug_fb_indices[DEBUG_PLANE], 1024);
 	}
 
-	if (context->enabled_debuggers & (1 << VDP_DEBUG_VRAM)) {
+	if (context->enabled_debuggers & (1 << DEBUG_VRAM)) {
 		uint32_t pitch;
-		uint32_t *fb = render_get_framebuffer(context->debug_fb_indices[VDP_DEBUG_VRAM], &pitch);
+		uint32_t *fb = render_get_framebuffer(context->debug_fb_indices[DEBUG_VRAM], &pitch);
 
-		uint8_t pal = (context->debug_modes[VDP_DEBUG_VRAM] % 4) << 4;
+		uint8_t pal = (context->debug_modes[DEBUG_VRAM] % 4) << 4;
 		for (int y = 0; y < 512; y++)
 		{
 			uint32_t *line = fb + y * pitch / sizeof(uint32_t);
@@ -2096,13 +2096,13 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 			}
 		}
 
-		render_framebuffer_updated(context->debug_fb_indices[VDP_DEBUG_VRAM], 1024);
+		render_framebuffer_updated(context->debug_fb_indices[DEBUG_VRAM], 1024);
 	}
 
-	if (context->enabled_debuggers & (1 << VDP_DEBUG_CRAM)) {
+	if (context->enabled_debuggers & (1 << DEBUG_CRAM)) {
 		uint32_t starting_line = 512 - 32*4;
-		uint32_t *line = context->debug_fbs[VDP_DEBUG_CRAM]
-			+ context->debug_fb_pitch[VDP_DEBUG_CRAM]  * starting_line / sizeof(uint32_t);
+		uint32_t *line = context->debug_fbs[DEBUG_CRAM]
+			+ context->debug_fb_pitch[DEBUG_CRAM]  * starting_line / sizeof(uint32_t);
 		if (context->regs[REG_MODE_2] & BIT_MODE_5) {
 			for (int pal = 0; pal < 4; pal ++)
 			{
@@ -2118,14 +2118,14 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 						}
 						*(cur++) = 0xFF000000;
 					}
-					line += context->debug_fb_pitch[VDP_DEBUG_CRAM] / sizeof(uint32_t);
+					line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(uint32_t);
 				}
 				cur = line;
 				for (int x = 0; x < 512; x++)
 				{
 					*(cur++) = 0xFF000000;
 				}
-				line += context->debug_fb_pitch[VDP_DEBUG_CRAM] / sizeof(uint32_t);
+				line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(uint32_t);
 			}
 		} else {
 			for (int pal = 0; pal < 2; pal ++)
@@ -2142,22 +2142,22 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 						}
 						*(cur++) = 0xFF000000;
 					}
-					line += context->debug_fb_pitch[VDP_DEBUG_CRAM] / sizeof(uint32_t);
+					line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(uint32_t);
 				}
 				cur = line;
 				for (int x = 0; x < 512; x++)
 				{
 					*(cur++) = 0xFF000000;
 				}
-				line += context->debug_fb_pitch[VDP_DEBUG_CRAM] / sizeof(uint32_t);
+				line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(uint32_t);
 			}
 		}
-		render_framebuffer_updated(context->debug_fb_indices[VDP_DEBUG_CRAM], 512);
-		context->debug_fbs[VDP_DEBUG_CRAM] = render_get_framebuffer(context->debug_fb_indices[VDP_DEBUG_CRAM], &context->debug_fb_pitch[VDP_DEBUG_CRAM]);
+		render_framebuffer_updated(context->debug_fb_indices[DEBUG_CRAM], 512);
+		context->debug_fbs[DEBUG_CRAM] = render_get_framebuffer(context->debug_fb_indices[DEBUG_CRAM], &context->debug_fb_pitch[DEBUG_CRAM]);
 	}
-	if (context->enabled_debuggers & (1 << VDP_DEBUG_COMPOSITE)) {
-		render_framebuffer_updated(context->debug_fb_indices[VDP_DEBUG_COMPOSITE], LINEBUF_SIZE);
-		context->debug_fbs[VDP_DEBUG_COMPOSITE] = render_get_framebuffer(context->debug_fb_indices[VDP_DEBUG_COMPOSITE], &context->debug_fb_pitch[VDP_DEBUG_COMPOSITE]);
+	if (context->enabled_debuggers & (1 << DEBUG_COMPOSITE)) {
+		render_framebuffer_updated(context->debug_fb_indices[DEBUG_COMPOSITE], LINEBUF_SIZE);
+		context->debug_fbs[DEBUG_COMPOSITE] = render_get_framebuffer(context->debug_fb_indices[DEBUG_COMPOSITE], &context->debug_fb_pitch[DEBUG_COMPOSITE]);
 	}
 }
 
@@ -4655,7 +4655,7 @@ static vdp_context *current_vdp;
 static void vdp_debug_window_close(uint8_t which)
 {
 	//TODO: remove need for current_vdp global, and find the VDP via current_system instead
-	for (int i = 0; i < VDP_NUM_DEBUG_TYPES; i++)
+	for (int i = 0; i < NUM_DEBUG_TYPES; i++)
 	{
 		if (current_vdp->enabled_debuggers & (1 << i) && which == current_vdp->debug_fb_indices[i]) {
 			vdp_toggle_debug_view(current_vdp, i);
@@ -4675,22 +4675,22 @@ void vdp_toggle_debug_view(vdp_context *context, uint8_t debug_type)
 		char *caption;
 		switch(debug_type)
 		{
-		case VDP_DEBUG_PLANE:
+		case DEBUG_PLANE:
 			caption = "BlastEm - VDP Plane Debugger";
 			width = height = 1024;
 			break;
-		case VDP_DEBUG_VRAM:
+		case DEBUG_VRAM:
 			caption = "BlastEm - VDP VRAM Debugger";
 			width = 1024;
 			height = 512;
 			break;
-		case VDP_DEBUG_CRAM:
+		case DEBUG_CRAM:
 			caption = "BlastEm - VDP CRAM Debugger";
 			width = 512;
 			height = 512;
 			fetch_immediately = 1;
 			break;
-		case VDP_DEBUG_COMPOSITE:
+		case DEBUG_COMPOSITE:
 			caption = "BlastEm - VDP Plane Composition Debugger";
 			width = LINEBUF_SIZE;
 			height = context->inactive_start + context->border_top + context->border_bot;
@@ -4716,7 +4716,7 @@ void vdp_inc_debug_mode(vdp_context *context)
 	if (active < FRAMEBUFFER_USER_START) {
 		return;
 	}
-	for (int i = 0; i < VDP_NUM_DEBUG_TYPES; i++)
+	for (int i = 0; i < NUM_DEBUG_TYPES; i++)
 	{
 		if (context->enabled_debuggers & (1 << i) && context->debug_fb_indices[i] == active) {
 			context->debug_modes[i]++;

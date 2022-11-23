@@ -42,7 +42,8 @@ typedef enum {
 	UI_PLANE_DEBUG,
 	UI_VRAM_DEBUG,
 	UI_CRAM_DEBUG,
-	UI_COMPOSITE_DEBUG
+	UI_COMPOSITE_DEBUG,
+	UI_OSCILLOSCOPE_DEBUG,
 } ui_action;
 
 typedef struct {
@@ -432,7 +433,10 @@ void handle_binding_up(keybinding * binding)
 		case UI_VRAM_DEBUG:
 		case UI_CRAM_DEBUG:
 		case UI_COMPOSITE_DEBUG:
-			if (allow_content_binds) {
+		case UI_OSCILLOSCOPE_DEBUG:
+			if (allow_content_binds && current_system->toggle_debug_view) {
+				current_system->toggle_debug_view(current_system, binding->subtype_a - UI_PLANE_DEBUG + DEBUG_PLANE);
+				/*
 				vdp_context *vdp = NULL;
 				if (current_system->type == SYSTEM_GENESIS || current_system->type == SYSTEM_SEGACD) {
 					genesis_context *gen = (genesis_context *)current_system;
@@ -452,7 +456,7 @@ void handle_binding_up(keybinding * binding)
 					default: return;
 					}
 					vdp_toggle_debug_view(vdp, debug_type);
-				}
+				}*/
 				break;
 			}
 		}
@@ -671,6 +675,8 @@ int parse_binding_target(int device_num, const char * target, tern_node * padbut
 			*subtype_a = UI_CRAM_DEBUG;
 		} else if (!strcmp(target + 3, "compositing_debug")) {
 			*subtype_a = UI_COMPOSITE_DEBUG;
+		} else if (!strcmp(target + 3, "oscilloscope")) {
+			*subtype_a = UI_OSCILLOSCOPE_DEBUG;
 		} else {
 			warning("Unreconized UI binding type %s\n", target);
 			return 0;

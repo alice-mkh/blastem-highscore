@@ -21,6 +21,21 @@ void psg_init(psg_context * context, uint32_t master_clock, uint32_t clock_div)
 	context->pan = 0xFF;
 }
 
+void psg_enable_scope(psg_context *context, oscilloscope *scope)
+{
+	context->scope = scope;
+	static const char *names[] = {
+		"PSG #1",
+		"PSG #2",
+		"PSG #3",
+		"PSG Noise",
+	};
+	for (int i = 0; i < 4; i++)
+	{
+		context->scope_channel[i] = scope_add_channel(scope, names[i], 53693175 / context->clock_inc);
+	}
+}
+
 void psg_free(psg_context *context)
 {
 	render_free_source(context->audio);
@@ -91,6 +106,7 @@ static int16_t volume_table[16] = {
 void psg_run(psg_context * context, uint32_t cycles)
 {
 	while (context->cycles < cycles) {
+		uint8_t trigger[4] = {0,0,0,0};
 		for (int i = 0; i < 4; i++) {
 			if (context->counters[i]) {
 				context->counters[i] -= 1;
@@ -98,6 +114,7 @@ void psg_run(psg_context * context, uint32_t cycles)
 			if (!context->counters[i]) {
 				context->counters[i] = context->counter_load[i];
 				context->output_state[i] = !context->output_state[i];
+				trigger[i] = context->output_state[i];
 				if (i == 3 && context->output_state[i]) {
 					context->noise_out = context->lsfr & 1;
 					context->lsfr = (context->lsfr >> 1) | (context->lsfr << 15);
@@ -114,9 +131,10 @@ void psg_run(psg_context * context, uint32_t cycles)
 		int16_t left_accum = 0, right_accum = 0;
 		uint8_t pan_left = 0x10, pan_right = 0x1;
 
+		int16_t value = 0;
 		for (int i = 0; i < 3; i++) {
 			if (context->output_state[i]) {
-				int16_t value = volume_table[context->volume[i]];
+				value = volume_table[context->volume[i]];
 				if (context->pan & pan_left) {
 					left_accum += value;
 				}
@@ -126,15 +144,22 @@ void psg_run(psg_context * context, uint32_t cycles)
 				pan_left <<= 1;
 				pan_right <<= 1;
 			}
+			if (context->scope) {
+				scope_add_sample(context->scope, context->scope_channel[i], value, trigger[i]);
+			}
 		}
+		value = 0;
 		if (context->noise_out) {
-			int16_t value = volume_table[context->volume[3]];
+			value = volume_table[context->volume[3]];
 			if (context->pan & pan_left) {
 				left_accum += value;
 			}
 			if (context->pan & pan_right) {
 				right_accum += value;
 			}
+		}
+		if (context->scope) {
+			scope_add_sample(context->scope, context->scope_channel[3], value, trigger[3]);
 		}
 
 		render_put_stereo_sample(context->audio, left_accum, right_accum);

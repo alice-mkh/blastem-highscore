@@ -22,6 +22,15 @@ typedef enum {
 	DEBUGGER_GDB
 } debugger_type;
 
+enum {
+	DEBUG_PLANE,
+	DEBUG_VRAM,
+	DEBUG_CRAM,
+	DEBUG_COMPOSITE,
+	DEBUG_OSCILLOSCOPE,
+	NUM_DEBUG_TYPES
+};
+
 typedef void (*system_fun)(system_header *);
 typedef uint16_t (*system_fun_r16)(system_header *);
 typedef void (*system_str_fun)(system_header *, char *);
@@ -65,6 +74,7 @@ struct system_header {
 	system_ptr8_sizet_fun   deserialize;
 	system_str_fun          start_vgm_log;
 	system_fun              stop_vgm_log;
+	system_u8_fun           toggle_debug_view;
 	rom_info          info;
 	arena             *arena;
 	char              *next_rom;

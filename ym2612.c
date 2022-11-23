@@ -156,9 +156,11 @@ void ym_reset(ym2612_context *context)
 	memset(context->part2_regs, 0, sizeof(context->part2_regs));
 	memset(context->operators, 0, sizeof(context->operators));
 	FILE* savedlogs[NUM_CHANNELS];
+	uint8_t saved_scope_channel[NUM_CHANNELS];
 	for (int i = 0; i < NUM_CHANNELS; i++)
 	{
 		savedlogs[i] = context->channels[i].logfile;
+		saved_scope_channel[i] = context->channels[i].scope_channel;
 	}
 	memset(context->channels, 0, sizeof(context->channels));
 	memset(context->ch3_supp, 0, sizeof(context->ch3_supp));
@@ -179,6 +181,7 @@ void ym_reset(ym2612_context *context)
 	for (int i = 0; i < NUM_CHANNELS; i++) {
 		context->channels[i].lr = 0xC0;
 		context->channels[i].logfile = savedlogs[i];
+		context->channels[i].scope_channel = saved_scope_channel[i];
 		if (i < 3) {
 			context->part1_regs[REG_LR_AMS_PMS - YM_PART1_START + i] = 0xC0;
 		} else {
@@ -496,7 +499,9 @@ void ym_run_phase(ym2612_context *context, uint32_t channel, uint32_t op)
 		ym_operator * operator = context->operators + op;
 		ym_channel * chan = context->channels + channel;
 		uint16_t phase = operator->phase_counter >> 10 & 0x3FF;
+		uint32_t old_phase = operator->phase_counter;
 		operator->phase_counter += operator->phase_inc;//ym_calc_phase_inc(context, operator, op);
+		operator->phase_overflow = (old_phase & 0xFFFFF) > (operator->phase_counter & 0xFFFFF);
 		int16_t mod = 0;
 		if (op & 3) {
 			if (operator->mod_src[0]) {
@@ -568,20 +573,26 @@ void ym_run_phase(ym2612_context *context, uint32_t channel, uint32_t op)
 		if (op % 4 == 3) {
 			if (chan->algorithm < 4) {
 				chan->output = operator->output;
+				chan->phase_overflow = operator->phase_overflow;
 			} else if(chan->algorithm == 4) {
-				chan->output = operator->output + context->operators[channel * 4 + 2].output;
+				ym_operator *other_op = context->operators + channel * 4 + 2;
+				chan->output = operator->output + other_op->output;
+				if (operator->phase_inc < other_op->phase_inc) {
+					chan->phase_overflow = operator->phase_overflow;
+				} else {
+					chan->phase_overflow = other_op->phase_overflow;
+				}
 			} else {
 				output = 0;
+				uint32_t lowest_phase_inc = 0xFFFFFFFF;
 				for (uint32_t op = ((chan->algorithm == 7) ? 0 : 1) + channel*4; op < (channel+1)*4; op++) {
 					output += context->operators[op].output;
+					if (context->operators[op].phase_inc < lowest_phase_inc) {
+						lowest_phase_inc = context->operators[op].phase_inc;
+						chan->phase_overflow = context->operators[op].phase_overflow;
+					}
 				}
 				chan->output = output;
-			}
-			if (first_key_on) {
-				int16_t value = context->channels[channel].output & 0x3FE0;
-				if (value & 0x2000) {
-					value |= 0xC000;
-				}
 			}
 		}
 		//puts("operator update done");
@@ -610,6 +621,9 @@ void ym_output_sample(ym2612_context *context)
 		}
 		if (context->channels[i].logfile) {
 			fwrite(&value, sizeof(value), 1, context->channels[i].logfile);
+		}
+		if (context->scope) {
+			scope_add_sample(context->scope, context->channels[i].scope_channel, value, context->channels[i].phase_overflow);
 		}
 		if (context->channels[i].lr & 0x80) {
 			left += (value * context->volume_mult) / context->volume_div;
@@ -1380,5 +1394,23 @@ void ym_deserialize(deserialize_buffer *buf, void *vcontext)
 	} else {
 		context->last_status = context->status;
 		context->last_status_cycle = context->write_cycle;
+	}
+}
+
+void ym_enable_scope(ym2612_context *context, oscilloscope *scope)
+{
+	static const char *names[] = {
+		"YM2612 #1",
+		"YM2612 #2",
+		"YM2612 #3",
+		"YM2612 #4",
+		"YM2612 #5",
+		"YM2612 #6"
+	};
+	context->scope = scope;
+	for (int i = 0; i < NUM_CHANNELS; i++)
+	{
+		//TODO: calculate actual sample rate based on current clock settings
+		context->channels[i].scope_channel = scope_add_channel(scope, names[i], 53267);
 	}
 }

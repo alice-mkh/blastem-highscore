@@ -285,7 +285,7 @@ static void migrate_pads(char *key, tern_val val, uint8_t valtype, void *data)
 	*pads = tern_insert_node(*pads, key, dupe_tree(val.ptrval));
 }
 
-#define CONFIG_VERSION 5
+#define CONFIG_VERSION 6
 static tern_node *migrate_config(tern_node *config, int from_version)
 {
 	tern_node *def_config = parse_bundled_config("default.cfg");
@@ -360,6 +360,10 @@ static tern_node *migrate_config(tern_node *config, int from_version)
 		config = tern_insert_path(config, "io\0ea_multitap\0""2\0", (tern_val){.ptrval = strdup(tap12)}, TVAL_PTR);
 		config = tern_insert_path(config, "io\0ea_multitap\0""3\0", (tern_val){.ptrval = strdup(tap13)}, TVAL_PTR);
 		config = tern_insert_path(config, "io\0ea_multitap\0""4\0", (tern_val){.ptrval = strdup(tap14)}, TVAL_PTR);
+	}
+	case 5: {
+		char *binding_o = tern_find_path_default(config, "bindings\0keys\0o\0", (tern_val){.ptrval = "ui.oscilloscope"}, TVAL_PTR).ptrval;
+		config = tern_insert_path(config, "bindings\0keys\0o\0", (tern_val){.ptrval = strdup(binding_o)}, TVAL_PTR);
 	}
 	}
 	char buffer[16];

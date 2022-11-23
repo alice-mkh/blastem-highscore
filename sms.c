@@ -426,6 +426,9 @@ static void run_sms(system_header *system)
 
 		}
 		if (sms->vdp->frame != sms->last_frame) {
+			if (sms->psg->scope) {
+				scope_render(sms->psg->scope);
+			}
 			uint32_t elapsed = sms->vdp->frame - sms->last_frame;
 			sms->last_frame = sms->vdp->frame;
 			if (system->enter_debugger_frames) {
@@ -648,6 +651,22 @@ static void config_updated(system_header *system)
 	setup_io_devices(config, &system->info, &sms->io);
 }
 
+static void toggle_debug_view(system_header *system, uint8_t debug_view)
+{
+	sms_context *sms = (sms_context *)system;
+	if (debug_view < DEBUG_OSCILLOSCOPE) {
+		vdp_toggle_debug_view(sms->vdp, debug_view);
+	} else if (debug_view == DEBUG_OSCILLOSCOPE) {
+		if (sms->psg->scope) {
+			oscilloscope *scope = sms->psg->scope;
+			sms->psg->scope = NULL;
+			scope_close(scope);
+		} else {
+			oscilloscope *scope = create_oscilloscope();
+			psg_enable_scope(sms->psg, scope);
+		}
+	}
+}
 
 sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t force_region)
 {
@@ -750,6 +769,7 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.config_updated = config_updated;
 	sms->header.serialize = serialize;
 	sms->header.deserialize = deserialize;
+	sms->header.toggle_debug_view = toggle_debug_view;
 	sms->header.type = SYSTEM_SMS;
 
 	return sms;

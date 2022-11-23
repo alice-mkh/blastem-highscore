@@ -467,6 +467,9 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 		gen->reset_cycle = CYCLE_NEVER;
 	}
 	if (v_context->frame != gen->last_frame) {
+		if (gen->ym->scope) {
+			scope_render(gen->ym->scope);
+		}
 		//printf("reached frame end %d | MCLK Cycles: %d, Target: %d, VDP cycles: %d, vcounter: %d, hslot: %d\n", gen->last_frame, mclks, gen->frame_end, v_context->cycles, v_context->vcounter, v_context->hslot);
 		uint32_t elapsed = v_context->frame - gen->last_frame;
 		gen->last_frame = v_context->frame;
@@ -1712,6 +1715,33 @@ static void stop_vgm_log(system_header *system)
 	gen->header.vgm_logging = 0;
 }
 
+static void toggle_debug_view(system_header *system, uint8_t debug_view)
+{
+	genesis_context *gen = (genesis_context *)system;
+	if (debug_view < DEBUG_OSCILLOSCOPE) {
+		vdp_toggle_debug_view(gen->vdp, debug_view);
+	} else if (debug_view == DEBUG_OSCILLOSCOPE) {
+		if (gen->ym->scope) {
+			oscilloscope *scope = gen->ym->scope;
+			gen->ym->scope = NULL;
+			gen->psg->scope = NULL;
+			if (gen->expansion) {
+				segacd_context *cd = gen->expansion;
+				cd->pcm.scope = NULL;
+			}
+			scope_close(scope);
+		} else {
+			oscilloscope *scope = create_oscilloscope();
+			ym_enable_scope(gen->ym, scope);
+			psg_enable_scope(gen->psg, scope);
+			if (gen->expansion) {
+				segacd_context *cd = gen->expansion;
+				rf5c164_enable_scope(&cd->pcm, scope);
+			}
+		}
+	}
+}
+
 static void *tmss_rom_write_16(uint32_t address, void *context, uint16_t value)
 {
 	m68k_context *m68k = context;
@@ -1886,6 +1916,7 @@ static genesis_context *shared_init(uint32_t system_opts, rom_info *rom, uint8_t
 	gen->header.deserialize = deserialize;
 	gen->header.start_vgm_log = start_vgm_log;
 	gen->header.stop_vgm_log = stop_vgm_log;
+	gen->header.toggle_debug_view = toggle_debug_view;
 	gen->header.type = SYSTEM_GENESIS;
 	gen->header.info = *rom;
 	set_region(gen, rom, force_region);

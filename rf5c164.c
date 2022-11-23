@@ -92,10 +92,15 @@ void rf5c164_run(rf5c164* pcm, uint32_t cycle)
 				pcm->channels[pcm->cur_channel].cur_ptr = pcm->channels[pcm->cur_channel].regs[ST] << 19;
 				//printf("chan %d START %X (%X raw)\n", pcm->cur_channel, pcm->channels[pcm->cur_channel].cur_ptr >> 11, pcm->channels[pcm->cur_channel].cur_ptr);
 				pcm->channels[pcm->cur_channel].state = NORMAL;
+				pcm->channels[pcm->cur_channel].trigger = 1;
 			} else if (pcm->channels[pcm->cur_channel].state == LOOP) {
+				uint32_t old_ptr = pcm->channels[pcm->cur_channel].cur_ptr;
 				pcm->channels[pcm->cur_channel].cur_ptr = (pcm->channels[pcm->cur_channel].regs[LSH] << 19) | (pcm->channels[pcm->cur_channel].regs[LSL] << 11);
 				//printf("chan %d LOOP %X (%X raw)\n", pcm->cur_channel, pcm->channels[pcm->cur_channel].cur_ptr >> 11, pcm->channels[pcm->cur_channel].cur_ptr);
 				pcm->channels[pcm->cur_channel].state = NORMAL;
+				pcm->channels[pcm->cur_channel].trigger = old_ptr != pcm->channels[pcm->cur_channel].cur_ptr;
+			} else {
+				pcm->channels[pcm->cur_channel].trigger = 0;
 			}
 		}
 		write_if_not_sounding(pcm);
@@ -144,8 +149,13 @@ void rf5c164_run(rf5c164* pcm, uint32_t cycle)
 			int16_t left = (sample * (pcm->channels[pcm->cur_channel].regs[PAN] >> 4)) >> 5;
 			int16_t right = (sample * (pcm->channels[pcm->cur_channel].regs[PAN] & 0xF)) >> 5;
 			//printf("chan %d, raw %X, sample %d, left %d, right %d, ptr %X (raw %X)\n", pcm->cur_channel, pcm->channels[pcm->cur_channel].sample, sample, left, right, pcm->channels[pcm->cur_channel].cur_ptr >> 11, pcm->channels[pcm->cur_channel].cur_ptr);
+			if (pcm->scope) {
+				scope_add_sample(pcm->scope, pcm->channels[pcm->cur_channel].scope_channel, sample, pcm->channels[pcm->cur_channel].trigger);
+			}
 			pcm->left += left;
 			pcm->right += right;
+		} else if (pcm->scope) {
+			scope_add_sample(pcm->scope, pcm->channels[pcm->cur_channel].scope_channel, 0, 0);
 		}
 		write_if_not_sounding(pcm);
 		CHECK;
@@ -226,5 +236,24 @@ uint8_t rf5c164_read(rf5c164* pcm, uint16_t address)
 		return pcm->ram[pcm->ram_bank | (address & 0xFFF)];
 	} else {
 		return 0xFF;
+	}
+}
+
+void rf5c164_enable_scope(rf5c164* pcm, oscilloscope *scope)
+{
+	static const char *names[] = {
+		"Richo #1",
+		"Richo #2",
+		"Richo #3",
+		"Richo #4",
+		"Richo #5",
+		"Richo #6",
+		"Richo #7",
+		"Richo #8",
+	};
+	pcm->scope = scope;
+	for (int i = 0; i < 8; i ++)
+	{
+		pcm->channels[i].scope_channel = scope_add_channel(scope, names[i], 50000000 / (pcm->clock_step * 96));
 	}
 }

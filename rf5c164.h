@@ -2,16 +2,20 @@
 #define RF5C164_H_
 #include <stdint.h>
 #include "render_audio.h"
+#include "oscilloscope.h"
 
 typedef struct {
 	uint32_t cur_ptr;
 	uint8_t  regs[7];
 	uint8_t  sample;
 	uint8_t  state;
+	uint8_t  scope_channel;
+	uint8_t  trigger;
 } rf5c164_channel;
 
 typedef struct {
 	audio_source    *audio;
+	oscilloscope    *scope;
 	uint32_t        cycle;
 	uint32_t        clock_step;
 	uint16_t        ram[64*1024];
@@ -33,5 +37,6 @@ void rf5c164_deinit(rf5c164* pcm);
 void rf5c164_run(rf5c164* pcm, uint32_t cycle);
 void rf5c164_write(rf5c164* pcm, uint16_t address, uint8_t value);
 uint8_t rf5c164_read(rf5c164* pcm, uint16_t address);
+void rf5c164_enable_scope(rf5c164* pcm, oscilloscope *scope);
 
 #endif //RF5C164_H_
