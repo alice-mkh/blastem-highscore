@@ -1615,6 +1615,7 @@ static void free_genesis(system_header *system)
 	if (gen->save_type != SAVE_NONE && gen->mapper_type != MAPPER_SEGA_MED_V2) {
 		free(gen->save_storage);
 	}
+	free(map);
 	free(gen);
 }
 
@@ -2233,6 +2234,7 @@ genesis_context *alloc_config_genesis(void *rom, uint32_t rom_size, void *lock_o
 		}
 		cd->base = 0x400000;
 	}
+	info.map = gen->header.info.map = NULL;
 
 	m68k_options *opts = malloc(sizeof(m68k_options));
 	init_m68k_opts(opts, map, map_chunks, MCLKS_PER_68K, sync_components);
