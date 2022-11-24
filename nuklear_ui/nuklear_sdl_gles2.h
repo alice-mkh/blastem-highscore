@@ -251,6 +251,7 @@ nk_sdl_render(enum nk_anti_aliasing AA, int max_vertex_buffer, int max_element_b
         /* load vertices/elements directly into vertex/element buffer */
         vertices = malloc((size_t)max_vertex_buffer);
         elements = malloc((size_t)max_element_buffer);
+		struct nk_buffer vbuf, ebuf;
         {
             /* fill convert configuration */
             struct nk_convert_config config;
@@ -273,10 +274,9 @@ nk_sdl_render(enum nk_anti_aliasing AA, int max_vertex_buffer, int max_element_b
             config.line_AA = AA;
 
             /* setup buffers to load vertices and elements */
-            {struct nk_buffer vbuf, ebuf;
             nk_buffer_init_fixed(&vbuf, vertices, (nk_size)max_vertex_buffer);
             nk_buffer_init_fixed(&ebuf, elements, (nk_size)max_element_buffer);
-            nk_convert(&sdl.ctx, &dev->cmds, &vbuf, &ebuf, &config);}
+            nk_convert(&sdl.ctx, &dev->cmds, &vbuf, &ebuf, &config);
         }
         glBufferSubData(GL_ARRAY_BUFFER, 0, (size_t)max_vertex_buffer, vertices);
         glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, (size_t)max_element_buffer, elements);
