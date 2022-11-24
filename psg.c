@@ -131,7 +131,7 @@ void psg_run(psg_context * context, uint32_t cycles)
 		int16_t left_accum = 0, right_accum = 0;
 		uint8_t pan_left = 0x10, pan_right = 0x1;
 
-		int16_t value = 0;
+		int16_t value;
 		for (int i = 0; i < 3; i++) {
 			if (context->output_state[i]) {
 				value = volume_table[context->volume[i]];
@@ -143,6 +143,8 @@ void psg_run(psg_context * context, uint32_t cycles)
 				}
 				pan_left <<= 1;
 				pan_right <<= 1;
+			} else {
+				value = 0;
 			}
 			if (context->scope) {
 				scope_add_sample(context->scope, context->scope_channel[i], value, trigger[i]);
