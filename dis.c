@@ -197,7 +197,7 @@ int main(int argc, char ** argv)
 			add_label(context, "reset", filebuf[2] << 16 | filebuf[3]);
 		}
 	} else if (filesize > 0x1000) {
-		long boot_size = filesize > (32*1024) ? 32*1024 : filesize;
+		long boot_size = filesize > (16*2352) ? 16*2352 : filesize;
 		filebuf = malloc(boot_size);
 		if (fread(filebuf, 1, boot_size, f) != boot_size) {
 			fprintf(stderr, "Failure while reading file %s\n", argv[1]);
