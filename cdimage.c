@@ -294,6 +294,9 @@ uint8_t parse_cue(system_media *media)
 						tracks[track].start_lba = timecode_to_lba(after);
 						if (!has_index_0) {
 							start_lba = tracks[track].start_lba;
+							if (!tracks[track].fake_pregap) {
+								tracks[track].pregap_lba = start_lba;
+							}
 							has_start_lba = 1;
 						}
 					}
