@@ -5,7 +5,6 @@
 
 SDL_Window *render_get_window(void);
 typedef void (*event_handler)(SDL_Event *);
-void render_update_display(void);
 void render_set_event_handler(event_handler handler);
 SDL_Joystick *render_get_joystick(int index);
 SDL_GameController *render_get_controller(int index);

@@ -1055,6 +1055,7 @@ static uint8_t read_parse_command(debug_root *root, parsed_command *out, int ind
 #endif
 	do {
 		process_events();
+		render_update_display();
 #ifndef _WIN32
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 16667;
@@ -1901,7 +1902,7 @@ static uint8_t cmd_disassemble_m68k(debug_root *root, parsed_command *cmd)
 				printf("%s:\n", def->labels[i]);
 			}
 		}
-		
+
 		address = m68k_decode(m68k_instruction_fetch, context, &inst, address);
 		m68k_disasm_labels(&inst, disasm_buf, root->disasm);
 		printf("\t%s\n", disasm_buf);
