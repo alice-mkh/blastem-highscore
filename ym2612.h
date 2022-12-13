@@ -159,7 +159,7 @@ void ym_print_channel_info(ym2612_context *context, int channel);
 void ym_print_timer_info(ym2612_context *context);
 void ym_serialize(ym2612_context *context, serialize_buffer *buf);
 void ym_deserialize(deserialize_buffer *buf, void *vcontext);
-void ym_enable_scope(ym2612_context *context, oscilloscope *scope);
+void ym_enable_scope(ym2612_context *context, oscilloscope *scope, uint32_t master_clock);
 
 #endif //YM2612_H_
 

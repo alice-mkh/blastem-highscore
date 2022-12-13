@@ -1397,7 +1397,7 @@ void ym_deserialize(deserialize_buffer *buf, void *vcontext)
 	}
 }
 
-void ym_enable_scope(ym2612_context *context, oscilloscope *scope)
+void ym_enable_scope(ym2612_context *context, oscilloscope *scope, uint32_t master_clock)
 {
 	static const char *names[] = {
 		"YM2612 #1",
@@ -1410,7 +1410,6 @@ void ym_enable_scope(ym2612_context *context, oscilloscope *scope)
 	context->scope = scope;
 	for (int i = 0; i < NUM_CHANNELS; i++)
 	{
-		//TODO: calculate actual sample rate based on current clock settings
-		context->channels[i].scope_channel = scope_add_channel(scope, names[i], 53267);
+		context->channels[i].scope_channel = scope_add_channel(scope, names[i], master_clock / (context->clock_inc * NUM_OPERATORS));
 	}
 }

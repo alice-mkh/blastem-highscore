@@ -1733,8 +1733,8 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 			scope_close(scope);
 		} else {
 			oscilloscope *scope = create_oscilloscope();
-			ym_enable_scope(gen->ym, scope);
-			psg_enable_scope(gen->psg, scope);
+			ym_enable_scope(gen->ym, scope, gen->normal_clock);
+			psg_enable_scope(gen->psg, scope, gen->normal_clock);
 			if (gen->expansion) {
 				segacd_context *cd = gen->expansion;
 				rf5c164_enable_scope(&cd->pcm, scope);

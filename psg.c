@@ -21,7 +21,7 @@ void psg_init(psg_context * context, uint32_t master_clock, uint32_t clock_div)
 	context->pan = 0xFF;
 }
 
-void psg_enable_scope(psg_context *context, oscilloscope *scope)
+void psg_enable_scope(psg_context *context, oscilloscope *scope, uint32_t master_clock)
 {
 	context->scope = scope;
 	static const char *names[] = {
@@ -32,7 +32,7 @@ void psg_enable_scope(psg_context *context, oscilloscope *scope)
 	};
 	for (int i = 0; i < 4; i++)
 	{
-		context->scope_channel[i] = scope_add_channel(scope, names[i], 53693175 / context->clock_inc);
+		context->scope_channel[i] = scope_add_channel(scope, names[i], master_clock / context->clock_inc);
 	}
 }
 

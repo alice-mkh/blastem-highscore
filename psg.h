@@ -33,7 +33,7 @@ typedef struct {
 
 
 void psg_init(psg_context * context, uint32_t master_clock, uint32_t clock_div);
-void psg_enable_scope(psg_context *context, oscilloscope *scope);
+void psg_enable_scope(psg_context *context, oscilloscope *scope, uint32_t master_clock);
 void psg_free(psg_context *context);
 void psg_adjust_master_clock(psg_context * context, uint32_t master_clock);
 void psg_write(psg_context * context, uint8_t value);
