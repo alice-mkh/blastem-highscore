@@ -14,6 +14,7 @@
 #include "megawifi.h"
 #include "jcart.h"
 #include "blastem.h"
+#include "sft_mapper.h"
 
 #define DOM_TITLE_START 0x120
 #define DOM_TITLE_END 0x150
@@ -980,6 +981,22 @@ void map_iter_fun(char *key, tern_val val, uint8_t valtype, void *data)
 		map->read_16 = jcart_read_w;
 		map->read_8 = jcart_read_b;
 		map->mask = 0xFFFFFF;
+	} else if (!strcmp(dtype, "sft-wukong-fixed") || !strcmp(dtype, "sft-wukong-remap")) {
+		state->info->mapper_type = MAPPER_SFT_WUKONG;
+		uint32_t expanded_size = nearest_pow2(state->rom_size);
+		if (offset >= expanded_size) {
+			fatal_error("offset of %X is invalid for ROM size of %X in map entry %d with addess %s\n", offset, state->rom_size, state->index, key);
+		}
+		map->buffer = state->rom + offset;
+		map->mask = calc_mask(nearest_pow2(state->rom_size) - offset, start, end);
+		map->write_8 = sft_wukong_write_b;
+		map->write_16 = sft_wukong_write_w;
+		if (!strcmp(dtype, "sft-wukong-remap")) {
+			map->flags = MMAP_READ | MMAP_CODE | MMAP_PTR_IDX;
+			state->info->mapper_start_index = state->ptr_index++;
+		} else {
+			map->flags = MMAP_READ;
+		}
 	} else {
 		fatal_error("Invalid device type %s for ROM DB map entry %d with address %s\n", dtype, state->index, key);
 	}
@@ -1003,7 +1020,7 @@ rom_info configure_rom(tern_node *rom_db, void *vrom, uint32_t rom_size, void *l
 	product_id[GAME_ID_LEN] = 0;
 	for (int i = 0; i < GAME_ID_LEN; i++)
 	{
-		if (rom[GAME_ID_OFF + i] <= ' ') {
+		if (i >= 3 && rom[GAME_ID_OFF + i] <= ' ') {
 			product_id[i] = 0;
 			break;
 		}
@@ -1019,6 +1036,9 @@ rom_info configure_rom(tern_node *rom_db, void *vrom, uint32_t rom_size, void *l
 	tern_node * entry = tern_find_node(rom_db, hex_hash);
 	if (!entry) {
 		entry = tern_find_node(rom_db, product_id);
+	}
+	if (!entry) {
+		entry = tern_find_node(rom_db, product_id + 3);
 	}
 	if (!entry) {
 		debug_message("Not found in ROM DB, examining header\n\n");

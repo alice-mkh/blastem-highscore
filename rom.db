@@ -1508,3 +1508,25 @@ T-172176 {
 		}
 	}
 }
+SF-002 {
+	name Legend of Wukong
+	SRAM {
+		size 8192
+		bus odd
+	}
+	map {
+		0 {
+			device sft-wukong-fixed
+			last 1FFFFF
+		}
+		200000 {
+			device sft-wukong-remap
+			offset 200000
+			last 3BFFFF
+		}
+		3C0000 {
+			device SRAM
+			last 3FFFFF
+		}
+	}
+}

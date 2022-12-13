@@ -49,7 +49,8 @@ enum {
 	MAPPER_XBAND,
 	MAPPER_MULTI_GAME,
 	MAPPER_JCART,
-	MAPPER_SEGA_MED_V2
+	MAPPER_SEGA_MED_V2,
+	MAPPER_SFT_WUKONG
 };
 
 
@@ -82,8 +83,8 @@ struct rom_info {
 	uint8_t       wants_cd;
 };
 
-#define GAME_ID_OFF 0x183
-#define GAME_ID_LEN 8
+#define GAME_ID_OFF 0x180
+#define GAME_ID_LEN 11
 
 tern_node *get_rom_db();
 rom_info configure_rom(tern_node *rom_db, void *vrom, uint32_t rom_size, void *lock_on, uint32_t lock_on_size, memmap_chunk const *base_map, uint32_t base_chunks);
