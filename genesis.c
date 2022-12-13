@@ -1695,12 +1695,12 @@ static void config_updated(system_header *system)
 static void start_vgm_log(system_header *system, char *filename)
 {
 	genesis_context *gen = (genesis_context *)system;
-	vgm_writer *vgm = vgm_write_open(filename, gen->version_reg & HZ50 ? 50 : 60, gen->master_clock, gen->m68k->current_cycle);
+	vgm_writer *vgm = vgm_write_open(filename, gen->version_reg & HZ50 ? 50 : 60, gen->normal_clock, gen->m68k->current_cycle);
 	if (vgm) {
 		printf("Started logging VGM to %s\n", filename);
 		sync_sound(gen, vgm->last_cycle);
-		ym_vgm_log(gen->ym, gen->master_clock, vgm);
-		psg_vgm_log(gen->psg, gen->master_clock, vgm);
+		ym_vgm_log(gen->ym, gen->normal_clock, vgm);
+		psg_vgm_log(gen->psg, gen->normal_clock, vgm);
 		gen->header.vgm_logging = 1;
 	} else {
 		printf("Failed to start logging to %s\n", filename);
