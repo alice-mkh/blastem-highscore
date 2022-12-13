@@ -663,7 +663,7 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 			scope_close(scope);
 		} else {
 			oscilloscope *scope = create_oscilloscope();
-			psg_enable_scope(sms->psg, scope);
+			psg_enable_scope(sms->psg, scope, sms->normal_clock);
 		}
 	}
 }
