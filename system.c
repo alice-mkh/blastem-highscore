@@ -32,23 +32,23 @@ system_type detect_system_type(system_media *media)
 			return buffer[8] + 1;
 		}
 	}
-		
-	
+
+
 	//TODO: Detect Jaguar ROMs here
-	
+
 	//Header based detection failed, examine filename for clues
 	if (media->extension) {
 		if (!strcmp("md", media->extension) || !strcmp("gen", media->extension)) {
 			return SYSTEM_GENESIS;
 		}
-		if (!strcmp("sms", media->extension)) {
+		if (!strcmp("sms", media->extension) || !strcmp("sg", media->extension) || !strcmp("gg", media->extension)) {
 			return SYSTEM_SMS;
 		}
 		if (!strcmp("j64", media->extension)) {
 			return SYSTEM_JAGUAR;
 		}
 	}
-	
+
 	//More certain checks failed, look for a valid 68K reset vector
 	if (media->size >= 8) {
 		char *rom = media->buffer;

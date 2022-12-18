@@ -690,8 +690,15 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.info.map = malloc(sizeof(memmap_chunk) * sms->header.info.map_chunks);
 	memcpy(sms->header.info.map, memory_map, sizeof(memmap_chunk) * sms->header.info.map_chunks);
 	z80_options *zopts = malloc(sizeof(z80_options));
+	tern_node *model_def;
 	uint8_t is_gamegear = !strcasecmp(media->extension, "gg");
-	tern_node *model_def = is_gamegear ? tern_find_node(get_systems_config(), "gg") : get_model(config, SYSTEM_SMS);
+	if (is_gamegear) {
+		model_def = tern_find_node(get_systems_config(), "gg");
+	} else if (!strcasecmp(media->extension, "sg")) {
+		model_def = tern_find_node(get_systems_config(), "sg1000");
+	} else {
+		model_def = get_model(config, SYSTEM_SMS);
+	}
 	char *vdp_str = tern_find_ptr(model_def, "vdp");
 	uint8_t vdp_type = is_gamegear ? VDP_GENESIS : VDP_GAMEGEAR;
 	if (vdp_str) {

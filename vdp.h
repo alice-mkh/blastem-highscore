@@ -35,6 +35,8 @@
 #define FBUF_SHADOW 0x0001
 #define FBUF_HILIGHT 0x0010
 #define FBUF_MODE4 0x0100
+#define FBUF_MASK (FBUF_SHADOW|FBUF_HILIGHT|FBUF_MODE4)
+#define FBUF_TMS (FBUF_MODE4 | FBUF_SHADOW)
 #define DBG_SHADOW 0x10
 #define DBG_HILIGHT 0x20
 #define DBG_PRIORITY 0x8
@@ -94,7 +96,9 @@ enum {
 	REG_DMASRC_H,
 	REG_KMOD_CTRL=29,
 	REG_KMOD_MSG,
-	REG_KMOD_TIMER
+	REG_KMOD_TIMER,
+	REG_COLOR_TABLE=REG_WINDOW,
+	REG_PATTERN_GEN=REG_SCROLL_B
 };
 
 //Mode reg 1
@@ -106,14 +110,18 @@ enum {
 #define BIT_PAL_SEL    0x04
 #define BIT_MODE_4     BIT_PAL_SEL
 #define BIT_HVC_LATCH  0x02
+#define BIT_M3         BIT_HVC_LATCH
 #define BIT_DISP_DIS   0x01
 
 //Mode reg 2
 #define BIT_128K_VRAM  0x80
+#define BIT_16K_VRAM   BIT_128K_VRAM
 #define BIT_DISP_EN    0x40
 #define BIT_VINT_EN    0x20
 #define BIT_DMA_ENABLE 0x10
+#define BIT_M1         BIT_DMA_ENABLE
 #define BIT_PAL        0x08
+#define BIT_M2         BIT_PAL
 #define BIT_MODE_5     0x04
 #define BIT_SPRITE_SZ  0x02
 #define BIT_SPRITE_ZM  0x01

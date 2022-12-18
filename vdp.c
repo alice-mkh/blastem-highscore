@@ -36,7 +36,7 @@
 #define HBLANK_END_H32 0 //should be 5 according to Nemesis, but 0 seems to fit better with my test ROM results
 #define LINE_CHANGE_H40 165
 #define LINE_CHANGE_H32 133
-#define LINE_CHANGE_MODE4 249
+#define LINE_CHANGE_MODE4 248
 #define VBLANK_START_H40 (LINE_CHANGE_H40+2)
 #define VBLANK_START_H32 (LINE_CHANGE_H32+2)
 #define FIFO_LATENCY    3
@@ -164,29 +164,103 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t
 	context->regs[REG_HINT] = context->hint_counter = 0xFF;
 	context->vsram_size = has_max_vsram ? MAX_VSRAM_SIZE : MIN_VSRAM_SIZE;
 	context->type = type;
-	uint8_t b,g,r;
+	uint8_t b,g,r,index;
 	for (uint16_t color = 0; color < (1 << 12); color++) {
 		if (type == VDP_GAMEGEAR) {
 			b = (color >> 8 & 0xF) * 0x11;
 			g = (color >> 4 & 0xF) * 0x11;
 			r = (color & 0xF) * 0x11;
-		}else if (color & FBUF_SHADOW) {
-			b = levels[(color >> 9) & 0x7];
-			g = levels[(color >> 5) & 0x7];
-			r = levels[(color >> 1) & 0x7];
-		} else if(color & FBUF_HILIGHT) {
-			b = levels[((color >> 9) & 0x7) + 7];
-			g = levels[((color >> 5) & 0x7) + 7];
-			r = levels[((color >> 1) & 0x7) + 7];
-		} else if(color & FBUF_MODE4) {
-			//TODO: Mode 4 has a separate DAC tap so this isn't quite correct
-			b = levels[(color >> 4 & 0xC) | (color >> 6 & 0x2)];
-			g = levels[(color >> 2 & 0x8) | (color >> 1 & 0x4) | (color >> 4 & 0x2)];
-			r = levels[(color << 1 & 0xC) | (color >> 1 & 0x2)];
 		} else {
-			b = levels[(color >> 8) & 0xE];
-			g = levels[(color >> 4) & 0xE];
-			r = levels[color & 0xE];
+			switch (color & FBUF_MASK)
+			{
+			case FBUF_SHADOW:
+				b = levels[(color >> 9) & 0x7];
+				g = levels[(color >> 5) & 0x7];
+				r = levels[(color >> 1) & 0x7];
+				break;
+			case FBUF_HILIGHT:
+				b = levels[((color >> 9) & 0x7) + 7];
+				g = levels[((color >> 5) & 0x7) + 7];
+				r = levels[((color >> 1) & 0x7) + 7];
+				break;
+			case FBUF_MODE4:
+				//TODO: Mode 4 has a separate DAC tap so this isn't quite correct
+				//TODO: blue channel has one of its taps offest on SMS1 and MD
+				b = levels[(color >> 4 & 0xC) | (color >> 6 & 0x2)];
+				g = levels[(color >> 2 & 0x8) | (color >> 1 & 0x4) | (color >> 4 & 0x2)];
+				r = levels[(color << 1 & 0xC) | (color >> 1 & 0x2)];
+				break;
+			case FBUF_TMS:
+				index = color >> 1 & 0x7;
+				index |= color >> 2 & 0x8;
+				if (type == VDP_TMS9918A) {
+					switch (index)
+					{
+					case 0:
+					case 1:
+						r = g = b = 0;
+						break;
+					case 2:
+						r = 0x21; g = 0xC8; b = 0x42;
+						break;
+					case 3:
+						r = 0x5E; g = 0xDC; b = 0x78;
+						break;
+					case 4:
+						r = 0x54; g = 0x55; b = 0xED;
+						break;
+					case 5:
+						r = 0x7D; g = 0x76; b = 0xFC;
+						break;
+					case 6:
+						r = 0xD4; g = 0x52; b = 0x4D;
+						break;
+					case 7:
+						r = 0x42; g = 0xEB; b = 0xF5;
+						break;
+					case 8:
+						r = 0xFC; g = 0x55; b = 0x54;
+						break;
+					case 9:
+						r = 0xFF; g = 0x79; b = 0x78;
+						break;
+					case 10:
+						r = 0xD4; g = 0xC1; b = 0x54;
+						break;
+					case 11:
+						r = 0xE6; g = 0xCE; b = 0x80;
+						break;
+					case 12:
+						r = 0x21; g = 0xB0; b = 0x3B;
+						break;
+					case 13:
+						r = 0xC9; g = 0x5B; b = 0xBA;
+						break;
+					case 14:
+						r = g = b = 0xCC;
+						break;
+					case 15:
+						r = g = b = 0xFF;
+						break;
+					}
+				} else {
+					static const uint8_t tms_to_sms[] = {
+						0x00, 0x00, 0x08, 0x0C, 0x10, 0x30, 0x01, 0x3C, 0x02, 0x03, 0x05, 0x0F, 0x04, 0x33, 0x15, 0x3F
+					};
+					index = tms_to_sms[index] << 1;
+					index = (index & 0xE) | (index << 1 & 0x80);
+					//TODO: Mode 4 has a separate DAC tap so this isn't quite correct
+					//TODO: blue channel has one of its taps offest on SMS1 and MD
+					b = levels[(index >> 4 & 0xC) | (index >> 6 & 0x2)];
+					g = levels[(index >> 2 & 0x8) | (index >> 1 & 0x4) | (index >> 4 & 0x2)];
+					r = levels[(index << 1 & 0xC) | (index >> 1 & 0x2)];
+				}
+				break;
+			default:
+				b = levels[(color >> 8) & 0xE];
+				g = levels[(color >> 4) & 0xE];
+				r = levels[color & 0xE];
+			}
 		}
 		context->color_map[color] = render_map_color(r, g, b);
 	}
@@ -450,7 +524,7 @@ static uint32_t mode5_sat_address(vdp_context *context)
 
 void vdp_print_sprite_table(vdp_context * context)
 {
-	if (context->regs[REG_MODE_2] & BIT_MODE_5) {
+	if (context->type == VDP_GENESIS && context->regs[REG_MODE_2] & BIT_MODE_5) {
 		uint16_t sat_address = mode5_sat_address(context);
 		uint16_t current_index = 0;
 		uint8_t count = 0;
@@ -469,7 +543,7 @@ void vdp_print_sprite_table(vdp_context * context)
 			current_index = link;
 			count++;
 		} while (current_index != 0 && count < 80);
-	} else {
+	} else if (context->type != VDP_TMS9918A && context->regs[REG_MODE_1] & BIT_MODE_4) {
 		uint16_t sat_address = (context->regs[REG_SAT] & 0x7E) << 7;
 		for (int i = 0; i < 64; i++)
 		{
@@ -484,6 +558,27 @@ void vdp_print_sprite_table(vdp_context * context)
 				tile_address &= ~32;
 			}
 			printf("Sprite %d: X=%d, Y=%d, Pat=%X\n", i, x, y, tile_address);
+		}
+	} else if (context->type != VDP_GENESIS) {
+		uint16_t sat_address = context->regs[REG_SAT] << 7 & 0x3F80;
+		for (int i = 0; i < 32; i++)
+		{
+			uint16_t address = i << 2 | sat_address;
+			int16_t y = context->vdpmem[mode4_address_map[address++] ^ 1];
+			if (y == 208) {
+				break;
+			}
+			if (y > 192) {
+				y -= 256;
+			}
+			int16_t x = context->vdpmem[mode4_address_map[address++] ^ 1];
+			uint8_t name = context->vdpmem[mode4_address_map[address++] ^ 1];
+			uint8_t tag = context->vdpmem[mode4_address_map[address] ^ 1];
+			if (tag & 0x80) {
+				x -= 32;
+			}
+			tag &= 0xF;
+			printf("Sprite %d: X=%d, Y=%d, Pat=%X, Color=%X\n", i, x, y, name, tag);
 		}
 	}
 }
@@ -1970,6 +2065,83 @@ static void vdp_advance_line(vdp_context *context)
 	}
 }
 
+static void vram_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context)
+{
+	uint8_t pal = (context->debug_modes[DEBUG_VRAM] % 4) << 4;
+	for (int y = 0; y < 512; y++)
+	{
+		uint32_t *line = fb + y * pitch / sizeof(uint32_t);
+		int row = y >> 4;
+		int yoff = y >> 1 & 7;
+		for (int col = 0; col < 64; col++)
+		{
+			uint16_t address = (row * 64 + col) * 32 + yoff * 4;
+			for (int x = 0; x < 4; x++)
+			{
+				uint8_t byte = context->vdpmem[address++];
+				uint8_t left = byte >> 4 | pal;
+				uint8_t right = byte & 0xF | pal;
+				*(line++) = context->colors[left];
+				*(line++) = context->colors[left];
+				*(line++) = context->colors[right];
+				*(line++) = context->colors[right];
+			}
+		}
+	}
+}
+
+static void vram_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *context)
+{
+	for (int y = 0; y < 256; y++)
+	{
+		uint32_t *line = fb + y * pitch / sizeof(uint32_t);
+		int row = y >> 4;
+		int yoff = y >> 1 & 7;
+		for (int col = 0; col < 64; col++)
+		{
+			uint8_t pal = (col >= 32) << 4;
+			uint16_t address = (row * 32 + (col & 31)) * 32 + yoff * 4;
+			uint32_t pixels = 0;
+			for (int x = 0; x < 4; x++)
+			{
+				uint8_t byte = context->vdpmem[mode4_address_map[address++]];
+				pixels |= planar_to_chunky[byte] << (x ^ 1);
+			}
+			for (int x = 0; x < 32; x+=4)
+			{
+				uint8_t pixel = (pixels >> (28 - x) & 0xF) | pal;
+				*(line++) = context->colors[pixel + MODE4_OFFSET];
+				*(line++) = context->colors[pixel + MODE4_OFFSET];
+			}
+		}
+	}
+}
+
+static void vram_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
+{
+	uint8_t pal = ((context->debug_modes[DEBUG_VRAM] % 14) + 2) << 1;
+	pal = (pal & 0xE) | (pal << 1 & 0x20);
+	for (int y = 0; y < 512; y++)
+	{
+		uint32_t *line = fb + y * pitch / sizeof(uint32_t);
+		int row = y >> 4;
+		int yoff = y >> 1 & 7;
+		for (int col = 0; col < 64; col++)
+		{
+			uint16_t address = (row * 64 + col) * 8 + yoff;
+			uint8_t byte = context->vdpmem[mode4_address_map[address^1]];
+			for (int x = 0; x < 8; x++)
+			{
+				uint16_t pixel = (byte & 0x80) ? pal : 0;
+				byte <<= 1;
+				*(line++) = context->color_map[pixel | FBUF_TMS];
+				*(line++) = context->color_map[pixel | FBUF_TMS];
+			}
+		}
+	}
+}
+
+
 static void vdp_update_per_frame_debug(vdp_context *context)
 {
 	if (context->enabled_debuggers & (1 << DEBUG_PLANE)) {
@@ -2075,29 +2247,13 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 	if (context->enabled_debuggers & (1 << DEBUG_VRAM)) {
 		uint32_t pitch;
 		uint32_t *fb = render_get_framebuffer(context->debug_fb_indices[DEBUG_VRAM], &pitch);
-
-		uint8_t pal = (context->debug_modes[DEBUG_VRAM] % 4) << 4;
-		for (int y = 0; y < 512; y++)
-		{
-			uint32_t *line = fb + y * pitch / sizeof(uint32_t);
-			int row = y >> 4;
-			int yoff = y >> 1 & 7;
-			for (int col = 0; col < 64; col++)
-			{
-				uint16_t address = (row * 64 + col) * 32 + yoff * 4;
-				for (int x = 0; x < 4; x++)
-				{
-					uint8_t byte = context->vdpmem[address++];
-					uint8_t left = byte >> 4 | pal;
-					uint8_t right = byte & 0xF | pal;
-					*(line++) = context->colors[left];
-					*(line++) = context->colors[left];
-					*(line++) = context->colors[right];
-					*(line++) = context->colors[right];
-				}
-			}
+		if (context->type == VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_MODE_5)) {
+			vram_debug_mode5(fb, pitch, context);
+		} else if (context->type != VDP_TMS9918A && (context->regs[REG_MODE_1] & BIT_MODE_4)) {
+			vram_debug_mode4(fb, pitch, context);
+		} else if (context->type != VDP_GENESIS) {
+			vram_debug_tms(fb, pitch, context);
 		}
-
 		render_framebuffer_updated(context->debug_fb_indices[DEBUG_VRAM], 1024);
 	}
 
@@ -3420,6 +3576,592 @@ static void vdp_h32_mode4(vdp_context * context, uint32_t target_cycles)
 	}
 }
 
+
+static void tms_fetch_pattern_name(vdp_context *context)
+{
+	uint16_t address = context->regs[REG_SCROLL_A] << 10 & 0x3C00;
+	address |= context->vcounter << 2 & 0x03E0;
+	address += context->hslot >> 2;
+	//TODO: 4K/16K mode address remapping when emulating TMS9918A
+	address = mode4_address_map[address] ^ 1;
+	context->col_1 = context->vdpmem[address];
+}
+
+static void tms_fetch_color(vdp_context *context)
+{
+	if (context->regs[REG_MODE_2] & BIT_M2) {
+		//Multicolor
+		external_slot(context);
+		return;
+	}
+	uint16_t address = context->regs[REG_COLOR_TABLE] << 6;
+	if (context->regs[REG_MODE_2] & BIT_M3) {
+		//Graphics II
+		uint16_t upper_vcounter_mask;
+		uint16_t pattern_name_mask;
+		if (context->type > VDP_SMS2) {
+			//SMS1 and TMS9918A
+			upper_vcounter_mask = address & 0x1800;
+			pattern_name_mask = (address & 0x07C0) | 0x0038;
+		} else {
+			//SMS2 and Game Gear
+			upper_vcounter_mask = 0x1800;
+			pattern_name_mask = 0x07F8;
+		}
+		address &= 0x2000;
+		address |= context->vcounter << 5 & upper_vcounter_mask;
+		address |= context->col_1 << 3 & pattern_name_mask;
+		address |= context->vcounter & 3;
+	} else {
+		address |= context->col_1 >> 3;
+	}
+	//TODO: 4K/16K mode address remapping when emulating TMS9918A
+	address = mode4_address_map[address] ^ 1;
+	context->col_2 = context->vdpmem[address];
+}
+
+static void tms_fetch_pattern_value(vdp_context *context)
+{
+	uint16_t address = context->regs[REG_PATTERN_GEN] << 11 & 0x3800;
+	if (context->regs[REG_MODE_1] & BIT_M3) {
+		//Graphics II
+		uint16_t mask = context->type > VDP_SMS2 ? address & 0x1800 : 0x1800;
+		address &= 0x2000;
+		address |= context->vcounter << 5 & mask;
+	}
+	address |= context->col_1 << 3;
+	if (context->regs[REG_MODE_2] & BIT_M2) {
+		//Multicolor
+		address |= context->vcounter >> 2 & 0x3;
+	} else {
+		address |= context->vcounter & 0x7;
+	}
+
+	//TODO: 4K/16K mode address remapping when emulating TMS9918A
+	address = mode4_address_map[address] ^ 1;
+	uint8_t value = context->vdpmem[address];
+	if (context->regs[REG_MODE_2] & BIT_M2) {
+		//Multicolor
+		context->tmp_buf_a[0] = 0xF0;
+		context->tmp_buf_b[0] = value;
+	} else {
+		context->tmp_buf_a[0] = value;
+		context->tmp_buf_b[0] = context->col_2;
+	}
+}
+
+static void tms_sprite_scan(vdp_context *context)
+{
+	if (context->sprite_draws > 4 || context->sprite_index == 32) {
+		return;
+	}
+	uint16_t address = context->regs[REG_SAT] << 7 & 0x3F80;
+	address |= context->sprite_index << 2;
+	address = mode4_address_map[address] ^ 1;
+	uint8_t y = context->vdpmem[address];
+	if (y == 208) {
+		context->sprite_index = 32;
+		context->sprite_info_list[4].index = context->sprite_index;
+	}
+	uint8_t diff = context->vcounter + 1 - y;
+	uint8_t size = 8;
+	if (context->regs[REG_MODE_2] & BIT_SPRITE_SZ) {
+		size *= 2;
+	}
+	if (context->regs[REG_MODE_2] & BIT_SPRITE_ZM) {
+		size *= 2;
+	}
+	if (diff < size) {
+		context->sprite_info_list[context->sprite_draws++].index = context->sprite_index;
+		if (context->sprite_draws == 5) {
+			context->flags |= FLAG_DOT_OFLOW;
+		}
+	} else {
+		context->sprite_info_list[4].index = context->sprite_index;
+	}
+	context->sprite_index++;
+}
+
+static void tms_sprite_vert(vdp_context *context)
+{
+	if (context->sprite_index >= 4 || context->sprite_index >= context->sprite_draws) {
+		return;
+	}
+	uint16_t address = context->regs[REG_SAT] << 7 & 0x3F80;
+	address |= context->sprite_info_list[context->sprite_index].index << 2;
+	address = mode4_address_map[address] ^ 1;
+	context->sprite_info_list[context->sprite_index].y = context->vdpmem[address];
+}
+
+static void tms_sprite_horiz(vdp_context *context)
+{
+	if (context->sprite_index >= 4 || context->sprite_index >= context->sprite_draws) {
+		return;
+	}
+	uint16_t address = context->regs[REG_SAT] << 7 & 0x3F80;
+	address |= context->sprite_info_list[context->sprite_index].index << 2 | 1;
+	address = mode4_address_map[address] ^ 1;
+	context->sprite_draw_list[context->sprite_index].x_pos = context->vdpmem[address];
+}
+
+static void tms_sprite_name(vdp_context *context)
+{
+	if (context->sprite_index >= 4 || context->sprite_index >= context->sprite_draws) {
+		return;
+	}
+	uint16_t address = context->regs[REG_SAT] << 7 & 0x3F80;
+	address |= context->sprite_info_list[context->sprite_index].index << 2 | 2;
+	address = context->vdpmem[mode4_address_map[address] ^ 1] << 3;
+	address |= context->regs[REG_STILE_BASE] << 11 & 0x3800;
+	uint8_t diff = context->vcounter + 1 - context->sprite_info_list[context->sprite_index].y;
+	address += diff;
+	context->sprite_draw_list[context->sprite_index].address = address;
+}
+
+static void tms_sprite_tag(vdp_context *context)
+{
+	if (context->sprite_index >= 4 || context->sprite_index >= context->sprite_draws) {
+		return;
+	}
+	uint16_t address = context->regs[REG_SAT] << 7 & 0x3F80;
+	address |= context->sprite_info_list[context->sprite_index].index << 2 | 3;
+	address = mode4_address_map[address] ^ 1;
+	uint8_t tag = context->vdpmem[address];
+	if (tag & 0x80) {
+		//early clock flag
+		context->sprite_draw_list[context->sprite_index].x_pos -= 32;
+	}
+	context->sprite_draw_list[context->sprite_index].pal_priority = tag & 0xF;
+	context->col_1 = 0;
+}
+
+static void tms_sprite_pattern1(vdp_context *context)
+{
+	if (context->sprite_index >= 4 || context->sprite_index >= context->sprite_draws) {
+		return;
+	}
+	context->col_1 = context->vdpmem[mode4_address_map[context->sprite_draw_list[context->sprite_index].address] ^ 1] << 8;
+	context->sprite_draw_list[context->sprite_index].address += 16;
+}
+
+static void tms_sprite_pattern2(vdp_context *context)
+{
+	if (context->sprite_index >= 4 || context->sprite_index >= context->sprite_draws) {
+		return;
+	}
+	uint16_t pixels = context->col_1;
+	if (context->regs[REG_MODE_2] & BIT_SPRITE_SZ) {
+		pixels |= context->vdpmem[mode4_address_map[context->sprite_draw_list[context->sprite_index].address] ^ 1];
+	}
+	context->sprite_draw_list[context->sprite_index++].address = pixels;
+}
+
+static uint8_t tms_sprite_clock(vdp_context *context, int16_t offset)
+{
+	int16_t x = context->hslot << 1;
+	if (x > 294) {
+		x -= 512;
+	}
+	x += offset;
+	uint8_t output = 0;
+	for (int i = 0; i < 4; i++) {
+		if (x >= context->sprite_draw_list[i].x_pos) {
+			if (context->sprite_draw_list[i].address & 0x8000) {
+				if (output) {
+					context->flags2 |= FLAG2_SPRITE_COLLIDE;
+				}
+				output = context->sprite_draw_list[i].pal_priority;
+			}
+			context->sprite_draw_list[i].address <<= 1;
+		}
+	}
+	return output;
+}
+
+static void tms_border(vdp_context *context)
+{
+	if (context->hslot <  (256 + BORDER_LEFT - (BORDER_LEFT-8))/2 || context->hslot > 256-32) {
+		tms_sprite_clock(context, 0);
+		tms_sprite_clock(context, 1);
+	}
+	if (!context->output) {
+		return;
+	}
+	uint32_t color;
+	if (context->type == VDP_GAMEGEAR) {
+		//Game Gear uses CRAM entries 16-31 for TMS9918A modes
+		color = context->colors[(context->regs[REG_BG_COLOR] & 0xF) + 16 + MODE4_OFFSET];
+	} else {
+		color = context->regs[REG_BG_COLOR] << 1 & 0x1E;
+		color = (color & 0xE) | (color << 1 & 0x20);
+		color = context->color_map[color | FBUF_TMS];
+	}
+	if (context->hslot == (520 - BORDER_LEFT) / 2) {
+		context->output[0] = color;
+		return;
+	}
+	if (context->hslot < (256 + BORDER_LEFT + BORDER_RIGHT - (BORDER_LEFT - 8)) / 2) {
+		context->output[context->hslot * 2 - 8 + BORDER_LEFT] = color;
+		context->output[context->hslot * 2 - 7 + BORDER_LEFT] = color;
+		if ((context->hslot * 2 - 6 + BORDER_LEFT) == (256 + BORDER_LEFT + BORDER_RIGHT)) {
+			advance_output_line(context);
+		}
+	} else {
+		int slot = (context->hslot - (520 - BORDER_LEFT) / 2) * 2 - 1;
+		context->output[slot] = color;
+		context->output[slot + 1] = color;
+	}
+}
+
+static void tms_composite(vdp_context *context)
+{
+	if (context->state == PREPARING) {
+		tms_border(context);
+		return;
+	}
+	uint8_t color = tms_sprite_clock(context, 0);
+	if (!context->output) {
+		tms_sprite_clock(context, 1);
+		return;
+	}
+	uint8_t pattern = context->tmp_buf_a[0] & 0x80;
+	context->tmp_buf_a[0] <<= 1;
+	if (!color) {
+		uint8_t fg,bg;
+		if (context->regs[REG_MODE_2] & BIT_M1) {
+			//Text mode uses TC and BD colors
+			fg = context->regs[REG_BG_COLOR] >> 4;
+			bg = context->regs[REG_BG_COLOR] & 0xF;
+		} else {
+			fg = context->tmp_buf_b[0] >> 4;
+			bg = context->tmp_buf_b[0] & 0xF;
+			if (!bg) {
+				bg = context->regs[REG_BG_COLOR] & 0xF;
+			}
+		}
+		color = pattern ? fg : bg;
+	}
+	//TODO: composite debug output
+	if (context->type == VDP_GAMEGEAR) {
+		//Game Gear uses CRAM entries 16-31 for TMS9918A modes
+		context->output[context->hslot * 2 - 8 + BORDER_LEFT] = context->colors[color + 16 + MODE4_OFFSET];
+	} else {
+		color <<= 1;
+		color = (color & 0xE) | (color << 1 & 0x20);
+		context->output[context->hslot * 2 - 8 + BORDER_LEFT] = context->color_map[color | FBUF_TMS];
+	}
+	color = tms_sprite_clock(context, 1);
+	pattern = context->tmp_buf_a[0] & 0x80;
+	context->tmp_buf_a[0] <<= 1;
+	if (!color) {
+		uint8_t fg,bg;
+		if (context->regs[REG_MODE_2] & BIT_M1) {
+			//Text mode uses TC and BD colors
+			fg = context->regs[REG_BG_COLOR] >> 4;
+			bg = context->regs[REG_BG_COLOR] & 0xF;
+		} else {
+			fg = context->tmp_buf_b[0] >> 4;
+			bg = context->tmp_buf_b[0] & 0xF;
+			if (!bg) {
+				bg = context->regs[REG_BG_COLOR] & 0xF;
+			}
+		}
+		color = pattern ? fg : bg;
+	}
+	//TODO: composite debug output
+	if (context->type == VDP_GAMEGEAR) {
+		//Game Gear uses CRAM entries 16-31 for TMS9918A modes
+		context->output[context->hslot * 2 - 7 + BORDER_LEFT] = context->colors[color + 16 + MODE4_OFFSET];
+	} else {
+		color <<= 1;
+		color = (color & 0xE) | (color << 1 & 0x20);
+		context->output[context->hslot * 2 - 7 + BORDER_LEFT] = context->color_map[color | FBUF_TMS];
+	}
+}
+
+#define TMS_OUTPUT(slot) if ((slot) < 8 || (slot) > (256 + BORDER_LEFT - 8) / 2) { tms_border(context); } else { tms_composite(context); }
+#define TMS_OUTPUT_RIGHT(slot) \
+	if ((slot) < (256 + BORDER_LEFT - (BORDER_LEFT - 8))/2) {\
+		tms_composite(context);\
+	} else if ((slot < (256 + BORDER_LEFT + BORDER_RIGHT -(BORDER_LEFT - 8))/2)) {\
+		tms_border(context);\
+	}
+#define TMS_CHECK_LIMIT context->hslot++; context->cycles += MCLKS_SLOT_H32; if (context->cycles >= target_cycles) { return; }
+#define TMS_GRAPHICS_PATTERN_CPU_BLOCK(slot) \
+	case slot:\
+		TMS_OUTPUT(slot)\
+		tms_fetch_pattern_name(context);\
+		TMS_CHECK_LIMIT \
+	case slot+1:\
+		TMS_OUTPUT(slot+1)\
+		external_slot(context);\
+		TMS_CHECK_LIMIT \
+	case slot+2:\
+		TMS_OUTPUT(slot+2)\
+		tms_fetch_color(context);\
+		TMS_CHECK_LIMIT \
+	case slot+3:\
+		TMS_OUTPUT(slot+3)\
+		tms_fetch_pattern_value(context);\
+		TMS_CHECK_LIMIT
+
+#define TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(slot) \
+	case slot:\
+		TMS_OUTPUT(slot)\
+		tms_fetch_pattern_name(context);\
+		TMS_CHECK_LIMIT \
+	case slot+1:\
+		TMS_OUTPUT(slot+1)\
+		tms_sprite_scan(context);\
+		TMS_CHECK_LIMIT \
+	case slot+2:\
+		TMS_OUTPUT(slot+2)\
+		tms_fetch_color(context);\
+		TMS_CHECK_LIMIT \
+	case slot+3:\
+		TMS_OUTPUT(slot+3)\
+		tms_fetch_pattern_value(context);\
+		TMS_CHECK_LIMIT
+
+#define TMS_SPRITE_SCAN_SLOT(slot) \
+	case slot:\
+		if (context->hslot >= (520 - BORDER_LEFT) / 2) { tms_border(context); }\
+		tms_sprite_scan(context);\
+		TMS_CHECK_LIMIT
+
+#define TMS_SPRITE_BLOCK(slot) \
+	case slot:\
+		TMS_OUTPUT_RIGHT(slot)\
+		tms_sprite_vert(context);\
+		TMS_CHECK_LIMIT \
+	case slot+1:\
+		TMS_OUTPUT_RIGHT(slot+1)\
+		tms_sprite_horiz(context);\
+		TMS_CHECK_LIMIT \
+	case slot+2:\
+		TMS_OUTPUT_RIGHT(slot+2)\
+		tms_sprite_name(context);\
+		TMS_CHECK_LIMIT \
+	case slot+3:\
+		TMS_OUTPUT_RIGHT(slot+3)\
+		tms_sprite_tag(context);\
+		TMS_CHECK_LIMIT \
+	case slot+4:\
+		TMS_OUTPUT_RIGHT(slot+4)\
+		tms_sprite_pattern1(context);\
+		TMS_CHECK_LIMIT \
+	case slot+5:\
+		TMS_OUTPUT_RIGHT(slot+5)\
+		tms_sprite_pattern2(context);\
+		TMS_CHECK_LIMIT
+
+static void vdp_tms_graphics(vdp_context * context, uint32_t target_cycles)
+{
+	switch (context->hslot)
+	{
+	for (;;)
+	{
+	TMS_GRAPHICS_PATTERN_CPU_BLOCK(0)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(4)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(8)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(12)
+	TMS_GRAPHICS_PATTERN_CPU_BLOCK(16)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(20)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(24)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(28)
+	TMS_GRAPHICS_PATTERN_CPU_BLOCK(32)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(36)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(40)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(44)
+	TMS_GRAPHICS_PATTERN_CPU_BLOCK(48)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(52)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(56)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(60)
+	TMS_GRAPHICS_PATTERN_CPU_BLOCK(64)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(68)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(72)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(76)
+	TMS_GRAPHICS_PATTERN_CPU_BLOCK(80)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(84)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(88)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(92)
+	TMS_GRAPHICS_PATTERN_CPU_BLOCK(96)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(100)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(104)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(108)
+	TMS_GRAPHICS_PATTERN_CPU_BLOCK(112)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(116)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(120)
+	TMS_GRAPHICS_PATTERN_SPRITE_BLOCK(124)
+	case 128:
+		tms_composite(context);
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 129:
+		tms_composite(context);
+		external_slot(context);
+		context->sprite_index = 0;
+		TMS_CHECK_LIMIT
+
+	TMS_SPRITE_BLOCK(130)
+	TMS_SPRITE_BLOCK(136)
+	case 142:
+		tms_sprite_vert(context);
+		TMS_CHECK_LIMIT
+	case 143:
+		tms_sprite_horiz(context);
+		TMS_CHECK_LIMIT
+	case 145:
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 146:
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 147:
+		external_slot(context);
+		context->hslot = 233;
+		context->cycles += MCLKS_SLOT_H32;
+		if (context->cycles >= target_cycles) { return; }
+	case 233:
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 234:
+		tms_sprite_name(context);
+		TMS_CHECK_LIMIT
+	case 235:
+		tms_sprite_tag(context);
+		TMS_CHECK_LIMIT
+	case 236:
+		tms_sprite_pattern1(context);
+		TMS_CHECK_LIMIT
+	case 237:
+		tms_sprite_pattern2(context);
+		TMS_CHECK_LIMIT
+	TMS_SPRITE_BLOCK(238)
+	case 244:
+		tms_sprite_clock(context, 0);
+		tms_sprite_clock(context, 1);
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 245:
+		tms_sprite_clock(context, 0);
+		tms_sprite_clock(context, 1);
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 246:
+		tms_sprite_clock(context, 0);
+		tms_sprite_clock(context, 1);
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 247:
+		tms_sprite_clock(context, 0);
+		tms_sprite_clock(context, 1);
+		external_slot(context);
+		vdp_advance_line(context);
+		context->sprite_index = context->sprite_draws = 0;
+		if (context->vcounter == 192) {
+			context->state = INACTIVE;
+			return;
+		}
+		TMS_CHECK_LIMIT
+	TMS_SPRITE_SCAN_SLOT(248)
+	TMS_SPRITE_SCAN_SLOT(249)
+	TMS_SPRITE_SCAN_SLOT(250)
+	TMS_SPRITE_SCAN_SLOT(251)
+	TMS_SPRITE_SCAN_SLOT(252)
+	TMS_SPRITE_SCAN_SLOT(253)
+	TMS_SPRITE_SCAN_SLOT(254)
+	TMS_SPRITE_SCAN_SLOT(255)
+	}
+	default:
+		context->hslot++;
+		context->cycles += MCLKS_SLOT_H32;
+	}
+}
+
+#define TMS_CHECK_LIMIT_SKIP context->hslot+=2; context->cycles += MCLKS_SLOT_H32; if (context->cycles >= target_cycles) { return; }
+#define TMS_TEXT_BLOCK(slot) \
+	case slot:\
+		tms_fetch_pattern_name(context);\
+		TMS_CHECK_LIMIT \
+	case slot+1:\
+		external_slot(context);\
+		TMS_CHECK_LIMIT_SKIP \
+	case slot+3:\
+		tms_fetch_pattern_value(context);\
+		TMS_CHECK_LIMIT
+
+static void vdp_tms_text(vdp_context * context, uint32_t target_cycles)
+{
+	switch (context->hslot)
+	{
+	for (;;)
+	{
+	TMS_TEXT_BLOCK(0)
+	TMS_TEXT_BLOCK(4)
+	TMS_TEXT_BLOCK(8)
+	TMS_TEXT_BLOCK(12)
+	TMS_TEXT_BLOCK(16)
+	TMS_TEXT_BLOCK(20)
+	TMS_TEXT_BLOCK(24)
+	TMS_TEXT_BLOCK(28)
+	TMS_TEXT_BLOCK(32)
+	TMS_TEXT_BLOCK(36)
+	TMS_TEXT_BLOCK(40)
+	TMS_TEXT_BLOCK(44)
+	TMS_TEXT_BLOCK(48)
+	TMS_TEXT_BLOCK(52)
+	TMS_TEXT_BLOCK(56)
+	TMS_TEXT_BLOCK(60)
+	TMS_TEXT_BLOCK(64)
+	TMS_TEXT_BLOCK(68)
+	TMS_TEXT_BLOCK(72)
+	TMS_TEXT_BLOCK(76)
+	TMS_TEXT_BLOCK(80)
+	TMS_TEXT_BLOCK(84)
+	TMS_TEXT_BLOCK(88)
+	TMS_TEXT_BLOCK(92)
+	TMS_TEXT_BLOCK(96)
+	TMS_TEXT_BLOCK(100)
+	TMS_TEXT_BLOCK(104)
+	TMS_TEXT_BLOCK(108)
+	TMS_TEXT_BLOCK(112)
+	TMS_TEXT_BLOCK(116)
+	TMS_TEXT_BLOCK(120)
+	TMS_TEXT_BLOCK(124)
+	TMS_TEXT_BLOCK(128)
+	TMS_TEXT_BLOCK(132)
+	TMS_TEXT_BLOCK(136)
+	TMS_TEXT_BLOCK(140)
+	TMS_TEXT_BLOCK(144)
+	TMS_TEXT_BLOCK(148)
+	TMS_TEXT_BLOCK(152)
+	TMS_TEXT_BLOCK(156)
+	default:
+		while (context->hslot < 179)
+		{
+			external_slot(context);
+			TMS_CHECK_LIMIT
+		}
+		if (context->hslot == 179) {
+			external_slot(context);
+			context->hslot = 233;
+			context->cycles += MCLKS_SLOT_H32;
+			if (context->cycles >= target_cycles) { return; }
+		}
+		while (context->hslot > 179) {
+			if (context->hslot >= 233) {
+				external_slot(context);
+				if (context->hslot + 1 == LINE_CHANGE_MODE4) {
+					vdp_advance_line(context);
+				}
+			}
+			TMS_CHECK_LIMIT
+		}
+	}
+	}
+}
+
 static void inactive_test_output(vdp_context *context, uint8_t is_h40, uint8_t test_layer)
 {
 	uint8_t max_slot = is_h40 ? 169 : 136;
@@ -3523,7 +4265,7 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 		line_change = LINE_CHANGE_MODE4;
 		jump_start = 147;
 		jump_dest = 233;
-		if (context->regs[REG_MODE_1] & BIT_MODE_4) {
+		if (context->regs[REG_MODE_1] & BIT_MODE_4 || context->type != VDP_GENESIS) {
 			active_line = 0x1FF;
 		} else {
 			//never active unless either mode 4 or mode 5 is turned on
@@ -3693,8 +4435,12 @@ void vdp_run_context_full(vdp_context * context, uint32_t target_cycles)
 				} else {
 					vdp_h32(context, target_cycles);
 				}
-			} else {
+			} else if (context->regs[REG_MODE_1] & BIT_MODE_4) {
 				vdp_h32_mode4(context, target_cycles);
+			} else if (context->regs[REG_MODE_2] & BIT_M1) {
+					vdp_tms_text(context, target_cycles);
+			} else {
+				vdp_tms_graphics(context, target_cycles);
 			}
 		} else {
 			vdp_inactive(context, target_cycles, is_h40, mode_5);
