@@ -248,7 +248,7 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t
 						0x00, 0x00, 0x08, 0x0C, 0x10, 0x30, 0x01, 0x3C, 0x02, 0x03, 0x05, 0x0F, 0x04, 0x33, 0x15, 0x3F
 					};
 					index = tms_to_sms[index] << 1;
-					index = (index & 0xE) | (index << 1 & 0x80);
+					index = (index & 0xE) | (index << 1 & 0xE0);
 					//TODO: Mode 4 has a separate DAC tap so this isn't quite correct
 					//TODO: blue channel has one of its taps offest on SMS1 and MD
 					b = levels[(index >> 4 & 0xC) | (index >> 6 & 0x2)];
@@ -3611,7 +3611,7 @@ static void tms_fetch_color(vdp_context *context)
 		address &= 0x2000;
 		address |= context->vcounter << 5 & upper_vcounter_mask;
 		address |= context->col_1 << 3 & pattern_name_mask;
-		address |= context->vcounter & 3;
+		address |= context->vcounter & 7;
 	} else {
 		address |= context->col_1 >> 3;
 	}
@@ -3769,8 +3769,9 @@ static uint8_t tms_sprite_clock(vdp_context *context, int16_t offset)
 			if (context->sprite_draw_list[i].address & 0x8000) {
 				if (output) {
 					context->flags2 |= FLAG2_SPRITE_COLLIDE;
+				} else {
+					output = context->sprite_draw_list[i].pal_priority;
 				}
-				output = context->sprite_draw_list[i].pal_priority;
 			}
 			context->sprite_draw_list[i].address <<= 1;
 		}
