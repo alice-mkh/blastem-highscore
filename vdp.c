@@ -3760,7 +3760,9 @@ static uint8_t tms_sprite_clock(vdp_context *context, int16_t offset)
 {
 	int16_t x = context->hslot << 1;
 	if (x > 294) {
-		x -= 512;
+		x -= 512 + 8;
+	} else {
+		x -= 8;
 	}
 	x += offset;
 	uint8_t output = 0;
