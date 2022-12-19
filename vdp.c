@@ -129,7 +129,7 @@ static void update_video_params(vdp_context *context)
 			border_top = BORDER_TOP_V24;
 			context->border_bot = calc_crop(bot_crop, BORDER_BOT_V24);
 		}
-		if (!(context->regs[REG_MODE_1] & BIT_MODE_4)){
+		if (!(context->regs[REG_MODE_1] & BIT_MODE_4) && context->type == VDP_GENESIS){
 			context->state = INACTIVE;
 		} else if (context->state == INACTIVE) {
 			//Undo forced INACTIVE state due to neither Mode 4 nor Mode 5 being active
@@ -3580,8 +3580,15 @@ static void vdp_h32_mode4(vdp_context * context, uint32_t target_cycles)
 static void tms_fetch_pattern_name(vdp_context *context)
 {
 	uint16_t address = context->regs[REG_SCROLL_A] << 10 & 0x3C00;
-	address |= context->vcounter << 2 & 0x03E0;
-	address += context->hslot >> 2;
+	if (context->regs[REG_MODE_2] & BIT_M1) {
+		//Text mode
+		address |= (context->vcounter >> 3) * 40;
+		address += (context->hslot - 4) / 3;
+	} else {
+		//Graphics/Multicolor
+		address |= context->vcounter << 2 & 0x03E0;
+		address |= context->hslot >> 2;
+	}
 	//TODO: 4K/16K mode address remapping when emulating TMS9918A
 	address = mode4_address_map[address] ^ 1;
 	context->col_1 = context->vdpmem[address];
@@ -3788,7 +3795,12 @@ static void tms_border(vdp_context *context)
 		tms_sprite_clock(context, 1);
 	}
 	if (!context->output) {
-		return;
+		if ((context->hslot * 2 - 6 + BORDER_LEFT) == (256 + BORDER_LEFT + BORDER_RIGHT)) {
+			advance_output_line(context);
+		}
+		if (!context->output) {
+			return;
+		}
 	}
 	uint32_t color;
 	if (context->type == VDP_GAMEGEAR) {
@@ -3882,7 +3894,7 @@ static void tms_composite(vdp_context *context)
 	}
 }
 
-#define TMS_OUTPUT(slot) if ((slot) < 8 || (slot) > (256 + BORDER_LEFT - 8) / 2) { tms_border(context); } else { tms_composite(context); }
+#define TMS_OUTPUT(slot) if ((slot) < 4 || (slot) > (256 + BORDER_LEFT - 8) / 2) { tms_border(context); } else { tms_composite(context); }
 #define TMS_OUTPUT_RIGHT(slot) \
 	if ((slot) < (256 + BORDER_LEFT - (BORDER_LEFT - 8))/2) {\
 		tms_composite(context);\
@@ -4082,15 +4094,18 @@ static void vdp_tms_graphics(vdp_context * context, uint32_t target_cycles)
 	}
 }
 
-#define TMS_CHECK_LIMIT_SKIP context->hslot+=2; context->cycles += MCLKS_SLOT_H32; if (context->cycles >= target_cycles) { return; }
+#define TMS_TEXT_OUTPUT(slot) if ((slot) < 8) { tms_border(context); } else { tms_composite(context); }
 #define TMS_TEXT_BLOCK(slot) \
 	case slot:\
+		TMS_TEXT_OUTPUT(slot)\
 		tms_fetch_pattern_name(context);\
 		TMS_CHECK_LIMIT \
 	case slot+1:\
+		TMS_TEXT_OUTPUT(slot+1)\
 		external_slot(context);\
-		TMS_CHECK_LIMIT_SKIP \
-	case slot+3:\
+		TMS_CHECK_LIMIT \
+	case slot+2:\
+		TMS_TEXT_OUTPUT(slot+2)\
 		tms_fetch_pattern_value(context);\
 		TMS_CHECK_LIMIT
 
@@ -4100,59 +4115,93 @@ static void vdp_tms_text(vdp_context * context, uint32_t target_cycles)
 	{
 	for (;;)
 	{
-	TMS_TEXT_BLOCK(0)
+	case 0:
+		tms_border(context);
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 1:
+		tms_border(context);
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 2:
+		tms_border(context);
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 3:
+		tms_border(context);
+		external_slot(context);
+		TMS_CHECK_LIMIT
 	TMS_TEXT_BLOCK(4)
-	TMS_TEXT_BLOCK(8)
-	TMS_TEXT_BLOCK(12)
+	TMS_TEXT_BLOCK(7)
+	TMS_TEXT_BLOCK(10)
+	TMS_TEXT_BLOCK(13)
 	TMS_TEXT_BLOCK(16)
-	TMS_TEXT_BLOCK(20)
-	TMS_TEXT_BLOCK(24)
+	TMS_TEXT_BLOCK(19)
+	TMS_TEXT_BLOCK(22)
+	TMS_TEXT_BLOCK(25)
 	TMS_TEXT_BLOCK(28)
-	TMS_TEXT_BLOCK(32)
-	TMS_TEXT_BLOCK(36)
+	TMS_TEXT_BLOCK(31)
+	TMS_TEXT_BLOCK(34)
+	TMS_TEXT_BLOCK(37)
 	TMS_TEXT_BLOCK(40)
-	TMS_TEXT_BLOCK(44)
-	TMS_TEXT_BLOCK(48)
+	TMS_TEXT_BLOCK(43)
+	TMS_TEXT_BLOCK(46)
+	TMS_TEXT_BLOCK(49)
 	TMS_TEXT_BLOCK(52)
-	TMS_TEXT_BLOCK(56)
-	TMS_TEXT_BLOCK(60)
+	TMS_TEXT_BLOCK(55)
+	TMS_TEXT_BLOCK(58)
+	TMS_TEXT_BLOCK(61)
 	TMS_TEXT_BLOCK(64)
-	TMS_TEXT_BLOCK(68)
-	TMS_TEXT_BLOCK(72)
+	TMS_TEXT_BLOCK(67)
+	TMS_TEXT_BLOCK(70)
+	TMS_TEXT_BLOCK(73)
 	TMS_TEXT_BLOCK(76)
-	TMS_TEXT_BLOCK(80)
-	TMS_TEXT_BLOCK(84)
+	TMS_TEXT_BLOCK(79)
+	TMS_TEXT_BLOCK(82)
+	TMS_TEXT_BLOCK(85)
 	TMS_TEXT_BLOCK(88)
-	TMS_TEXT_BLOCK(92)
-	TMS_TEXT_BLOCK(96)
+	TMS_TEXT_BLOCK(91)
+	TMS_TEXT_BLOCK(94)
+	TMS_TEXT_BLOCK(97)
 	TMS_TEXT_BLOCK(100)
-	TMS_TEXT_BLOCK(104)
-	TMS_TEXT_BLOCK(108)
+	TMS_TEXT_BLOCK(103)
+	TMS_TEXT_BLOCK(106)
+	TMS_TEXT_BLOCK(109)
 	TMS_TEXT_BLOCK(112)
-	TMS_TEXT_BLOCK(116)
-	TMS_TEXT_BLOCK(120)
-	TMS_TEXT_BLOCK(124)
-	TMS_TEXT_BLOCK(128)
-	TMS_TEXT_BLOCK(132)
-	TMS_TEXT_BLOCK(136)
-	TMS_TEXT_BLOCK(140)
-	TMS_TEXT_BLOCK(144)
-	TMS_TEXT_BLOCK(148)
-	TMS_TEXT_BLOCK(152)
-	TMS_TEXT_BLOCK(156)
+	TMS_TEXT_BLOCK(115)
+	TMS_TEXT_BLOCK(118)
+	TMS_TEXT_BLOCK(121)
+	case 124:
+		tms_composite(context);
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 125:
+		tms_composite(context);
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 126:
+		tms_composite(context);
+		external_slot(context);
+		TMS_CHECK_LIMIT
 	default:
-		while (context->hslot < 179)
+		while (context->hslot < 139)
+		{
+			tms_border(context);
+			external_slot(context);
+			TMS_CHECK_LIMIT
+		}
+		while (context->hslot < 147)
 		{
 			external_slot(context);
 			TMS_CHECK_LIMIT
 		}
-		if (context->hslot == 179) {
+		if (context->hslot == 147) {
 			external_slot(context);
 			context->hslot = 233;
 			context->cycles += MCLKS_SLOT_H32;
 			if (context->cycles >= target_cycles) { return; }
 		}
-		while (context->hslot > 179) {
+		while (context->hslot > 147) {
 			if (context->hslot >= 233) {
 				external_slot(context);
 				if (context->hslot + 1 == LINE_CHANGE_MODE4) {
