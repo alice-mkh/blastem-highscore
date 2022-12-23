@@ -4131,55 +4131,59 @@ static void vdp_tms_text(vdp_context * context, uint32_t target_cycles)
 		tms_border(context);
 		external_slot(context);
 		TMS_CHECK_LIMIT
-	TMS_TEXT_BLOCK(4)
-	TMS_TEXT_BLOCK(7)
-	TMS_TEXT_BLOCK(10)
-	TMS_TEXT_BLOCK(13)
-	TMS_TEXT_BLOCK(16)
-	TMS_TEXT_BLOCK(19)
-	TMS_TEXT_BLOCK(22)
-	TMS_TEXT_BLOCK(25)
-	TMS_TEXT_BLOCK(28)
-	TMS_TEXT_BLOCK(31)
-	TMS_TEXT_BLOCK(34)
-	TMS_TEXT_BLOCK(37)
-	TMS_TEXT_BLOCK(40)
-	TMS_TEXT_BLOCK(43)
-	TMS_TEXT_BLOCK(46)
-	TMS_TEXT_BLOCK(49)
-	TMS_TEXT_BLOCK(52)
-	TMS_TEXT_BLOCK(55)
-	TMS_TEXT_BLOCK(58)
-	TMS_TEXT_BLOCK(61)
-	TMS_TEXT_BLOCK(64)
-	TMS_TEXT_BLOCK(67)
-	TMS_TEXT_BLOCK(70)
-	TMS_TEXT_BLOCK(73)
-	TMS_TEXT_BLOCK(76)
-	TMS_TEXT_BLOCK(79)
-	TMS_TEXT_BLOCK(82)
-	TMS_TEXT_BLOCK(85)
-	TMS_TEXT_BLOCK(88)
-	TMS_TEXT_BLOCK(91)
-	TMS_TEXT_BLOCK(94)
-	TMS_TEXT_BLOCK(97)
-	TMS_TEXT_BLOCK(100)
-	TMS_TEXT_BLOCK(103)
-	TMS_TEXT_BLOCK(106)
-	TMS_TEXT_BLOCK(109)
-	TMS_TEXT_BLOCK(112)
-	TMS_TEXT_BLOCK(115)
-	TMS_TEXT_BLOCK(118)
-	TMS_TEXT_BLOCK(121)
-	case 124:
-		tms_composite(context);
+	case 4:
+		tms_border(context);
 		external_slot(context);
 		TMS_CHECK_LIMIT
+	TMS_TEXT_BLOCK(5)
+	TMS_TEXT_BLOCK(8)
+	TMS_TEXT_BLOCK(11)
+	TMS_TEXT_BLOCK(14)
+	TMS_TEXT_BLOCK(17)
+	TMS_TEXT_BLOCK(20)
+	TMS_TEXT_BLOCK(23)
+	TMS_TEXT_BLOCK(26)
+	TMS_TEXT_BLOCK(29)
+	TMS_TEXT_BLOCK(32)
+	TMS_TEXT_BLOCK(35)
+	TMS_TEXT_BLOCK(38)
+	TMS_TEXT_BLOCK(41)
+	TMS_TEXT_BLOCK(44)
+	TMS_TEXT_BLOCK(47)
+	TMS_TEXT_BLOCK(50)
+	TMS_TEXT_BLOCK(53)
+	TMS_TEXT_BLOCK(56)
+	TMS_TEXT_BLOCK(59)
+	TMS_TEXT_BLOCK(62)
+	TMS_TEXT_BLOCK(65)
+	TMS_TEXT_BLOCK(68)
+	TMS_TEXT_BLOCK(71)
+	TMS_TEXT_BLOCK(74)
+	TMS_TEXT_BLOCK(77)
+	TMS_TEXT_BLOCK(80)
+	TMS_TEXT_BLOCK(83)
+	TMS_TEXT_BLOCK(86)
+	TMS_TEXT_BLOCK(89)
+	TMS_TEXT_BLOCK(92)
+	TMS_TEXT_BLOCK(95)
+	TMS_TEXT_BLOCK(98)
+	TMS_TEXT_BLOCK(101)
+	TMS_TEXT_BLOCK(104)
+	TMS_TEXT_BLOCK(107)
+	TMS_TEXT_BLOCK(110)
+	TMS_TEXT_BLOCK(113)
+	TMS_TEXT_BLOCK(116)
+	TMS_TEXT_BLOCK(119)
+	TMS_TEXT_BLOCK(122)
 	case 125:
 		tms_composite(context);
 		external_slot(context);
 		TMS_CHECK_LIMIT
 	case 126:
+		tms_composite(context);
+		external_slot(context);
+		TMS_CHECK_LIMIT
+	case 127:
 		tms_composite(context);
 		external_slot(context);
 		TMS_CHECK_LIMIT
@@ -4206,6 +4210,10 @@ static void vdp_tms_text(vdp_context * context, uint32_t target_cycles)
 				external_slot(context);
 				if (context->hslot + 1 == LINE_CHANGE_MODE4) {
 					vdp_advance_line(context);
+					if (context->vcounter == 192) {
+						context->state = INACTIVE;
+						return;
+					}
 				}
 			}
 			TMS_CHECK_LIMIT
@@ -4404,7 +4412,7 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 				bg_index = 0x10 + (context->regs[REG_BG_COLOR] & 0xF);
 				bg_color = context->colors[MODE4_OFFSET + bg_index];
 			} else {
-				bg_color = context->colors[0];
+				bg_color = context->color_map[0];
 			}
 			if (context->done_composite) {
 				uint8_t pixel = context->compositebuf[dst-context->output];
