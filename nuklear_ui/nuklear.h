@@ -11387,7 +11387,7 @@ nk_font_bake_pack(struct nk_font_baker *baker,
     *height = 0;
 	int width_estimate = sqrt(pixel_area_estimate) + 0.5;
 	*width = 128;
-	while (*width < width_estimate)
+	while (*width < width_estimate || *width < custom->w * 2)
 	{
 		*width *= 2;
 	}
