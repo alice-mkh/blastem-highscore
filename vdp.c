@@ -4317,7 +4317,7 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 		line_change = LINE_CHANGE_MODE4;
 		jump_start = 147;
 		jump_dest = 233;
-		if (context->regs[REG_MODE_1] & BIT_MODE_4 || context->type != VDP_GENESIS) {
+		if ((context->regs[REG_MODE_1] & BIT_MODE_4) || context->type != VDP_GENESIS) {
 			active_line = 0x1FF;
 		} else {
 			//never active unless either mode 4 or mode 5 is turned on
@@ -4369,9 +4369,11 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 		if (context->hslot == buf_clear_slot) {
 			if (mode_5) {
 				context->cur_slot = max_draws;
-			} else {
+			} else if ((context->regs[REG_MODE_1] & BIT_MODE_4) || context->type == VDP_GENESIS) {
 				context->cur_slot = context->sprite_index = MAX_DRAWS_H32_MODE4-1;
 				context->sprite_draws = MAX_DRAWS_H32_MODE4;
+			} else {
+				context->sprite_draws = 0;
 			}
 			memset(context->linebuf, 0, LINEBUF_SIZE);
 		} else if (context->hslot == index_reset_slot) {
@@ -4398,11 +4400,11 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 			if (mode_5) {
 				bg_index = context->regs[REG_BG_COLOR] & 0x3F;
 				bg_color = context->colors[bg_index];
-			} else if (context->regs[REG_MODE_1] & BIT_MODE_4) {
+			} else if ((context->regs[REG_MODE_1] & BIT_MODE_4) || context->type != VDP_GENESIS) {
 				bg_index = 0x10 + (context->regs[REG_BG_COLOR] & 0xF);
 				bg_color = context->colors[MODE4_OFFSET + bg_index];
 			} else {
-				bg_color = render_map_color(0, 0, 0);
+				bg_color = context->colors[0];
 			}
 			if (context->done_composite) {
 				uint8_t pixel = context->compositebuf[dst-context->output];
