@@ -23,6 +23,7 @@
 #include "gdb_remote.h"
 #include "gst.h"
 #include "util.h"
+#include "paths.h"
 #include "romdb.h"
 #include "terminal.h"
 #include "arena.h"
@@ -167,6 +168,9 @@ uint32_t load_media_zip(const char *filename, system_media *dst)
 					}
 					dst->extension = ext;
 					dst->dir = path_dirname(filename);
+					if (!dst->dir) {
+						dst->dir = path_current_dir();
+					}
 					dst->name = basename_no_extension(filename);
 					dst->size = out_size;
 					zip_close(z);
@@ -253,6 +257,9 @@ uint32_t load_media(const char * filename, system_media *dst, system_type *stype
 		ret = (uint32_t)readsize;
 	}
 	dst->dir = path_dirname(filename);
+	if (!dst->dir) {
+		dst->dir = path_current_dir();
+	}
 	dst->name = basename_no_extension(filename);
 	dst->extension = ext;
 	dst->size = ret;

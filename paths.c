@@ -2,6 +2,12 @@
 #include <stdlib.h>
 #include "blastem.h"
 #include "util.h"
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#include <errno.h>
+#endif
 
 static char **current_path;
 
@@ -138,5 +144,36 @@ char *path_append(const char *base, const char *suffix)
 			char const *pieces[] = {base, PATH_SEP, suffix};
 			return alloc_concat_m(3, pieces);
 		}
+	}
+}
+
+char *path_current_dir(void)
+{
+	size_t size = 128;
+	char *res = malloc(size);
+	for (;;) {
+#ifdef _WIN32
+		DWORD actual = GetCurrentDirectoryA(size, res);
+		if (actual > size) {
+			res = realloc(res, actual);
+			size = actual;
+		} else {
+			return res;
+		}
+#else
+		errno = 0;
+		char *tmp = getcwd(res, size);
+		if (!tmp) {
+			if (errno == ERANGE) {
+				size *= 2;
+				res = realloc(res, size);
+			} else {
+				free(res);
+				return NULL;
+			}
+		} else {
+			return res;
+		}
+#endif
 	}
 }
