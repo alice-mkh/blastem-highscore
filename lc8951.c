@@ -315,7 +315,11 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 
 	uint8_t sync_detected = 0, sync_ignored = 0;
 	if (byte == 0) {
-		if (context->sync_counter == 11 && ((sector_offset & 3) == 3)) {
+		// HACK!: The (sector_offset < 0x10) check is not correct, but without it Thunderhawk gets stuck
+		// It has a sector that contains the sync pattern in the main data area
+		// From the LC8951 datasheet, I would expect tohis to trigger a short block, but either
+		// it's sync detection is fancier than I thought or I have a bug that is confusing the BIOS
+		if (context->sync_counter == 11 && ((sector_offset & 3) == 3) && (sector_offset < 0x10)) {
 			if (context->ctrl1 & BIT_SYDEN) {
 				sync_detected = 1;
 			} else {
