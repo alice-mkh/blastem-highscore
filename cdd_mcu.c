@@ -168,6 +168,9 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 	uint32_t prev_pba = context->head_pba;
 	switch (context->status)
 	{
+	case DS_STOP:
+		handle_seek(context);
+		break;
 	case DS_PLAY:
 		handle_seek(context);
 		if (!context->seeking) {
