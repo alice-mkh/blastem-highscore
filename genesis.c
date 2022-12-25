@@ -2269,6 +2269,23 @@ genesis_context *alloc_config_genesis_cdboot(system_media *media, uint32_t syste
 {
 	tern_node *rom_db = get_rom_db();
 	rom_info info = configure_rom(rom_db, media->buffer, media->size, NULL, 0, base_map, base_chunks);
+	if (media->size > 0x20B) {
+		//Use a byte in the security code region that's unique across all 3 regions
+		//since it's more reliable than the official header field for this
+		uint8_t *bytes = media->buffer;
+		switch (bytes[0x20B])
+		{
+		case 0x7A:
+			info.regions = REGION_U;
+			break;
+		case 0xA1:
+			info.regions = REGION_J;
+			break;
+		case 0x64:
+			info.regions = REGION_E;
+			break;
+		}
+	}
 
 	segacd_context *cd = alloc_configure_segacd(media, system_opts, force_region, &info);
 	genesis_context *gen = shared_init(system_opts, &info, force_region);
