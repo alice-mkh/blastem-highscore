@@ -353,7 +353,6 @@ void calc_areg_index_disp8(m68k_options *opts, m68k_op_info *op, uint8_t native_
 void m68k_check_cycles_int_latch(m68k_options *opts)
 {
 	code_info *code = &opts->gen.code;
-	check_alloc_code(code, 3*MAX_INST_LEN);
 	uint8_t cc;
 	if (opts->gen.limit < 0) {
 		cmp_ir(code, 1, opts->gen.cycles, SZ_D);
@@ -362,10 +361,11 @@ void m68k_check_cycles_int_latch(m68k_options *opts)
 		cmp_rr(code, opts->gen.cycles, opts->gen.limit, SZ_D);
 		cc = CC_A;
 	}
+ALLOC_CODE_RETRY_POINT
 	code_ptr jmp_off = code->cur+1;
 	jcc(code, cc, jmp_off+1);
 	call(code, opts->handle_int_latch);
-	*jmp_off = code->cur - (jmp_off+1);
+	CHECK_BRANCH_DEST(jmp_off)
 }
 
 uint8_t translate_m68k_op(m68kinst * inst, host_ea * ea, m68k_options * opts, uint8_t dst)
@@ -866,7 +866,7 @@ void translate_m68k_scc(m68k_options * opts, m68kinst * inst)
 		}
 	} else {
 		uint8_t cc = m68k_eval_cond(opts, cond);
-		check_alloc_code(code, 6*MAX_INST_LEN);
+ALLOC_CODE_RETRY_POINT
 		code_ptr true_off = code->cur + 1;
 		jcc(code, cc, code->cur+2);
 		cycles(&opts->gen, BUS);
@@ -877,14 +877,14 @@ void translate_m68k_scc(m68k_options * opts, m68kinst * inst)
 		}
 		code_ptr end_off = code->cur+1;
 		jmp(code, code->cur+2);
-		*true_off = code->cur - (true_off+1);
+		CHECK_BRANCH_DEST(true_off);
 		cycles(&opts->gen, inst->dst.addr_mode == MODE_REG ? 6 : 4);
 		if (dst_op.mode == MODE_REG_DIRECT) {
 			mov_ir(code, 0xFF, dst_op.base, SZ_B);
 		} else {
 			mov_irdisp(code, 0xFF, dst_op.base, dst_op.disp, SZ_B);
 		}
-		*end_off = code->cur - (end_off+1);
+		CHECK_BRANCH_DEST(end_off);
 	}
 	m68k_save_result(inst, opts);
 }
@@ -897,9 +897,10 @@ void translate_m68k_dbcc(m68k_options * opts, m68kinst * inst)
 	code_ptr skip_loc = NULL;
 	//TODO: Check if COND_TRUE technically valid here even though
 	//it's basically a slow NOP
+	ALLOC_CODE_RETRY_VAR;
 	if (inst->extra.cond != COND_FALSE) {
 		uint8_t cond = m68k_eval_cond(opts, inst->extra.cond);
-		check_alloc_code(code, 6*MAX_INST_LEN);
+ALLOC_CODE_RETRY_POINT_NO_VAR
 		skip_loc = code->cur + 1;
 		jcc(code, cond, code->cur + 2);
 	}
@@ -917,7 +918,7 @@ void translate_m68k_dbcc(m68k_options * opts, m68kinst * inst)
 	*loop_end_loc = code->cur - (loop_end_loc+1);
 	if (skip_loc) {
 		cycles(&opts->gen, 2);
-		*skip_loc = code->cur - (skip_loc+1);
+		CHECK_BRANCH_DEST(skip_loc);
 		cycles(&opts->gen, 2);
 	} else {
 		cycles(&opts->gen, 4);
@@ -1031,11 +1032,13 @@ void translate_shift(m68k_options * opts, m68kinst * inst, host_ea *src_op, host
 	code_ptr end_off = NULL;
 	code_ptr nz_off = NULL;
 	code_ptr z_off = NULL;
+	ALLOC_CODE_RETRY_VAR;
 	if (inst->src.addr_mode == MODE_UNUSED) {
 		cycles(&opts->gen, BUS);
 		//Memory shift
 		shift_ir(code, 1, dst_op->base, SZ_W);
 	} else {
+ALLOC_CODE_RETRY_POINT_NO_VAR
 		if (src_op->mode == MODE_IMMED) {
 			cycles(&opts->gen, (inst->extra.size == OPSIZE_LONG ? 8 : 6) + 2 * src_op->disp);
 			if (src_op->disp != 1 && inst->op == M68K_ASL) {
@@ -1046,11 +1049,10 @@ void translate_shift(m68k_options * opts, m68kinst * inst, host_ea *src_op, host
 					} else {
 						shift_irdisp(code, 1, dst_op->base, dst_op->disp, inst->extra.size);
 					}
-					check_alloc_code(code, 2*MAX_INST_LEN);
 					code_ptr after_flag_set = code->cur + 1;
 					jcc(code, CC_NO, code->cur + 2);
 					set_flag(opts, 1, FLAG_V);
-					*after_flag_set = code->cur - (after_flag_set+1);
+					CHECK_BRANCH_DEST(after_flag_set);
 				}
 			} else {
 				if (dst_op->mode == MODE_REG_DIRECT) {
@@ -1071,7 +1073,6 @@ void translate_shift(m68k_options * opts, m68kinst * inst, host_ea *src_op, host
 
 			}
 			and_ir(code, 63, RCX, SZ_D);
-			check_alloc_code(code, 7*MAX_INST_LEN);
 			nz_off = code->cur + 1;
 			jcc(code, CC_NZ, code->cur + 2);
 			//Flag behavior for shift count of 0 is different for x86 than 68K
@@ -1089,7 +1090,7 @@ void translate_shift(m68k_options * opts, m68kinst * inst, host_ea *src_op, host
 			}
 			z_off = code->cur + 1;
 			jmp(code, code->cur + 2);
-			*nz_off = code->cur - (nz_off + 1);
+			CHECK_BRANCH_DEST(nz_off);
 			//add 2 cycles for every bit shifted
 			mov_ir(code, 2 * opts->gen.clock_divider, opts->gen.scratch2, SZ_D);
 			imul_rr(code, RCX, opts->gen.scratch2, SZ_D);
@@ -1098,7 +1099,6 @@ void translate_shift(m68k_options * opts, m68kinst * inst, host_ea *src_op, host
 				//ASL has Overflow flag behavior that depends on all of the bits shifted through the MSB
 				//Easiest way to deal with this is to shift one bit at a time
 				set_flag(opts, 0, FLAG_V);
-				check_alloc_code(code, 5*MAX_INST_LEN);
 				code_ptr loop_start = code->cur;
 				if (dst_op->mode == MODE_REG_DIRECT) {
 					shift_ir(code, 1, dst_op->base, inst->extra.size);
@@ -1108,13 +1108,12 @@ void translate_shift(m68k_options * opts, m68kinst * inst, host_ea *src_op, host
 				code_ptr after_flag_set = code->cur + 1;
 				jcc(code, CC_NO, code->cur + 2);
 				set_flag(opts, 1, FLAG_V);
-				*after_flag_set = code->cur - (after_flag_set+1);
+				CHECK_BRANCH_DEST(after_flag_set);
 				loop(code, loop_start);
 			} else {
 				//x86 shifts modulo 32 for operand sizes less than 64-bits
 				//but M68K shifts modulo 64, so we need to check for large shifts here
 				cmp_ir(code, 32, RCX, SZ_B);
-				check_alloc_code(code, 14*MAX_INST_LEN);
 				code_ptr norm_shift_off = code->cur + 1;
 				jcc(code, CC_L, code->cur + 2);
 				if (special) {
@@ -1132,11 +1131,11 @@ void translate_shift(m68k_options * opts, m68kinst * inst, host_ea *src_op, host
 						set_flag_cond(opts, CC_C, FLAG_C);
 						after_flag_set = code->cur + 1;
 						jmp(code, code->cur + 2);
-						*neq_32_off = code->cur - (neq_32_off+1);
+						CHECK_BRANCH_DEST(neq_32_off);
 					}
 					set_flag(opts, 0, FLAG_C);
 					if (after_flag_set) {
-						*after_flag_set = code->cur - (after_flag_set+1);
+						CHECK_BRANCH_DEST(after_flag_set);
 					}
 					set_flag(opts, 1, FLAG_Z);
 					set_flag(opts, 0, FLAG_N);
@@ -1157,7 +1156,7 @@ void translate_shift(m68k_options * opts, m68kinst * inst, host_ea *src_op, host
 				}
 				end_off = code->cur + 1;
 				jmp(code, code->cur + 2);
-				*norm_shift_off = code->cur - (norm_shift_off+1);
+				CHECK_BRANCH_DEST(norm_shift_off);
 				if (dst_op->mode == MODE_REG_DIRECT) {
 					shift_clr(code, dst_op->base, inst->extra.size);
 				} else {
@@ -1168,11 +1167,11 @@ void translate_shift(m68k_options * opts, m68kinst * inst, host_ea *src_op, host
 
 	}
 	if (!special && end_off) {
-		*end_off = code->cur - (end_off + 1);
+		CHECK_BRANCH_DEST(end_off);
 	}
 	update_flags(opts, C|Z|N);
 	if (special && end_off) {
-		*end_off = code->cur - (end_off + 1);
+		CHECK_BRANCH_DEST(end_off);
 	}
 	//set X flag to same as C flag
 	if (opts->flag_regs[FLAG_C] >= 0) {
@@ -1181,7 +1180,7 @@ void translate_shift(m68k_options * opts, m68kinst * inst, host_ea *src_op, host
 		set_flag_cond(opts, CC_C, FLAG_X);
 	}
 	if (z_off) {
-		*z_off = code->cur - (z_off + 1);
+		CHECK_BRANCH_DEST(z_off);
 	}
 	if (inst->op != M68K_ASL) {
 		set_flag(opts, 0, FLAG_V);
@@ -1352,11 +1351,11 @@ void translate_m68k_arith(m68k_options *opts, m68kinst * inst, uint32_t flag_mas
 	if (inst->dst.addr_mode != MODE_AREG || inst->op == M68K_CMP) {
 		update_flags(opts, flag_mask);
 		if (inst->op == M68K_ADDX || inst->op == M68K_SUBX) {
-			check_alloc_code(code, 2*MAX_INST_LEN);
+ALLOC_CODE_RETRY_POINT
 			code_ptr after_flag_set = code->cur + 1;
 			jcc(code, CC_Z, code->cur + 2);
 			set_flag(opts, 0, FLAG_Z);
-			*after_flag_set = code->cur - (after_flag_set+1);
+			CHECK_BRANCH_DEST(after_flag_set);
 		}
 	}
 	if (inst->op != M68K_CMP) {
@@ -1726,15 +1725,14 @@ void translate_m68k_chk(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 	default:
 		isize = 2;
 	}
-	//make sure we won't start a new chunk in the middle of these branches
-	check_alloc_code(code, MAX_INST_LEN * 11);
+ALLOC_CODE_RETRY_POINT
 	code_ptr passed = code->cur + 1;
 	jcc(code, CC_GE, code->cur + 2);
 	set_flag(opts, 1, FLAG_N);
 	mov_ir(code, VECTOR_CHK, opts->gen.scratch2, SZ_D);
 	mov_ir(code, inst->address+isize, opts->gen.scratch1, SZ_D);
 	jmp(code, opts->trap);
-	*passed = code->cur - (passed+1);
+	CHECK_BRANCH_DEST(passed);
 	if (dst_op->mode == MODE_REG_DIRECT) {
 		if (src_op->mode == MODE_REG_DIRECT) {
 			cmp_rr(code, src_op->base, dst_op->base, inst->extra.size);
@@ -1756,7 +1754,7 @@ void translate_m68k_chk(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 	mov_ir(code, VECTOR_CHK, opts->gen.scratch2, SZ_D);
 	mov_ir(code, inst->address+isize, opts->gen.scratch1, SZ_D);
 	jmp(code, opts->trap);
-	*passed = code->cur - (passed+1);
+	CHECK_BRANCH_DEST(passed);
 	cycles(&opts->gen, 6);
 }
 
@@ -1883,7 +1881,6 @@ static uint32_t divs(uint32_t dividend, m68k_context *context, uint32_t divisor_
 void translate_m68k_div(m68k_options *opts, m68kinst *inst, host_ea *src_op, host_ea *dst_op)
 {
 	code_info *code = &opts->gen.code;
-	check_alloc_code(code, MAX_NATIVE_SIZE);
 	set_flag(opts, 0, FLAG_C);
 	if (dst_op->mode == MODE_REG_DIRECT) {
 		mov_rr(code, dst_op->base, opts->gen.scratch2, SZ_D);
@@ -1901,6 +1898,7 @@ void translate_m68k_div(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 		shl_ir(code, 16, opts->gen.scratch1, SZ_D);
 	}
 	cmp_ir(code, 0, opts->gen.scratch1, SZ_D);
+ALLOC_CODE_RETRY_POINT
 	code_ptr not_zero = code->cur+1;
 	jcc(code, CC_NZ, not_zero);
 
@@ -1926,8 +1924,7 @@ void translate_m68k_div(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 	mov_ir(code, VECTOR_INT_DIV_ZERO, opts->gen.scratch2, SZ_D);
 	mov_ir(code, inst->address+isize, opts->gen.scratch1, SZ_D);
 	jmp(code, opts->trap);
-
-	*not_zero = code->cur - (not_zero + 1);
+	CHECK_BRANCH_DEST(not_zero);
 	code_ptr end = NULL;
 	if (inst->op == M68K_DIVU) {
 		//initial overflow check needs to be done in the C code for divs
@@ -1942,7 +1939,7 @@ void translate_m68k_div(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 		end = code->cur+1;
 		jmp(code, end);
 
-		*not_overflow = code->cur - (not_overflow + 1);
+		CHECK_BRANCH_DEST(not_overflow);
 	}
 	call(code, opts->gen.save_context);
 	push_r(code, opts->gen.context_reg);
@@ -1964,7 +1961,7 @@ void translate_m68k_div(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 		mov_rrdisp(code, opts->gen.scratch1, dst_op->base, dst_op->disp, SZ_D);
 	}
 	if (end) {
-		*end = code->cur - (end + 1);
+		CHECK_BRANCH_DEST(end);
 	}
 }
 

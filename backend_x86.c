@@ -81,11 +81,11 @@ void check_cycles(cpu_options * opts)
 		cmp_rr(code, opts->cycles, opts->limit, SZ_D);
 		cc = CC_A;
 	}
-	check_alloc_code(code, MAX_INST_LEN*2);
+ALLOC_CODE_RETRY_POINT
 	code_ptr jmp_off = code->cur+1;
 	jcc(code, cc, jmp_off+1);
 	call(code, opts->handle_cycle_limit);
-	*jmp_off = code->cur - (jmp_off+1);
+	CHECK_BRANCH_DEST(jmp_off);
 }
 
 void log_address(cpu_options *opts, uint32_t address, char * format)

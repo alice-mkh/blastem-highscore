@@ -218,12 +218,26 @@ void btc_ir(code_info *code, uint8_t val, uint8_t dst, uint8_t size);
 void btc_irdisp(code_info *code, uint8_t val, uint8_t dst_base, int32_t dst_disp, uint8_t size);
 void jcc(code_info *code, uint8_t cc, code_ptr dest);
 void jmp_rind(code_info *code, uint8_t dst);
+void jmp_nocheck(code_info *code, code_ptr dest);
 void call_noalign(code_info *code, code_ptr fun);
 void call_r(code_info *code, uint8_t dst);
 void retn(code_info *code);
 void cdq(code_info *code);
 void loop(code_info *code, code_ptr dst);
 uint8_t is_mov_ir(code_ptr inst);
+
+#define ALLOC_CODE_RETRY_POINT code_info tmp_alloc_retry = *code; alloc_code_retry:
+#define ALLOC_CODE_RETRY_VAR code_info tmp_alloc_retry
+#define ALLOC_CODE_RETRY_POINT_NO_VAR tmp_alloc_retry = *code; alloc_code_retry:
+#define CHECK_BRANCH_DEST(ptr) if (code->cur - ((ptr) + 1) > 127 || code->cur - ((ptr) + 1) < -128) {\
+		code_info next_alloc_retry = *code;\
+		*code = tmp_alloc_retry;\
+		next_alloc_retry.cur = next_alloc_retry.last - (CODE_ALLOC_SIZE-RESERVE_WORDS);\
+		jmp_nocheck(code, next_alloc_retry.cur);\
+		*code = next_alloc_retry;\
+		goto alloc_code_retry;\
+	}\
+	*(ptr) = code->cur - ((ptr) + 1);
 
 #endif //GEN_X86_H_
 
