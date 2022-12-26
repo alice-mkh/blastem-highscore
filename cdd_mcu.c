@@ -235,7 +235,7 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		break;
 	}
 	uint8_t force_not_ready = 0;
-	if (context->coarse_seek  && !(context->coarse_seek % 15)) {
+	if (context->coarse_seek  && !(context->coarse_seek % 6)) {
 		//TODO: adjust seeking for focus error when these bad statuses happen
 		//BIOS depends on getting a not ready status during seeking to clear certain state
 		force_not_ready = context->status_buffer.format != SF_NOTREADY;
