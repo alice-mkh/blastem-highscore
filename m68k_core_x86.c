@@ -361,8 +361,9 @@ void m68k_check_cycles_int_latch(m68k_options *opts)
 		cmp_rr(code, opts->gen.cycles, opts->gen.limit, SZ_D);
 		cc = CC_A;
 	}
+	code_ptr jmp_off;
 ALLOC_CODE_RETRY_POINT
-	code_ptr jmp_off = code->cur+1;
+	jmp_off = code->cur+1;
 	jcc(code, cc, jmp_off+1);
 	call(code, opts->handle_int_latch);
 	CHECK_BRANCH_DEST(jmp_off)
@@ -866,8 +867,9 @@ void translate_m68k_scc(m68k_options * opts, m68kinst * inst)
 		}
 	} else {
 		uint8_t cc = m68k_eval_cond(opts, cond);
+		code_ptr true_off;
 ALLOC_CODE_RETRY_POINT
-		code_ptr true_off = code->cur + 1;
+		true_off = code->cur + 1;
 		jcc(code, cc, code->cur+2);
 		cycles(&opts->gen, BUS);
 		if (dst_op.mode == MODE_REG_DIRECT) {
@@ -1351,8 +1353,9 @@ void translate_m68k_arith(m68k_options *opts, m68kinst * inst, uint32_t flag_mas
 	if (inst->dst.addr_mode != MODE_AREG || inst->op == M68K_CMP) {
 		update_flags(opts, flag_mask);
 		if (inst->op == M68K_ADDX || inst->op == M68K_SUBX) {
+			code_ptr after_flag_set;
 ALLOC_CODE_RETRY_POINT
-			code_ptr after_flag_set = code->cur + 1;
+			after_flag_set = code->cur + 1;
 			jcc(code, CC_Z, code->cur + 2);
 			set_flag(opts, 0, FLAG_Z);
 			CHECK_BRANCH_DEST(after_flag_set);
@@ -1725,8 +1728,9 @@ void translate_m68k_chk(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 	default:
 		isize = 2;
 	}
+	code_ptr passed;
 ALLOC_CODE_RETRY_POINT
-	code_ptr passed = code->cur + 1;
+	passed = code->cur + 1;
 	jcc(code, CC_GE, code->cur + 2);
 	set_flag(opts, 1, FLAG_N);
 	mov_ir(code, VECTOR_CHK, opts->gen.scratch2, SZ_D);
@@ -1898,8 +1902,9 @@ void translate_m68k_div(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 		shl_ir(code, 16, opts->gen.scratch1, SZ_D);
 	}
 	cmp_ir(code, 0, opts->gen.scratch1, SZ_D);
+	code_ptr not_zero;
 ALLOC_CODE_RETRY_POINT
-	code_ptr not_zero = code->cur+1;
+	not_zero = code->cur+1;
 	jcc(code, CC_NZ, not_zero);
 
 	//TODO: Check that opts->trap includes the cycles conumed by the first trap0 microinstruction

@@ -81,8 +81,9 @@ void check_cycles(cpu_options * opts)
 		cmp_rr(code, opts->cycles, opts->limit, SZ_D);
 		cc = CC_A;
 	}
+	code_ptr jmp_off;
 ALLOC_CODE_RETRY_POINT
-	code_ptr jmp_off = code->cur+1;
+	jmp_off = code->cur+1;
 	jcc(code, cc, jmp_off+1);
 	call(code, opts->handle_cycle_limit);
 	CHECK_BRANCH_DEST(jmp_off);
