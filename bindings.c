@@ -44,6 +44,7 @@ typedef enum {
 	UI_CRAM_DEBUG,
 	UI_COMPOSITE_DEBUG,
 	UI_OSCILLOSCOPE_DEBUG,
+	UI_CD_GRAPHICS_DEBUG
 } ui_action;
 
 typedef struct {
@@ -434,6 +435,7 @@ void handle_binding_up(keybinding * binding)
 		case UI_CRAM_DEBUG:
 		case UI_COMPOSITE_DEBUG:
 		case UI_OSCILLOSCOPE_DEBUG:
+		case UI_CD_GRAPHICS_DEBUG:
 			if (allow_content_binds && current_system->toggle_debug_view) {
 				current_system->toggle_debug_view(current_system, binding->subtype_a - UI_PLANE_DEBUG + DEBUG_PLANE);
 				/*
@@ -677,6 +679,8 @@ int parse_binding_target(int device_num, const char * target, tern_node * padbut
 			*subtype_a = UI_COMPOSITE_DEBUG;
 		} else if (!strcmp(target + 3, "oscilloscope")) {
 			*subtype_a = UI_OSCILLOSCOPE_DEBUG;
+		} else if (!strcmp(target + 3, "cd_graphics_debug")) {
+			*subtype_a = UI_CD_GRAPHICS_DEBUG;
 		} else {
 			warning("Unreconized UI binding type %s\n", target);
 			return 0;

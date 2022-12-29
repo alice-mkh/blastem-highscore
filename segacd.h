@@ -29,6 +29,7 @@ typedef struct {
 	uint32_t        graphics_dy;
 	uint16_t        graphics_dst_x;
 	uint8_t         graphics_pixels[4];
+	uint8_t         graphics_debug_window;
 	uint8_t         timer_pending;
 	uint8_t         timer_value;
 	uint8_t         busreq;
@@ -57,5 +58,6 @@ memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_
 uint32_t gen_cycle_to_scd(uint32_t cycle, genesis_context *gen);
 void scd_run(segacd_context *cd, uint32_t cycle);
 void scd_adjust_cycle(segacd_context *cd, uint32_t deduction);
+void scd_toggle_graphics_debug(segacd_context *cd);
 
 #endif //SEGACD_H_

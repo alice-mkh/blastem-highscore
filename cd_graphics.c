@@ -1,5 +1,6 @@
 #include "cd_graphics.h"
 #include "backend.h"
+#include "render.h"
 
 void cd_graphics_init(segacd_context *cd)
 {
@@ -22,12 +23,12 @@ static uint8_t get_src_pixel(segacd_context *cd)
 		//32x32 stamps
 		stamp_shift = 5;
 		pixel_mask = 0x1F;
-		stamp_num_mask = 0x3FC;
+		stamp_num_mask = 0x7FC;
 	} else {
 		//16x16 stamps
 		stamp_shift = 4;
 		pixel_mask = 0xF;
-		stamp_num_mask = 0x3FF;
+		stamp_num_mask = 0x7FF;
 	}
 	uint16_t stamp_x = x >> stamp_shift;
 	uint16_t stamp_y = y >> stamp_shift;
@@ -249,6 +250,64 @@ draw:
 	}
 }
 
+void scd_toggle_graphics_debug(segacd_context *cd)
+{
+	if (cd->graphics_debug_window) {
+		render_destroy_window(cd->graphics_debug_window);
+		cd->graphics_debug_window = 0;
+	} else {
+		cd->graphics_debug_window = render_create_window("CD ASIC", 1024, 1024, NULL);
+	}
+}
+
+static void render_graphics_debug(segacd_context *cd)
+{
+	int pitch;
+	uint32_t *fb = render_get_framebuffer(cd->graphics_debug_window, &pitch);
+	uint32_t pixels = (cd->gate_array[GA_STAMP_SIZE] & BIT_SMS) ? 4096 : 256;
+	uint32_t stamp_size = (cd->gate_array[GA_STAMP_SIZE] & BIT_STS) ? 32 : 16;
+	uint32_t num_stamps = pixels / stamp_size;
+	//TODO: fix mask based on SMS and STS
+	uint32_t address = (cd->gate_array[GA_STAMP_MAP_BASE] & 0xFFE0) << 1;
+	genesis_context *gen = cd->genesis;
+	for (uint32_t stamp_y = 0; stamp_y < num_stamps; stamp_y++)
+	{
+		uint32_t start_y = stamp_y * stamp_size;
+		for (uint32_t stamp_x = 0; stamp_x < num_stamps; stamp_x++)
+		{
+			uint16_t entry = cd->word_ram[address++];
+			uint32_t tile_address = (entry & 0x7FF) << 6;
+			//TODO: flip and rotation
+			uint32_t start_x = stamp_x * stamp_size;
+			if (start_x < 1024 && start_y < 1024) {
+				for (uint32_t tile_x = start_x; tile_x < start_x + stamp_size; tile_x+=8)
+				{
+					for (uint32_t y = start_y; y < start_y + stamp_size; y++)
+					{
+						uint32_t *line = fb + y * pitch / sizeof(uint32_t);
+						for (uint32_t x = tile_x; x < tile_x + 8; x += 4)
+						{
+						
+							uint16_t word = cd->word_ram[tile_address++];
+							uint16_t pixels[4] = {
+								word >> 12,
+								word >> 8 & 0xF,
+								word >> 4 & 0xF,
+								word & 0xF
+							};
+							for (uint32_t i = 0; i < 4; i++)
+							{
+								line[x + i] = gen->vdp->colors[pixels[i]];
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	render_framebuffer_updated(cd->graphics_debug_window, 1024);
+}
+
 void cd_graphics_run(segacd_context *cd, uint32_t cycle)
 {
 	while (cd->graphics_cycle < cycle)
@@ -263,6 +322,10 @@ void cd_graphics_run(segacd_context *cd, uint32_t cycle)
 			if (cd->graphics_cycle >= cd->graphics_int_cycle) {
 				printf("graphics end %u\n", cd->graphics_cycle);
 				cd->gate_array[GA_STAMP_SIZE] &= ~BIT_GRON;
+				
+				if (cd->graphics_debug_window) {
+					render_graphics_debug(cd);
+				}
 				break;
 			}
 		} else {

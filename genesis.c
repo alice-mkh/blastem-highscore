@@ -1740,6 +1740,8 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 				rf5c164_enable_scope(&cd->pcm, scope);
 			}
 		}
+	} else if (debug_view == DEBUG_CD_GRAPHICS && gen->expansion) {
+		scd_toggle_graphics_debug(gen->expansion);
 	}
 }
 
