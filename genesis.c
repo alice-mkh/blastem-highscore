@@ -2235,6 +2235,7 @@ genesis_context *alloc_config_genesis(void *rom, uint32_t rom_size, void *lock_o
 			}
 		}
 		cd->base = 0x400000;
+		cd->m68k->options->address_log = (ym_opts & OPT_ADDRESS_LOG) ? fopen("address_sub.log", "w") : NULL;
 	}
 	info.map = gen->header.info.map = NULL;
 
@@ -2297,6 +2298,7 @@ genesis_context *alloc_config_genesis_cdboot(system_media *media, uint32_t syste
 	gen->version_reg &= ~NO_DISK;
 
 	gen->expansion = cd;
+	cd->m68k->options->address_log = (system_opts & OPT_ADDRESS_LOG) ? fopen("address_sub.log", "w") : NULL;
 	gen->version_reg &= ~NO_DISK;
 	cd->genesis = gen;
 	setup_io_devices(config, &info, &gen->io);
