@@ -42,8 +42,9 @@ typedef struct {
 uint16_t fetch(uint32_t address, void *data)
 {
 	rom_def *rom = data;
+	address &= 0xFFFFFF;
 	if (address >= rom->address_off && address < rom->address_end) {
-		return rom->buffer[((address & 0xFFFFFF) - rom->address_off) >> 1];
+		return rom->buffer[(address - rom->address_off) >> 1];
 	}
 	return 0;
 }
