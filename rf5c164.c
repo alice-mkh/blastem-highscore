@@ -216,7 +216,7 @@ void rf5c164_write(rf5c164* pcm, uint16_t address, uint8_t value)
 	} else if (address <= ST) {
 		//See note in first step of rf5c164_run
 		pcm->channels[pcm->selected_channel].regs[address] = value;
-	} else {
+	} else if (address > 0x1000){
 		pcm->pending_address = address;
 		pcm->pending_byte = value;
 		pcm->flags |= FLAG_PENDING;
