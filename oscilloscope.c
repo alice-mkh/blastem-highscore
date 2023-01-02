@@ -84,8 +84,8 @@ void scope_render(oscilloscope *scope)
 			//TODO: at least linear filtering
 			int16_t sample = scope->channels[i].samples[(int)(cur_sample + 0.5f)];
 			int y = (float)sample * value_scale + 0.5f;
-			if (y > row_height / 2) {
-				y = row_height / 2;
+			if (y > row_height / 2 - 1) {
+				y = row_height / 2 - 1;
 			} else if (y < -(row_height / 2)) {
 				y = -(row_height / 2);
 			}
@@ -106,15 +106,15 @@ void scope_render(oscilloscope *scope)
 				cur_sample -= scope->channels[i].period;
 			}
 		}
-	
+
 		offset += column_width;
 		if (offset >= width) {
 			offset = 0;
 			cur_line += pitch * row_height;
 		}
 	}
-	
-	
+
+
 	render_framebuffer_updated(scope->window, WIDTH);
 }
 
