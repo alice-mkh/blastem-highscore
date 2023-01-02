@@ -1683,6 +1683,14 @@ static void set_audio_config(genesis_context *gen)
 
 	char *config_dac = tern_find_path_default(config, "audio\0fm_dac\0", (tern_val){.ptrval="zero_offset"}, TVAL_PTR).ptrval;
 	ym_enable_zero_offset(gen->ym, !strcmp(config_dac, "zero_offset"));
+
+	if (gen->expansion) {
+		segacd_context *cd = gen->expansion;
+		config_gain = tern_find_path(config, "audio\0rf5c164_gain\0", TVAL_PTR).ptrval;
+		render_audio_source_gaindb(cd->pcm.audio, config_gain ? atof(config_gain) : -6.0f);
+		config_gain = tern_find_path(config, "audio\0cdda_gain\0", TVAL_PTR).ptrval;
+		render_audio_source_gaindb(cd->fader.audio, config_gain ? atof(config_gain) : -9.5f);
+	}
 }
 
 static void config_updated(system_header *system)
@@ -1953,8 +1961,6 @@ static genesis_context *shared_init(uint32_t system_opts, rom_info *rom, uint8_t
 	gen->psg = malloc(sizeof(psg_context));
 	psg_init(gen->psg, gen->master_clock, MCLKS_PER_PSG);
 
-	set_audio_config(gen);
-
 	z80_map[0].buffer = gen->zram = calloc(1, Z80_RAM_BYTES);
 #ifndef NO_Z80
 	z80_options *z_opts = malloc(sizeof(z80_options));
@@ -2208,6 +2214,7 @@ genesis_context *alloc_config_genesis(void *rom, uint32_t rom_size, void *lock_o
 	memmap_chunk* map = info.map;
 	uint32_t map_chunks = info.map_chunks;
 	if (info.wants_cd || (current_media()->chain && current_media()->chain->type == MEDIA_CDROM)) {
+		gen->header.type = SYSTEM_SEGACD;
 		segacd_context *cd = alloc_configure_segacd((system_media *)current_media(), 0, force_region, &info);
 		gen->expansion = cd;
 		gen->version_reg &= ~NO_DISK;
@@ -2265,6 +2272,7 @@ genesis_context *alloc_config_genesis(void *rom, uint32_t rom_size, void *lock_o
 	}
 	gen->reset_cycle = CYCLE_NEVER;
 
+	set_audio_config(gen);
 	return gen;
 }
 
@@ -2327,5 +2335,7 @@ genesis_context *alloc_config_genesis_cdboot(system_media *media, uint32_t syste
 		}
 	}
 	gen->header.type = SYSTEM_SEGACD;
+
+	set_audio_config(gen);
 	return gen;
 }

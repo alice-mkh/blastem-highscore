@@ -1931,6 +1931,8 @@ void view_audio_settings(struct nk_context *context)
 		settings_float_property(context, "Gain (dB)", "Overall", "audio\0gain\0", 0, -30.0f, 30.0f, 0.5f);
 		settings_float_property(context, "", "FM", "audio\0fm_gain\0", 0, -30.0f, 30.0f, 0.5f);
 		settings_float_property(context, "", "PSG", "audio\0psg_gain\0", 0, -30.0f, 30.0f, 0.5f);
+		settings_float_property(context, "", "RF5C164", "audio\0rf5c164_gain\0", -6.0f, -30.0f, 30.0f, 0.5f);
+		settings_float_property(context, "", "CDDA", "audio\0cdd_gain\0", -9.5f, -30.0f, 30.0f, 0.5f);
 		selected_dac = settings_dropdown_ex(context, "FM DAC", dac, dac_desc, num_dacs, selected_dac, "audio\0fm_dac\0");
 		if (nk_button_label(context, "Back")) {
 			pop_view();
