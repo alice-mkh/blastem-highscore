@@ -1356,6 +1356,10 @@ static void set_speed_percent(system_header * system, uint32_t percent)
 	while (context->ym->current_cycle != context->psg->cycles) {
 		sync_sound(context, context->psg->cycles + MCLKS_PER_PSG);
 	}
+	if (context->expansion) {
+		segacd_context *cd = context->expansion;
+		segacd_set_speed_percent(cd, percent);
+	}
 	ym_adjust_master_clock(context->ym, context->master_clock);
 	psg_adjust_master_clock(context->psg, context->master_clock);
 }

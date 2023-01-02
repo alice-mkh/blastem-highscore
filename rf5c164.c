@@ -33,6 +33,11 @@ void rf5c164_deinit(rf5c164* pcm)
 	render_free_source(pcm->audio);
 }
 
+void rf5c164_adjust_master_clock(rf5c164* pcm, uint32_t mclks)
+{
+	render_audio_adjust_clock(pcm->audio, mclks, pcm->clock_step * 96);
+}
+
 //48 cycles per channel
 //1 external write per 16 cycles
 //3 external writes per channel/sample

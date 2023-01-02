@@ -1538,3 +1538,12 @@ memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_
 	*num_chunks = sizeof(main_cpu_map) / sizeof(*main_cpu_map);
 	return main_cpu_map;
 }
+
+void segacd_set_speed_percent(segacd_context *cd, uint32_t percent)
+{
+	uint32_t scd_cycle = gen_cycle_to_scd(cd->genesis->ym->current_cycle, cd->genesis);
+	scd_run(cd, scd_cycle);
+	uint32_t new_clock = ((uint64_t)SCD_MCLKS * (uint64_t)percent) / 100;
+	rf5c164_adjust_master_clock(&cd->pcm, new_clock);
+	cdd_fader_set_speed_percent(&cd->fader, percent);
+}

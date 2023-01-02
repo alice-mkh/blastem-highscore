@@ -59,5 +59,6 @@ uint32_t gen_cycle_to_scd(uint32_t cycle, genesis_context *gen);
 void scd_run(segacd_context *cd, uint32_t cycle);
 void scd_adjust_cycle(segacd_context *cd, uint32_t deduction);
 void scd_toggle_graphics_debug(segacd_context *cd);
+void segacd_set_speed_percent(segacd_context *cd, uint32_t percent);
 
 #endif //SEGACD_H_

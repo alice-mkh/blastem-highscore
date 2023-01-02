@@ -1,9 +1,10 @@
 #include "cdd_fader.h"
 #include <stdio.h>
+#define CDDA_MCLKS 16934400
 
 void cdd_fader_init(cdd_fader *fader)
 {
-	fader->audio = render_audio_source("CDDA", 16934400, 384, 2);
+	fader->audio = render_audio_source("CDDA", CDDA_MCLKS, 384, 2);
 	fader->cur_attenuation = 0x4000;
 	fader->dst_attenuation = 0x4000;
 	fader->attenuation_step = 0;
@@ -12,6 +13,12 @@ void cdd_fader_init(cdd_fader *fader)
 void cdd_fader_deinit(cdd_fader *fader)
 {
 	render_free_source(fader->audio);
+}
+
+void cdd_fader_set_speed_percent(cdd_fader *fader, uint32_t percent)
+{
+	uint32_t new_clock = ((uint64_t)CDDA_MCLKS * (uint64_t)percent) / 100;
+	render_audio_adjust_clock(fader->audio, new_clock, 384);
 }
 
 void cdd_fader_attenuation_write(cdd_fader *fader, uint16_t attenuation)

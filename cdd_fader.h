@@ -15,6 +15,7 @@ typedef struct {
 
 void cdd_fader_init(cdd_fader *fader);
 void cdd_fader_deinit(cdd_fader *fader);
+void cdd_fader_set_speed_percent(cdd_fader *fader, uint32_t percent);
 void cdd_fader_attenuation_write(cdd_fader *fader, uint16_t attenuation);
 void cdd_fader_data(cdd_fader *fader, uint8_t byte);
 void cdd_fader_pause(cdd_fader *fader);

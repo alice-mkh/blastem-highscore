@@ -34,6 +34,7 @@ typedef struct {
 
 void rf5c164_init(rf5c164* pcm, uint32_t mclks, uint32_t divider);
 void rf5c164_deinit(rf5c164* pcm);
+void rf5c164_adjust_master_clock(rf5c164* pcm, uint32_t mclks);
 void rf5c164_run(rf5c164* pcm, uint32_t cycle);
 void rf5c164_write(rf5c164* pcm, uint16_t address, uint8_t value);
 uint8_t rf5c164_read(rf5c164* pcm, uint16_t address);
