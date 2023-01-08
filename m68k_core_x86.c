@@ -2528,10 +2528,10 @@ void m68k_invalidate_code_range(m68k_context *context, uint32_t start, uint32_t 
 		//calculate the lowest alias for this address
 		start = mem_chunk->start + ((start - mem_chunk->start) & mem_chunk->mask);
 	}
-	mem_chunk = find_map_chunk(end, &opts->gen, 0, NULL);
+	mem_chunk = find_map_chunk(end - 1, &opts->gen, 0, NULL);
 	if (mem_chunk) {
 		//calculate the lowest alias for this address
-		end = mem_chunk->start + ((end - mem_chunk->start) & mem_chunk->mask);
+		end = mem_chunk->start + ((end - 1 - mem_chunk->start) & mem_chunk->mask) + 1;
 	}
 	uint32_t start_chunk = start / NATIVE_CHUNK_SIZE, end_chunk = end / NATIVE_CHUNK_SIZE;
 	for (uint32_t chunk = start_chunk; chunk <= end_chunk; chunk++)
