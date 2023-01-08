@@ -412,6 +412,7 @@ uint8_t ym_save_gst(ym2612_context * context, FILE * gstfile)
 	return 1;
 }
 
+#include "m68k_internal.h" //needed for get_native_address_trans, should be eliminated once handling of PC is cleaned up
 uint32_t load_gst(genesis_context * gen, char * fname)
 {
 	char buffer[4096];
@@ -461,6 +462,7 @@ uint32_t load_gst(genesis_context * gen, char * fname)
 			i++;
 		}
 	}
+	gen->m68k->resume_pc = get_native_address_trans(gen->m68k, pc);
 	fclose(gstfile);
 	return pc;
 

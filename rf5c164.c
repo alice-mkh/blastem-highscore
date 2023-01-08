@@ -262,3 +262,50 @@ void rf5c164_enable_scope(rf5c164* pcm, oscilloscope *scope)
 		pcm->channels[i].scope_channel = scope_add_channel(scope, names[i], 50000000 / (pcm->clock_step * 96));
 	}
 }
+
+void rf5c164_serialize(rf5c164* pcm, serialize_buffer *buf)
+{
+	save_int32(buf, pcm->cycle);
+	save_buffer16(buf, pcm->ram, sizeof(pcm->ram)/sizeof(*pcm->ram));
+	save_int16(buf, pcm->ram_bank);
+	save_int16(buf, pcm->pending_address);
+	save_int32(buf, pcm->left);
+	save_int32(buf, pcm->right);
+	for (int i = 0; i < 8; i++)
+	{
+		rf5c164_channel *chan = pcm->channels + i;
+		save_int32(buf, chan->cur_ptr);
+		save_buffer8(buf, chan->regs, sizeof(chan->regs));
+		save_int8(buf, chan->sample);
+	}
+	save_int8(buf, pcm->pending_byte);
+	save_int8(buf, pcm->channel_enable);
+	save_int8(buf, pcm->selected_channel);
+	save_int8(buf, pcm->cur_channel);
+	save_int8(buf, pcm->step);
+	save_int8(buf, pcm->flags);
+}
+
+void rf5c164_deserialize(deserialize_buffer *buf, void *vpcm)
+{
+	rf5c164 *pcm = vpcm;
+	pcm->cycle = load_int32(buf);
+	load_buffer16(buf, pcm->ram, sizeof(pcm->ram)/sizeof(*pcm->ram));
+	pcm->ram_bank = load_int16(buf);
+	pcm->pending_address = load_int16(buf);
+	pcm->left = load_int32(buf);
+	pcm->right = load_int32(buf);
+	for (int i = 0; i < 8; i++)
+	{
+		rf5c164_channel *chan = pcm->channels + i;
+		chan->cur_ptr = load_int32(buf);
+		load_buffer8(buf, chan->regs, sizeof(chan->regs));
+		chan->sample = load_int8(buf);
+	}
+	pcm->pending_byte = load_int8(buf);
+	pcm->channel_enable = load_int8(buf);
+	pcm->selected_channel = load_int8(buf);
+	pcm->cur_channel = load_int8(buf);
+	pcm->step = load_int8(buf);
+	pcm->flags = load_int8(buf);
+}

@@ -561,3 +561,41 @@ uint32_t make_iso_media(system_media *media, const char *filename)
 	media->read_subcodes = bin_subcode_read;
 	return media->size;
 }
+
+void cdimage_serialize(system_media *media, serialize_buffer *buf)
+{
+	if (media->type != MEDIA_CDROM) {
+		return;
+	}
+	save_int32(buf, media->cur_track);
+	save_int32(buf, media->cur_sector);
+	if (media->cur_track < media->num_tracks && media->tracks[media->cur_track].f) {
+		save_int32(buf, ftell(media->tracks[media->cur_track].f));
+	} else {
+		save_int32(buf, 0);
+	}
+	save_int8(buf, media->in_fake_pregap);
+	save_int8(buf, media->byte_storage);
+	if (media->tmp_buffer) {
+		save_buffer8(buf, media->tmp_buffer, 96);
+	}
+}
+
+void cdimage_deserialize(deserialize_buffer *buf, void *vmedia)
+{
+	system_media *media = vmedia;
+	if (media->type != MEDIA_CDROM) {
+		return;
+	}
+	media->cur_track = load_int32(buf);
+	media->cur_sector = load_int32(buf);
+	uint32_t seekpos = load_int32(buf);
+	if (media->cur_track < media->num_tracks && media->tracks[media->cur_track].f) {
+		fseek(media->tracks[media->cur_track].f, seekpos, SEEK_SET);
+	}
+	media->in_fake_pregap = load_int8(buf);
+	media->byte_storage = load_int8(buf);
+	if (media->tmp_buffer) {
+		load_buffer8(buf, media->tmp_buffer, 96);
+	}
+}

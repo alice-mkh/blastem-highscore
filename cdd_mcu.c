@@ -809,3 +809,90 @@ void cdd_mcu_adjust_cycle(cdd_mcu *context, uint32_t deduction)
 		context->next_subcode_cycle -= cd_deduction;
 	}
 }
+
+void cdd_mcu_serialize(cdd_mcu *context, serialize_buffer *buf)
+{
+	save_int32(buf, context->cycle);
+	save_int32(buf, context->next_int_cycle);
+	save_int32(buf, context->next_subcode_int_cycle);
+	save_int32(buf, context->last_sector_cycle);
+	save_int32(buf, context->last_nibble_cycle);
+	save_int32(buf, context->next_byte_cycle);
+	save_int32(buf, context->next_subcode_cycle);
+	save_int8(buf, context->current_status_nibble);
+	save_int8(buf, context->current_cmd_nibble);
+	save_int16(buf, context->current_sector_byte);
+	save_int8(buf, context->current_subcode_byte);
+	save_int8(buf, context->current_subcode_dest);
+	save_int32(buf, context->head_pba);
+	save_int32(buf, context->seek_pba);
+	save_int32(buf, context->pause_pba);
+	save_int32(buf, context->coarse_seek);
+	save_buffer8(buf, (uint8_t *)&context->cmd_buffer, sizeof(context->cmd_buffer));
+	save_buffer8(buf, (uint8_t *)&context->status_buffer, sizeof(context->status_buffer));
+	save_int8(buf, context->requested_format);
+	save_int8(buf, context->status);
+	save_int8(buf, context->error_status);
+	save_int8(buf, context->requested_track);
+	save_int8(buf, context->cmd_recv_wait);
+	save_int8(buf, context->cmd_recv_pending);
+	save_int8(buf, context->int_pending);
+	save_int8(buf, context->subcode_int_pending);
+	save_int8(buf, context->toc_valid);
+	save_int8(buf, context->first_cmd_received);
+	save_int8(buf, context->seeking);
+	save_int8(buf, context->in_fake_pregap);
+}
+
+static int sign_extend8(uint8_t value)
+{
+	if (value & 0x80) {
+		return value | 0xFFFFFF00;
+	} else {
+		return value;
+	}
+}
+
+static int sign_extend16(uint16_t value)
+{
+	if (value & 0x8000) {
+		return value | 0xFFFF0000;
+	} else {
+		return value;
+	}
+}
+
+void cdd_mcu_deserialize(deserialize_buffer *buf, void *vcontext)
+{
+	cdd_mcu *context = vcontext;
+	context->cycle = load_int32(buf);
+	context->next_int_cycle = load_int32(buf);
+	context->next_subcode_int_cycle = load_int32(buf);
+	context->last_sector_cycle = load_int32(buf);
+	context->last_nibble_cycle = load_int32(buf);
+	context->next_byte_cycle = load_int32(buf);
+	context->next_subcode_cycle = load_int32(buf);
+	context->current_status_nibble = sign_extend8(load_int8(buf));
+	context->current_cmd_nibble = sign_extend8(load_int8(buf));
+	context->current_sector_byte = sign_extend16(load_int16(buf));
+	context->current_subcode_byte = sign_extend8(load_int8(buf));
+	context->current_subcode_dest = sign_extend8(load_int8(buf));
+	context->head_pba = load_int32(buf);
+	context->seek_pba = load_int32(buf);
+	context->pause_pba = load_int32(buf);
+	context->coarse_seek = load_int32(buf);
+	load_buffer8(buf, (uint8_t *)&context->cmd_buffer, sizeof(context->cmd_buffer));
+	load_buffer8(buf, (uint8_t *)&context->status_buffer, sizeof(context->status_buffer));
+	context->requested_format = load_int8(buf);
+	context->status = load_int8(buf);
+	context->error_status = load_int8(buf);
+	context->requested_track = load_int8(buf);
+	context->cmd_recv_wait = load_int8(buf);
+	context->cmd_recv_pending = load_int8(buf);
+	context->int_pending = load_int8(buf);
+	context->subcode_int_pending = load_int8(buf);
+	context->toc_valid = load_int8(buf);
+	context->first_cmd_received = load_int8(buf);
+	context->seeking = load_int8(buf);
+	context->in_fake_pregap = load_int8(buf);
+}

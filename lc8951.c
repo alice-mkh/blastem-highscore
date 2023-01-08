@@ -428,3 +428,48 @@ void lc8951_adjust_cycles(lc8951 *context, uint32_t deduction)
 	}
 	printf("cycle is now %u, decode_end %u, transfer_end %u\n", context->cycle, context->decode_end, context->transfer_end);
 }
+
+void lc8951_serialize(lc8951 *context, serialize_buffer *buf)
+{
+	save_int32(buf, context->cycle);
+	save_int32(buf, context->decode_end);
+	save_int32(buf, context->transfer_end);
+	save_int32(buf, context->next_byte_cycle);
+	save_int16(buf, context->sector_counter);
+	save_buffer8(buf, context->buffer, sizeof(context->buffer));
+	save_buffer8(buf, context->regs, sizeof(context->regs));
+	save_buffer8(buf, context->comin, sizeof(context->comin));
+	save_int16(buf, context->dac);
+	save_int8(buf, context->comin_write);
+	save_int8(buf, context->comin_count);
+	save_int8(buf, context->ifctrl);
+	save_int8(buf, context->ctrl0);
+	save_int8(buf, context->ctrl1);
+	save_int8(buf, context->ar);
+	save_int8(buf, context->ar_mask);
+	save_int8(buf, context->triggered);
+	save_int8(buf, context->sync_counter);
+}
+
+void lc8951_deserialize(deserialize_buffer *buf, void *vcontext)
+{
+	lc8951 *context = vcontext;
+	context->cycle = load_int32(buf);
+	context->decode_end = load_int32(buf);
+	context->transfer_end = load_int32(buf);
+	context->next_byte_cycle = load_int32(buf);
+	context->sector_counter = load_int16(buf);
+	load_buffer8(buf, context->buffer, sizeof(context->buffer));
+	load_buffer8(buf, context->regs, sizeof(context->regs));
+	load_buffer8(buf, context->comin, sizeof(context->comin));
+	context->dac = load_int16(buf);
+	context->comin_write = load_int8(buf);
+	context->comin_count = load_int8(buf);
+	context->ifctrl = load_int8(buf);
+	context->ctrl0 = load_int8(buf);
+	context->ctrl1 = load_int8(buf);
+	context->ar = load_int8(buf);
+	context->ar_mask = load_int8(buf);
+	context->triggered = load_int8(buf);
+	context->sync_counter = load_int8(buf);
+}

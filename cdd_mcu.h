@@ -3,6 +3,7 @@
 #include "system.h"
 #include "lc8951.h"
 #include "cdd_fader.h"
+#include "serialize.h"
 
 typedef enum {
 	SF_ABSOLUTE,
@@ -172,5 +173,7 @@ void cdd_hock_enabled(cdd_mcu *context);
 void cdd_hock_disabled(cdd_mcu *context);
 void cdd_mcu_start_cmd_recv(cdd_mcu *context, uint16_t *gate_array);
 void cdd_mcu_adjust_cycle(cdd_mcu *context, uint32_t deduction);
+void cdd_mcu_serialize(cdd_mcu *context, serialize_buffer *buf);
+void cdd_mcu_deserialize(deserialize_buffer *buf, void *vcontext);
 
 #endif //CD_MCU_H_

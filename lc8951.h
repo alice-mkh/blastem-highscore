@@ -2,6 +2,7 @@
 #define LC8951_H_
 
 #include <stdint.h>
+#include "serialize.h"
 
 typedef uint8_t (*lcd8951_byte_recv_fun)(void *data, uint8_t byte);
 
@@ -43,5 +44,7 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 uint32_t lc8951_next_interrupt(lc8951 *context);
 void lc8951_resume_transfer(lc8951 *context, uint32_t cycle);
 void lc8951_adjust_cycles(lc8951 *context, uint32_t deduction);
+void lc8951_serialize(lc8951 *context, serialize_buffer *buf);
+void lc8951_deserialize(deserialize_buffer *buf, void *vcontext);
 
 #endif //LC8951_H_

@@ -76,3 +76,24 @@ void cdd_fader_data(cdd_fader *fader, uint8_t byte)
 		}
 	}
 }
+
+void cdd_fader_serialize(cdd_fader *fader, serialize_buffer *buf)
+{
+	save_int16(buf, fader->cur_attenuation);
+	save_int16(buf, fader->dst_attenuation);
+	save_int16(buf, fader->attenuation_step);
+	save_int8(buf, fader->flags);
+	save_buffer8(buf, fader->bytes, sizeof(fader->bytes));
+	save_int8(buf, fader->byte_counter);
+}
+
+void cdd_fader_deserialize(deserialize_buffer *buf, void *vfader)
+{
+	cdd_fader *fader = vfader;
+	fader->cur_attenuation = load_int16(buf);
+	fader->dst_attenuation = load_int16(buf);
+	fader->attenuation_step = load_int16(buf);
+	fader->flags = load_int8(buf);
+	load_buffer8(buf, fader->bytes, sizeof(fader->bytes));
+	fader->byte_counter = load_int8(buf);
+}

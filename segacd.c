@@ -7,6 +7,7 @@
 #include "debug.h"
 #include "gdb_remote.h"
 #include "blastem.h"
+#include "cdimage.h"
 
 #define SCD_MCLKS 50000000
 #define SCD_PERIPH_RESET_CLKS (SCD_MCLKS / 10)
@@ -1057,14 +1058,17 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 	context->current_cycle += num_refresh * REFRESH_DELAY;
 
 	scd_peripherals_run(cd, context->current_cycle);
-	if (address && cd->enter_debugger) {
-		genesis_context *gen = cd->genesis;
-		cd->enter_debugger = 0;
-		if (gen->header.debugger_type == DEBUGGER_NATIVE) {
-			debugger(context, address);
-		} else {
-			gdb_debug_enter(context, address);
+	if (address) {
+		if (cd->enter_debugger) {
+			genesis_context *gen = cd->genesis;
+			cd->enter_debugger = 0;
+			if (gen->header.debugger_type == DEBUGGER_NATIVE) {
+				debugger(context, address);
+			} else {
+				gdb_debug_enter(context, address);
+			}
 		}
+		cd->m68k_pc = address;
 	}
 	switch (context->int_ack)
 	{
@@ -1453,14 +1457,8 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	memcpy(cd->rom_mut, cd->rom, adjusted_size);
 	cd->rom_mut[0x72/2] = 0xFFFF;
 
-	//memset(info, 0, sizeof(*info));
-	//tern_node *db = get_rom_db();
-	//*info = configure_rom(db, media->buffer, media->size, media->chain ? media->chain->buffer : NULL, media->chain ? media->chain->size : 0, NULL, 0);
-
 	cd->prog_ram = calloc(512*1024, 1);
 	cd->word_ram = calloc(256*1024, 1);
-	cd->pcm_ram = calloc(64*1024, 1);
-	//TODO: Load state from file
 	cd->bram = calloc(8*1024, 1);
 
 
@@ -1497,10 +1495,142 @@ void free_segacd(segacd_context *cd)
 	m68k_options_free(cd->m68k->options);
 	free(cd->m68k);
 	free(cd->bram);
-	free(cd->pcm_ram);
 	free(cd->word_ram);
 	free(cd->prog_ram);
 	free(cd->rom_mut);
+}
+
+void segacd_serialize(segacd_context *cd, serialize_buffer *buf, uint8_t all)
+{
+	if (all) {
+		start_section(buf, SECTION_SUB_68000);
+		m68k_serialize(cd->m68k, cd->m68k_pc, buf);
+		end_section(buf);
+
+		start_section(buf, SECTION_GATE_ARRAY);
+		save_buffer16(buf, cd->gate_array, sizeof(cd->gate_array)/sizeof(*cd->gate_array));
+		save_buffer16(buf, cd->prog_ram, 256*1024);
+		save_buffer16(buf, cd->word_ram, 128*1024);
+		save_int16(buf, cd->rom_mut[0x72/2]);
+		save_int32(buf, cd->stopwatch_cycle);
+		save_int32(buf, cd->int2_cycle);
+		save_int32(buf, cd->graphics_int_cycle);
+		save_int32(buf, cd->periph_reset_cycle);
+		save_int32(buf, cd->last_refresh_cycle);
+		save_int32(buf, cd->graphics_cycle);
+		save_int32(buf, cd->base);
+		save_int32(buf, cd->graphics_x);
+		save_int32(buf, cd->graphics_y);
+		save_int32(buf, cd->graphics_dx);
+		save_int32(buf, cd->graphics_dy);
+		save_int32(buf, cd->graphics_dst_x);
+		save_buffer8(buf, cd->graphics_pixels, sizeof(cd->graphics_pixels));
+		save_int8(buf, cd->timer_pending);
+		save_int8(buf, cd->timer_value);
+		save_int8(buf, cd->busreq);
+		save_int8(buf, cd->reset);
+		save_int8(buf, cd->need_reset);
+		save_int8(buf, cd->cdc_dst_low);
+		save_int8(buf, cd->cdc_int_ack);
+		save_int8(buf, cd->graphics_step);
+		save_int8(buf, cd->graphics_dst_y);
+		save_int8(buf, cd->main_has_word2m);
+		save_int8(buf, cd->main_swap_request);
+		save_int8(buf, cd->bank_toggle);
+		save_int8(buf, cd->sub_paused_wordram);
+		end_section(buf);
+
+		start_section(buf, SECTION_CDD_MCU);
+		cdd_mcu_serialize(&cd->cdd, buf);
+		end_section(buf);
+
+		start_section(buf, SECTION_LC8951);
+		lc8951_serialize(&cd->cdc, buf);
+		end_section(buf);
+
+		start_section(buf, SECTION_CDROM);
+		cdimage_serialize(cd->cdd.media, buf);
+		end_section(buf);
+	}
+	start_section(buf, SECTION_RF5C164);
+	rf5c164_serialize(&cd->pcm, buf);
+	end_section(buf);
+
+	start_section(buf, SECTION_CDD_FADER);
+	cdd_fader_serialize(&cd->fader, buf);
+	end_section(buf);
+}
+
+static void gate_array_deserialize(deserialize_buffer *buf, void *vcd)
+{
+	segacd_context *cd = vcd;
+	load_buffer16(buf, cd->gate_array, sizeof(cd->gate_array)/sizeof(*cd->gate_array));
+	load_buffer16(buf, cd->prog_ram, 256*1024);
+	load_buffer16(buf, cd->word_ram, 128*1024);
+	cd->rom_mut[0x72/2] = load_int16(buf);
+	cd->stopwatch_cycle = load_int32(buf);
+	cd->int2_cycle = load_int32(buf);
+	cd->graphics_int_cycle = load_int32(buf);
+	cd->periph_reset_cycle = load_int32(buf);
+	cd->last_refresh_cycle = load_int32(buf);
+	cd->graphics_cycle = load_int32(buf);
+	cd->base = load_int32(buf);
+	cd->graphics_x = load_int32(buf);
+	cd->graphics_y = load_int32(buf);
+	cd->graphics_dx = load_int32(buf);
+	cd->graphics_dy = load_int32(buf);
+	cd->graphics_dst_x = load_int32(buf);
+	load_buffer8(buf, cd->graphics_pixels, sizeof(cd->graphics_pixels));
+	cd->timer_pending = load_int8(buf);
+	cd->timer_value = load_int8(buf);
+	cd->busreq = load_int8(buf);
+	cd->reset = load_int8(buf);
+	cd->need_reset = load_int8(buf);
+	cd->cdc_dst_low = load_int8(buf);
+	cd->cdc_int_ack = load_int8(buf);
+	cd->graphics_step = load_int8(buf);
+	cd->graphics_dst_y = load_int8(buf);
+	cd->main_has_word2m = load_int8(buf);
+	cd->main_swap_request = load_int8(buf);
+	cd->bank_toggle = load_int8(buf);
+	cd->sub_paused_wordram = load_int8(buf);
+
+	if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
+		//1M mode
+		cd->genesis->m68k->mem_pointers[cd->memptr_start_index + 1] = NULL;
+		cd->genesis->m68k->mem_pointers[cd->memptr_start_index + 2] = NULL;
+		cd->m68k->mem_pointers[0] = NULL;
+		cd->m68k->mem_pointers[1] = cd->bank_toggle ? cd->word_ram : cd->word_ram + 1;
+	} else {
+		//2M mode
+		if (cd->main_has_word2m) {
+			//main CPU has word ram
+			cd->genesis->m68k->mem_pointers[cd->memptr_start_index + 1] = cd->word_ram;
+			cd->genesis->m68k->mem_pointers[cd->memptr_start_index + 2] = cd->word_ram + 0x10000;
+			cd->m68k->mem_pointers[0] = NULL;
+			cd->m68k->mem_pointers[1] = NULL;
+		} else {
+			//sub cpu has word ram
+			cd->genesis->m68k->mem_pointers[cd->memptr_start_index + 1] = NULL;
+			cd->genesis->m68k->mem_pointers[cd->memptr_start_index + 2] = NULL;
+			cd->m68k->mem_pointers[0] = cd->word_ram;
+			cd->m68k->mem_pointers[1] = NULL;
+		}
+	}
+
+	m68k_invalidate_code_range(cd->m68k, 0, 0x0E0000);
+	m68k_invalidate_code_range(cd->genesis->m68k, cd->base + 0x200000, cd->base + 0x240000);
+}
+
+void segacd_register_section_handlers(segacd_context *cd, deserialize_buffer *buf)
+{
+	register_section_handler(buf, (section_handler){.fun = m68k_deserialize, .data = cd->m68k}, SECTION_SUB_68000);
+	register_section_handler(buf, (section_handler){.fun = gate_array_deserialize, .data = cd}, SECTION_GATE_ARRAY);
+	register_section_handler(buf, (section_handler){.fun = cdd_mcu_deserialize, .data = &cd->cdd}, SECTION_CDD_MCU);
+	register_section_handler(buf, (section_handler){.fun = lc8951_deserialize, .data = &cd->cdc}, SECTION_LC8951);
+	register_section_handler(buf, (section_handler){.fun = rf5c164_deserialize, .data = &cd->pcm}, SECTION_RF5C164);
+	register_section_handler(buf, (section_handler){.fun = cdd_fader_deserialize, .data = &cd->fader}, SECTION_CDD_FADER);
+	register_section_handler(buf, (section_handler){.fun = cdimage_deserialize, .data = cd->cdd.media}, SECTION_CDROM);
 }
 
 memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_t *num_chunks)

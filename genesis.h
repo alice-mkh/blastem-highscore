@@ -62,6 +62,8 @@ struct genesis_context {
 	uint32_t        last_flush_cycle;
 	uint32_t        soft_flush_cycles;
 	uint32_t        tmss_write_offset;
+	uint32_t        last_sync_cycle;
+	uint32_t        refresh_counter;
 	uint16_t        z80_bank_reg;
 	uint16_t        tmss_lock[2];
 	uint16_t        mapper_start_index;

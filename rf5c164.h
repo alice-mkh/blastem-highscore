@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include "render_audio.h"
 #include "oscilloscope.h"
+#include "serialize.h"
 
 typedef struct {
 	uint32_t cur_ptr;
@@ -39,5 +40,7 @@ void rf5c164_run(rf5c164* pcm, uint32_t cycle);
 void rf5c164_write(rf5c164* pcm, uint16_t address, uint8_t value);
 uint8_t rf5c164_read(rf5c164* pcm, uint16_t address);
 void rf5c164_enable_scope(rf5c164* pcm, oscilloscope *scope);
+void rf5c164_serialize(rf5c164* pcm, serialize_buffer *buf);
+void rf5c164_deserialize(deserialize_buffer *buf, void *vpcm);
 
 #endif //RF5C164_H_
