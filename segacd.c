@@ -1736,7 +1736,7 @@ memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_
 	};
 	*num_chunks = sizeof(main_cpu_map) / sizeof(*main_cpu_map);
 	if (cart_boot) {
-		*num_chunks--;
+		(*num_chunks)--;
 	}
 	for (int i = 0; i < *num_chunks; i++)
 	{
