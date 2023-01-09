@@ -1152,13 +1152,14 @@ static void external_slot(vdp_context * context)
 		{
 		case VRAM_READ:
 			if (context->flags2 & FLAG2_READ_PENDING) {
-				context->prefetch |= context->vdpmem[context->address | 1];
+				//TODO: 128K VRAM support
+				context->prefetch |= context->vdpmem[(context->address & 0xFFFE) | 1];
 				context->flags |= FLAG_READ_FETCHED;
 				context->flags2 &= ~FLAG2_READ_PENDING;
 				//Should this happen after the prefetch or after the read?
 				increment_address(context);
 			} else {
-				//TODO: 128K VRAM Mode
+				//TODO: 128K VRAM support
 				context->prefetch = context->vdpmem[context->address & 0xFFFE] << 8;
 				context->flags2 |= FLAG2_READ_PENDING;
 			}
@@ -1168,7 +1169,8 @@ static void external_slot(vdp_context * context)
 			if (!(context->regs[REG_MODE_2] & BIT_MODE_5)) {
 				address = mode4_address_map[address & 0x3FFF];
 			}
-			context->prefetch = context->vdpmem[address];
+			//TODO: 128K VRAM support
+			context->prefetch = context->vdpmem[context->address & 0xFFFF];
 			context->prefetch |= context->fifo[context->fifo_write].value & 0xFF00;
 			context->flags |= FLAG_READ_FETCHED;
 			//Should this happen after the prefetch or after the read?
