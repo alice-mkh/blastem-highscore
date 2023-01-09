@@ -1542,6 +1542,17 @@ static void persist_save(system_header *system)
 			printf("Saved internal BRAM to %s\n", bram_name);
 		}
 		free(bram_name);
+		if (cd->bram_cart_id < 8) {
+			bram_name = path_append(system->save_dir, "cart.bram");
+			f = fopen(bram_name, "wb");
+			if (f) {
+				long configured_size = 0x2000 << cd->bram_cart_id;
+				fwrite(cd->bram_cart, 1, configured_size, f);
+				fclose(f);
+				printf("Saved BRAM cart to %s\n", bram_name);
+			}
+			free(bram_name);
+		}
 	}
 	if (gen->save_type == SAVE_NONE) {
 		return;
@@ -1585,6 +1596,31 @@ static void load_save(system_header *system)
 			fclose(f);
 			if (read > 0) {
 				printf("Loaded internal BRAM from %s\n", bram_name);
+			}
+		}
+		free(bram_name);
+		bram_name = path_append(system->save_dir, "cart.bram");
+		f = fopen(bram_name, "rb");
+		if (f) {
+			long existing_size = nearest_pow2(file_size(f));
+			if (existing_size > 1 * 1024 * 1024) {
+				existing_size = 1 * 1024 * 1024;
+			}
+			long configured_size = 0x2000 << cd->bram_cart_id;
+			if (existing_size != configured_size) {
+				if (existing_size > configured_size) {
+					free(cd->bram_cart);
+					cd->bram_cart = calloc(existing_size, 1);
+				}
+				cd->bram_cart_id = 0;
+				while (existing_size > (0x2000 <<cd->bram_cart_id)) {
+					cd->bram_cart_id++;
+				}
+			}
+			uint32_t read = fread(cd->bram_cart, 1, existing_size, f);
+			fclose(f);
+			if (read > 0) {
+				printf("Loaded BRAM cart from %s\n", bram_name);
 			}
 		}
 		free(bram_name);

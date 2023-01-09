@@ -16,6 +16,7 @@ typedef struct {
 	uint16_t        *prog_ram;
 	uint16_t        *word_ram;
 	uint8_t         *bram;
+	uint8_t         *bram_cart;
 	uint32_t        stopwatch_cycle;
 	uint32_t        int2_cycle;
 	uint32_t        graphics_int_cycle;
@@ -47,6 +48,8 @@ typedef struct {
 	uint8_t         main_swap_request;
 	uint8_t         bank_toggle;
 	uint8_t         sub_paused_wordram;
+	uint8_t         bram_cart_write_enabled;
+	uint8_t         bram_cart_id;
 	rf5c164         pcm;
 	lc8951          cdc;
 	cdd_mcu         cdd;

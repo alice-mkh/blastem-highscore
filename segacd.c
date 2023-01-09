@@ -440,6 +440,80 @@ static void *pcm_write16(uint32_t address, void *vcontext, uint16_t value)
 	return pcm_write8(address+1, vcontext, value);
 }
 
+static uint16_t cart_area_read16(uint32_t address, void *vcontext)
+{
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	segacd_context *cd = gen->expansion;
+	uint16_t open_bus = read_word(m68k->last_prefetch_address, (void **)m68k->mem_pointers, &m68k->options->gen, m68k);
+	if (cd->bram_cart_id > 7) {
+		// No cart, just return open bus
+		return open_bus;
+	}
+	address &= 0x3FFFFF;
+	if (address < 0x200000) {
+		if (address < 0x100000) {
+			return (open_bus & 0xFF00) | cd->bram_cart_id;
+		}
+		return open_bus;
+	} else {
+		address &= 0x1FFFFF;
+		uint32_t end = 0x2000 << (1 + cd->bram_cart_id);
+		if (address >= end) {
+			return open_bus;
+		}
+		return (open_bus & 0xFF00) | cd->bram_cart[address >> 1];
+	}
+}
+
+static uint8_t cart_area_read8(uint32_t address, void *vcontext)
+{
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	segacd_context *cd = gen->expansion;
+	if (!(address & 1) || cd->bram_cart_id > 7) {
+		//open bus
+		return read_byte(m68k->last_prefetch_address | (address & 1), (void **)m68k->mem_pointers, &m68k->options->gen, m68k);
+	}
+	address &= 0x3FFFFF;
+	if (address < 0x200000) {
+		if (address < 0x100000) {
+			return cd->bram_cart_id;
+		}
+		return read_byte(m68k->last_prefetch_address | 1, (void **)m68k->mem_pointers, &m68k->options->gen, m68k);
+	} else {
+		address &= 0x1FFFFF;
+		uint32_t end = 0x2000 << (1 + cd->bram_cart_id);
+		if (address >= end) {
+			return read_byte(m68k->last_prefetch_address | 1, (void **)m68k->mem_pointers, &m68k->options->gen, m68k);
+		}
+		return cd->bram_cart[address >> 1];
+	}
+}
+
+static void *cart_area_write8(uint32_t address, void *vcontext, uint8_t value)
+{
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	segacd_context *cd = gen->expansion;
+	if (!(address & 1) || cd->bram_cart_id > 7 || address < 0x600000) {
+		return vcontext;
+	}
+	address &= 0x1FFFFF;
+	uint32_t end = 0x2000 << (1 + cd->bram_cart_id);
+	if (address < end && cd->bram_cart_write_enabled) {
+		cd->bram_cart[address >> 1] = value;
+	}
+	if (address == 0x1FFFFF || (cd->bram_cart_id < 7 && address > 0x100000)) {
+		cd->bram_cart_write_enabled = value & 1;
+	}
+	return vcontext;
+}
+
+static void *cart_area_write16(uint32_t address, void *vcontext, uint16_t value)
+{
+	return cart_area_write8(address | 1, vcontext, value);
+}
 
 static void timers_run(segacd_context *cd, uint32_t cycle)
 {
@@ -1460,7 +1534,17 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	cd->prog_ram = calloc(512*1024, 1);
 	cd->word_ram = calloc(256*1024, 1);
 	cd->bram = calloc(8*1024, 1);
-
+	char *bram_size_id = tern_find_path_default(config, "system\0bram_cart_size_id\0", (tern_val){.ptrval = "4"}, TVAL_PTR).ptrval;
+	cd->bram_cart_id = 0xFF;
+	cd->bram_cart = NULL;
+	if (strcmp(bram_size_id, "none")) {
+		char *end;
+		long id = strtol(bram_size_id, &end, 10);
+		if (end != bram_size_id && id < 8) {
+			cd->bram_cart_id = id;
+			cd->bram_cart = calloc(0x2000 << id, 1);
+		}
+	}
 
 	sub_cpu_map[0].buffer = sub_cpu_map[1].buffer = cd->prog_ram;
 	sub_cpu_map[4].buffer = cd->bram;
@@ -1538,6 +1622,7 @@ void segacd_serialize(segacd_context *cd, serialize_buffer *buf, uint8_t all)
 		save_int8(buf, cd->main_swap_request);
 		save_int8(buf, cd->bank_toggle);
 		save_int8(buf, cd->sub_paused_wordram);
+		save_int8(buf, cd->bram_cart_write_enabled);
 		end_section(buf);
 
 		start_section(buf, SECTION_CDD_MCU);
@@ -1594,6 +1679,7 @@ static void gate_array_deserialize(deserialize_buffer *buf, void *vcd)
 	cd->main_swap_request = load_int8(buf);
 	cd->bank_toggle = load_int8(buf);
 	cd->sub_paused_wordram = load_int8(buf);
+	cd->bram_cart_write_enabled = load_int8(buf);
 
 	if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
 		//1M mode
@@ -1645,11 +1731,16 @@ memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_
 			.read_16 = unmapped_word_read16, .write_16 = unmapped_word_write16, .read_8 = unmapped_word_read8, .write_8 = unmapped_word_write8},
 		{0x220000, 0x240000, 0x01FFFF, .flags=MMAP_READ|MMAP_WRITE|MMAP_PTR_IDX|MMAP_FUNC_NULL|MMAP_CODE, .ptr_index = 2,
 			.read_16 = cell_image_read16, .write_16 = cell_image_write16, .read_8 = cell_image_read8, .write_8 = cell_image_write8},
-		{0xA12000, 0xA13000, 0xFFFFFF, .read_16 = main_gate_read16, .write_16 = main_gate_write16, .read_8 = main_gate_read8, .write_8 = main_gate_write8}
+		{0xA12000, 0xA13000, 0xFFFFFF, .read_16 = main_gate_read16, .write_16 = main_gate_write16, .read_8 = main_gate_read8, .write_8 = main_gate_write8},
+		{0x400000, 0x800000, 0xFFFFFF, .read_16 = cart_area_read16, .write_16 = cart_area_write16, .read_8 = cart_area_read8, .write_8 = cart_area_write8}
 	};
-	for (int i = 0; i < sizeof(main_cpu_map) / sizeof(*main_cpu_map); i++)
+	*num_chunks = sizeof(main_cpu_map) / sizeof(*main_cpu_map);
+	if (cart_boot) {
+		*num_chunks--;
+	}
+	for (int i = 0; i < *num_chunks; i++)
 	{
-		if (main_cpu_map[i].start < 0x800000) {
+		if (main_cpu_map[i].start < 0x400000) {
 			if (cart_boot) {
 				main_cpu_map[i].start  |= 0x400000;
 				main_cpu_map[i].end  |= 0x400000;
@@ -1659,13 +1750,11 @@ memmap_chunk *segacd_main_cpu_map(segacd_context *cd, uint8_t cart_boot, uint32_
 			}
 		}
 	}
-	//TODO: support BRAM cart
 	main_cpu_map[0].buffer = cd->rom_mut;
 	main_cpu_map[2].buffer = cd->rom;
 	main_cpu_map[1].buffer = cd->prog_ram;
 	main_cpu_map[3].buffer = cd->word_ram;
 	main_cpu_map[4].buffer = cd->word_ram + 0x10000;
-	*num_chunks = sizeof(main_cpu_map) / sizeof(*main_cpu_map);
 	return main_cpu_map;
 }
 
