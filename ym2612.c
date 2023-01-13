@@ -416,24 +416,26 @@ void ym_run_timers(ym2612_context *context)
 	}
 	context->sub_timer_b += 0x10;
 	//Update LFO
+	uint8_t old_pm_step = context->lfo_pm_step;
 	if (context->lfo_enable) {
-		if (context->lfo_counter) {
-			context->lfo_counter--;
-		} else {
-			context->lfo_counter = lfo_timer_values[context->lfo_freq];
+		if (context->lfo_counter >= lfo_timer_values[context->lfo_freq]) {
+			context->lfo_counter = 0;
 			context->lfo_am_step += 2;
 			context->lfo_am_step &= 0xFE;
-			uint8_t old_pm_step = context->lfo_pm_step;
 			context->lfo_pm_step = context->lfo_am_step / 8;
-			if (context->lfo_pm_step != old_pm_step) {
-				for (int chan = 0; chan < NUM_CHANNELS; chan++)
+		} else {
+			context->lfo_counter--;
+		}
+	} else {
+		context->lfo_am_step = context->lfo_pm_step = 0;
+	}
+	if (context->lfo_pm_step != old_pm_step) {
+		for (int chan = 0; chan < NUM_CHANNELS; chan++)
+		{
+			if (context->channels[chan].pms) {
+				for (int op = chan * 4; op < (chan + 1) * 4; op++)
 				{
-					if (context->channels[chan].pms) {
-						for (int op = chan * 4; op < (chan + 1) * 4; op++)
-						{
-							context->operators[op].phase_inc = ym_calc_phase_inc(context, context->operators + op, op);
-						}
-					}
+					context->operators[op].phase_inc = ym_calc_phase_inc(context, context->operators + op, op);
 				}
 			}
 		}
@@ -450,7 +452,18 @@ void ym_run_envelope(ym2612_context *context, ym_channel *channel, ym_operator *
 	}
 	rate = operator->rates[operator->env_phase];
 	if (rate) {
-		uint8_t ks = channel->keycode >> operator->key_scaling;;
+		uint8_t keycode = channel->keycode;
+		if (context->ch3_mode) {
+			int opnum = operator - context->operators;
+			if (opnum >= 2 * 4 && opnum < 2 * 4 + 3) {
+				opnum &= 3;
+				if (opnum < 2) {
+					opnum ^= 1;
+				}
+				keycode = context->ch3_supp[opnum].keycode;
+			}
+		}
+		uint8_t ks = keycode >> operator->key_scaling;
 		rate = rate*2 + ks;
 		if (rate > 63) {
 			rate = 63;
@@ -862,19 +875,7 @@ void ym_data_write(ym2612_context * context, uint8_t value)
 			}*/
 			context->lfo_enable = value & 0x8;
 			if (!context->lfo_enable) {
-				uint8_t old_pm_step = context->lfo_pm_step;
-				context->lfo_am_step = context->lfo_pm_step = 0;
-				if (old_pm_step) {
-					for (int chan = 0; chan < NUM_CHANNELS; chan++)
-					{
-						if (context->channels[chan].pms) {
-							for (int op = chan * 4; op < (chan + 1) * 4; op++)
-							{
-								context->operators[op].phase_inc = ym_calc_phase_inc(context, context->operators + op, op);
-							}
-						}
-					}
-				}
+				context->lfo_counter = 0;
 			}
 			context->lfo_freq = value & 0x7;
 
