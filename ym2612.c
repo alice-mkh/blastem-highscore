@@ -424,7 +424,7 @@ void ym_run_timers(ym2612_context *context)
 			context->lfo_am_step &= 0xFE;
 			context->lfo_pm_step = context->lfo_am_step / 8;
 		} else {
-			context->lfo_counter--;
+			context->lfo_counter++;
 		}
 	} else {
 		context->lfo_am_step = context->lfo_pm_step = 0;
