@@ -2103,6 +2103,7 @@ genesis_context *alloc_config_genesis(void *rom, uint32_t rom_size, void *lock_o
 		gen->save_ram_mask = info.save_mask;
 		gen->save_size = info.save_size;
 		gen->save_storage = info.save_buffer;
+		gen->header.info.save_buffer = info.save_buffer = NULL;
 		gen->eeprom_map = info.eeprom_map;
 		gen->num_eeprom = info.num_eeprom;
 		if (gen->save_type == SAVE_I2C) {

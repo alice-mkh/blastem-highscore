@@ -427,7 +427,7 @@ void reload_media(void)
 	char const **start = parts[0] ? parts : parts + 2;
 	int num_parts = parts[0] ? 5 : 3;
 	if (!parts[4]) {
-		num_parts--;
+		num_parts -= 2;
 	}
 	current_system->next_rom = alloc_concat_m(num_parts, start);
 	system_request_exit(current_system, 1);

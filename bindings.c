@@ -386,7 +386,20 @@ void handle_binding_up(keybinding * binding)
 			break;
 		case UI_RELOAD:
 			if (allow_content_binds) {
-				reload_media();
+				system_media *lock = current_media()->chain;
+				if (lock) {
+					const char* parts[] = {lock->dir, PATH_SEP, lock->name, ".", lock->extension};
+					char const **start = parts[0] ? parts : parts + 2;
+					int num_parts = parts[0] ? 5 : 3;
+					if (!parts[4]) {
+						num_parts -= 2;
+					}
+					char *path = alloc_concat_m(num_parts, start);
+					lockon_media(path);
+					free(path);
+				} else {
+					reload_media();
+				}
 			}
 			break;
 		case UI_SMS_PAUSE:
