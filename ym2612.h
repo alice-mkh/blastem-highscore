@@ -37,7 +37,6 @@ typedef struct {
 	uint8_t  ssg;
 	uint8_t  inverted;
 	uint8_t  phase_overflow;
-	uint8_t  key_on;
 } ym_operator;
 
 typedef struct {
