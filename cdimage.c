@@ -4,6 +4,7 @@
 
 #include "system.h"
 #include "util.h"
+#include "wave.h"
 
 static char* cmd_start(char *cur)
 {
@@ -199,6 +200,7 @@ uint8_t parse_cue(system_media *media)
 	FILE *f = NULL;
 	int track_of_file = -1;
 	uint8_t has_index_0 = 0;
+	uint32_t extra_offset = 0;
 	do {
 		char *cmd = cmd_start(line);
 		if (*cmd) {
@@ -266,10 +268,21 @@ uint8_t parse_cue(system_media *media)
 						for (end++; *end && *end != '\n' && *end != '\r'; end++)
 						{
 							if (!isspace(*end)) {
+								extra_offset = 0;
 								if (startswith(end, "BINARY")) {
 									audio_byte_swap = 0;
 								} else if (startswith(end, "MOTOROLA")) {
 									audio_byte_swap = 1;
+								} else if (startswith(end, "WAVE")) {
+									audio_byte_swap = 0;
+									wave_header wave;
+									if (!wave_read_header(f, &wave)) {
+										fatal_error("Wave file %s specified by cute sheet %s.%s is not valid\n", fname, media->name, media->extension);
+									}
+									if (wave.audio_format != 1 || wave.num_channels != 2 || wave.sample_rate != 44100 || wave.bits_per_sample != 16) {
+										warning("BlastEm only suports WAVE tracks in 16-bit stereo PCM format at 44100 hz, file %s does not match\n", fname);
+									}
+									extra_offset = wave.format_header.size + sizeof(wave.data_header) + sizeof(wave.chunk);
 								} else {
 									warning("Unsupported FILE type in CUE sheet. Only BINARY and MOTOROLA are supported\n");
 								}
@@ -310,7 +323,7 @@ uint8_t parse_cue(system_media *media)
 								tracks[track].file_offset -= tracks[track-2].end_lba * tracks[track-1].sector_bytes;
 							}
 						} else {
-							tracks[track].file_offset = 0;
+							tracks[track].file_offset = extra_offset;
 						}
 					}
 				}
