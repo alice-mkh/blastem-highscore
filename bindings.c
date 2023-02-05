@@ -201,7 +201,7 @@ void set_content_binding_state(uint8_t enabled)
 
 void handle_binding_down(keybinding * binding)
 {
-	if (!current_system) {
+	if (!current_system || !content_binds_enabled) {
 		return;
 	}
 	if (binding->bind_type == BIND_GAMEPAD && current_system && current_system->gamepad_down)
