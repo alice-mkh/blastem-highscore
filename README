@@ -9,7 +9,7 @@ Extract this archive to a directory of your choosing.
 NOTE: Prior to version 0.4.1, BlastEm was still using Unixy locations for config
 and save files. If you're upgrading from a previous version on Windows, you will
 need to move them manually. For config files, the relevant paths are in the
-previous paragraph. For save files, move all the directories found in 
+previous paragraph. For save files, move all the directories found in
 %userprofile%\.local\share\blastem to %localappdata%\blastem
 
 Usage
@@ -29,11 +29,11 @@ Some operations are currently only supported through the command line. To get a
 list of supported command line options on Linux or OSX type:
 
     ./blastem -h
-    
+
 From within your BlastEm directory. On Windows type:
-    
+
     blastem.exe -h
-    
+
 Lock-On Support
 ---------------
 
@@ -46,7 +46,7 @@ the command line, specify the Sonic & Knuckles ROM as the primary ROM and
 specify the ROM to be locked on using the -o option. As an example:
 
     ./blastem ~/romz/sonic_and_knuckles.bin -o ~/romz/sonic3.bin
-    
+
 Please note that Sonic 2 lock-on does not work at this time.
 
 Configuration
@@ -55,7 +55,7 @@ Configuration
 Configuration is read from the file at $HOME/.config/blastem/blastem.cfg on
 Unix-like systems and %localappdata%\blastem\blastem.cfg if it exists.
 Othwerise it is read from default.cfg from the same directory as the BlastEm
-executable. Sections are denoted by a section name followed by an open curly 
+executable. Sections are denoted by a section name followed by an open curly
 bracket, the section's contents and a closing curly bracket. Individual
 configuration values are set by entering the value's name followed by a space
 or tab and followed by the desired value.
@@ -107,8 +107,8 @@ don't correspond to a normal character, check the list below:
   back
 
 The pads subsection is used to map gamepads and joysticks. Gamepads that are
-recognized, can have their buttons and axes mapped with semantic names. 
-Xbox 360, PS4 and PS3 style names are supported. Unrecognized gamepads can be 
+recognized, can have their buttons and axes mapped with semantic names.
+Xbox 360, PS4 and PS3 style names are supported. Unrecognized gamepads can be
 mapped using numeric button and axis ids. The following button names are
 recognized by BlastEm:
 	a, cross
@@ -129,7 +129,7 @@ The following axis names are recognized by BlastEm:
 	righty
 	lefttrigger, l2
 	righttrigger, r2
-	
+
 
 The mice subsection is used to map mice to emulated Mega/Sega mice. The default
 configuration maps both the first and second host mice to the first emulated
@@ -163,7 +163,7 @@ ui.exit                      Returns to the menu ROM if currently in a game
 ui.save_state                Saves a savestate to the quicksave slot
 ui.set_speed.N               Selects a specific machine speed specified by N
                              which should be a number between 0-9. Speeds are
-                             specified in the "clocks" section of the config				
+                             specified in the "clocks" section of the config
 ui.next_speed                Selects the next machine speed
 ui.prev_speed                Selects the previous machine speed
 ui.toggle_fullscreen         Toggles between fullscreen and windowed mode
@@ -176,7 +176,7 @@ ui.sms_pause                 Triggers a press of the pause button when in SMS
                              mode
 ui.toggle_keyboard_captured  Toggles the capture state of the host keyboard
                              when an emulated keyboard is present
-		
+
 IO
 --
 
@@ -203,7 +203,7 @@ left unspecified, it will be calculated from "width" and "aspect".
 "vertex_shader" and "fragment_shader" define the GLSL shader program that
 produces the final image for each frame. Shaders can be used to add various
 visual effects or enhancements. Currently BlastEm only ships with the default
-shader and a "subtle" crt shader. If you write your own shaders, place them in 
+shader and a "subtle" crt shader. If you write your own shaders, place them in
 $HOME/.config/blastem/shaders and then specify the basename of the new shader
 files in the "vertex_shader" and "fragment_shader" config options. Note that
 shaders are not available in the SDL fallback renderer.
@@ -334,7 +334,7 @@ defined in the OS environment can be used.
 
 "remember_path" specifies whether BlastEm should remember the last path used in
 the file browser. When it is set to "on", the last path will be remembered and
-used instead of "initial_path" in subsequent runs. If it is set to "off", 
+used instead of "initial_path" in subsequent runs. If it is set to "off",
 "initial_path" will always be used.
 
 "screenshot_path" specifies the directory "internal" screenshots will be saved
@@ -364,7 +364,7 @@ This section explains the meaning of the special path variables referenced
 in the previous section.
 
 $HOME      The home directory of the current user. On most Unix variants, it
-           will be a subdirectory of /home. On Windows it will typically be a 
+           will be a subdirectory of /home. On Windows it will typically be a
            subdirectory of C:\Users
 $EXEDIR    The directory the BlastEm executable is located in
 $USERDATA  This is an OS-specific path used for storing application specific
@@ -453,7 +453,7 @@ installation and ROM_FILE.bin is the name of the raw binary for your program.
 BlastEm will halt at the beginning of your program's entry point and return
 control to GDB. This will allow you to set breakpoints before your code runs.
 
-On Windows, the procedure is slightly different. First run 
+On Windows, the procedure is slightly different. First run
     blastem.exe ROM_FILE.bin -D
 This will cause BlastEm to wait for a socket connection on port 1234. It will
 appear to be frozen until gdb connects to it. Now open the ELF file in gdb
@@ -468,12 +468,10 @@ Included Tools
 
 BlastEm ships with a few small utilities that leverage portions of the emulator
 code.
-    
+
     dis       - 68K disassembler
     zdis      - Z80 disassembler
-    vgmplay   - Very basic VGM player
-    stateview - GST save state viewer
-    
+
 Sync Source and VSync
 -----
 
@@ -509,9 +507,9 @@ Charles MacDonald  - While it hasn't been updated in a while, I still find his
                      hardware document has also come in handy.
 
 Eke-Eke            - Eke-Eke wrote a great document on the use of I2C EEPROM in
-                     Genesis games and also left some useful very helpful 
+                     Genesis games and also left some useful very helpful
                      comments about problematic games in Genesis Plus GX
-					 
+
 Sauraen            - Sauraen has analyzed the YM2203 and YM2612 dies and written
                      a VHDL operator implementation. These have been useful in
                      improving the accuracy of my YM2612 core.
@@ -524,16 +522,16 @@ Alexey Khokholov   - Alexey (aka Nuke.YKT) has analyzed the YM3438 die and writt
 Bart Trzynadlowski - His documents on the Genecyst save-state format and the
                      mapper used in Super Street Fighter 2 were definitely
                      appreciated.
-                     
+
 KanedaFR           - Kaneda's SpritesMind forum is a great resource for the
                      Sega development community.
-					 
+
 Titan              - Titan has created what are without a doubt the most
                      impressive demos on the Megadrive. Additionally, I am very
                      grateful for the documentation provided by Kabuto and the
                      assistance of Kabuto, Sik and Jorge in getting Overdrive 2
                      to run properly in BlastEm.
-					 
+
 flamewing          - flamewing created a very handy exhaustive test ROM for 68K
                      BCD instructions and documented the proper behavior for
                      certain BCD edge cases

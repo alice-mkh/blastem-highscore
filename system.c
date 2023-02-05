@@ -3,6 +3,7 @@
 #include "genesis.h"
 #include "gen_player.h"
 #include "sms.h"
+#include "mediaplayer.h"
 
 uint8_t safe_cmp(char *str, long offset, uint8_t *buffer, long filesize)
 {
@@ -31,6 +32,12 @@ system_type detect_system_type(system_media *media)
 		if (media->size > 9 && buffer[7] == 0) {
 			return buffer[8] + 1;
 		}
+	}
+	if (
+		safe_cmp("Vgm ", 0, media->buffer, media->size)
+		|| safe_cmp("RIFF", 0, media->buffer, media->size)
+		|| safe_cmp("fLaC", 0, media->buffer, media->size)) {
+		return SYSTEM_MEDIA_PLAYER;
 	}
 
 
@@ -81,6 +88,8 @@ system_header *alloc_config_system(system_type stype, system_media *media, uint3
 	case SYSTEM_SMS:
 		return &(alloc_configure_sms(media, opts, force_region))->header;
 #endif
+	case SYSTEM_MEDIA_PLAYER:
+		return &(alloc_media_player(media, opts))->header;
 	default:
 		return NULL;
 	}

@@ -15,6 +15,7 @@ typedef enum {
 	SYSTEM_SMS,
 	SYSTEM_SMS_PLAYER,
 	SYSTEM_JAGUAR,
+	SYSTEM_MEDIA_PLAYER
 } system_type;
 
 typedef enum {

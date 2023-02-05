@@ -294,7 +294,7 @@ system_header *menu_system;
 system_header *game_system;
 void persist_save()
 {
-	if (!game_system) {
+	if (!game_system || !game_system->persist_save) {
 		return;
 	}
 	game_system->persist_save(game_system);
@@ -343,6 +343,10 @@ const char *get_save_fname(uint8_t save_type)
 
 void setup_saves(system_media *media, system_header *context)
 {
+	if (!context->load_save) {
+		// system doesn't support saves
+		return;
+	}
 	static uint8_t persist_save_registered;
 	rom_info *info = &context->info;
 	char *save_dir = get_save_dir(info->is_save_lock_on ? media->chain : media);
@@ -448,7 +452,9 @@ static uint8_t force_region = 0;
 void init_system_with_media(const char *path, system_type force_stype)
 {
 	if (game_system) {
-		game_system->persist_save(game_system);
+		if (game_system->persist_save) {
+			game_system->persist_save(game_system);
+		}
 		//swap to game context arena and mark all allocated pages in it free
 		if (current_system == menu_system) {
 			current_system->arena = set_current_arena(game_system->arena);
@@ -596,6 +602,8 @@ int main(int argc, char ** argv)
 					stype = force_stype = SYSTEM_GENESIS;
 				} else if (!strcmp("jag", argv[i])) {
 					stype = force_stype = SYSTEM_JAGUAR;
+				} else if (!strcmp("media", argv[i])) {
+					stype = force_stype = SYSTEM_MEDIA_PLAYER;
 				} else {
 					fatal_error("Unrecognized machine type %s\n", argv[i]);
 				}
@@ -633,7 +641,7 @@ int main(int argc, char ** argv)
 					"	-m MACHINE  Force emulated machine type to MACHINE. Valid values are:\n"
 					"                   sms - Sega Master System/Mark III\n"
 					"                   gen - Sega Genesis/Megadrive\n"
-					"                   jag - Atari Jaguar\n"
+					"                   media - Media Player\n"
 					"	-f          Toggles fullscreen mode\n"
 					"	-g          Disable OpenGL rendering\n"
 					"	-s FILE     Load a GST format savestate from FILE\n"

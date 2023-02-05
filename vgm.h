@@ -26,6 +26,28 @@ typedef struct {
 	uint32_t sega_pcm_reg;
 } vgm_header;
 
+typedef struct {
+	uint32_t rf5c68_clk;
+	uint32_t ym2203_clk;
+	uint32_t ym2608_clk;
+	uint32_t ym2610_clk;
+	uint32_t ym3812_clk;
+	uint32_t ym3526_clk;
+	uint32_t y8950_clk;
+	uint32_t ymf262_clk;
+	uint32_t ymf278b_clk;
+	uint32_t ymf271_clk;
+	uint32_t ymz280b_clk;
+	uint32_t rf5c164_clk;
+	uint32_t pwm_clk;
+	uint32_t ay8910_clk;
+	uint8_t  ay8910_type;
+	uint8_t  ay8910_flags;
+	uint8_t  ym2203_ay_flags;
+	uint8_t  ym2608_ay_flags;
+	//TODO: additional header extension fields
+} vgm_extended_header;
+
 enum {
 	CMD_PSG_STEREO = 0x4F,
 	CMD_PSG,
