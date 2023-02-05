@@ -751,7 +751,15 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.info.save_type = SAVE_NONE;
 	sms->header.info.name = strdup(media->name);
 
-	setup_io_devices(config, &sms->header.info, &sms->io);
+	tern_node *io_config_root = config;
+	tern_node *sms_root = tern_find_node(config, "sms");
+	if (sms_root) {
+		tern_node *io = tern_find_node(sms_root, "io");
+		if (io) {
+			io_config_root = sms_root;
+		}
+	}
+	setup_io_devices(io_config_root, &sms->header.info, &sms->io);
 	sms->header.has_keyboard = io_has_keyboard(&sms->io);
 
 	sms->header.set_speed_percent = set_speed_percent;
