@@ -109,6 +109,7 @@ controller_info get_controller_info(int joystick)
 		case SUBTYPE_XBOX:
 		case SUBTYPE_X360:
 		case SUBTYPE_XBONE:
+		case SUBTYPE_XBOX_ELITE:
 			res.type = TYPE_XBOX;
 			break;
 		case SUBTYPE_PS2:
