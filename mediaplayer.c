@@ -410,7 +410,35 @@ void vgm_frame(media_player *player)
 
 void wave_frame(media_player *player)
 {
-	render_sleep_ms(15);
+	for (uint32_t remaining_samples = player->wave->sample_rate / 60; remaining_samples > 0; remaining_samples--)
+	{
+		uint32_t sample_size = player->wave->bits_per_sample * player->wave->num_channels / 8;
+		if (sample_size > player->media->size || player->current_offset > player->media->size - sample_size) {
+			player->current_offset = player->wave->format_header.size + offsetof(wave_header, audio_format);
+			player->state = STATE_PAUSED;
+			return;
+		}
+		if (player->wave->bits_per_sample == 16) {
+			int16_t value = read_word_le(player);
+			if (player->wave->num_channels == 1) {
+				render_put_mono_sample(player->audio, value);
+			} else {
+				int16_t right = read_word_le(player);
+				render_put_stereo_sample(player->audio, value, right);
+			}
+		} else {
+			uint8_t sample = read_byte(player);
+			int16_t value = sample * 257 - 128 * 257;
+			if (player->wave->num_channels == 1) {
+				render_put_mono_sample(player->audio, value);
+			} else {
+				sample = read_byte(player);
+				int16_t right = sample * 257 - 128 * 257;
+				render_put_stereo_sample(player->audio, value, right);
+			}
+		}
+
+	}
 }
 
 void flac_frame(media_player *player)
@@ -511,6 +539,38 @@ void vgm_init(media_player *player, uint32_t opts)
 	player->current_offset = player->vgm->data_offset + offsetof(vgm_header, data_offset);
 }
 
+static void wave_player_init(media_player *player)
+{
+	player->wave = calloc(1, sizeof(wave_header));
+	memcpy(player->wave, player->media->buffer, offsetof(wave_header, data_header));
+	if (memcmp(player->wave->chunk.format, "WAVE", 4)) {
+		goto format_error;
+	}
+	if (player->wave->chunk.size < offsetof(wave_header, data_header)) {
+		goto format_error;
+	}
+	if (memcmp(player->wave->format_header.id, "fmt ", 4)) {
+		goto format_error;
+	}
+	if (player->wave->format_header.size < offsetof(wave_header, data_header) - offsetof(wave_header, audio_format)) {
+		goto format_error;
+	}
+	if (player->wave->bits_per_sample != 8 && player->wave->bits_per_sample != 16) {
+		goto format_error;
+	}
+	uint32_t data_sub_chunk = player->wave->format_header.size + offsetof(wave_header, audio_format);
+	if (data_sub_chunk > player->media->size || player->media->size - data_sub_chunk < sizeof(riff_sub_chunk)) {
+		goto format_error;
+	}
+	memcpy(&player->wave->data_header, ((uint8_t *)player->media->buffer) + data_sub_chunk, sizeof(riff_sub_chunk));
+	player->current_offset = data_sub_chunk;
+	player->audio = render_audio_source("Audio File", player->wave->sample_rate, 1, player->wave->num_channels);
+	return;
+format_error:
+	player->media_type = MEDIA_UNKNOWN;
+	free(player->wave);
+}
+
 static void resume_player(system_header *system)
 {
 	media_player *player = (media_player *)system;
@@ -589,6 +649,9 @@ uint8_t detect_media_type(system_media *media)
 		return AUDIO_VGM;
 	}
 	if (!memcmp(media->buffer, "RIFF", 4)) {
+		if (media->size < sizeof(wave_header)) {
+			return MEDIA_UNKNOWN;
+		}
 		return AUDIO_WAVE;
 	}
 	if (!memcmp(media->buffer, "fLaC", 4)) {
@@ -622,6 +685,9 @@ media_player *alloc_media_player(system_media *media, uint32_t opts)
 	{
 	case AUDIO_VGM:
 		vgm_init(player, opts);
+		break;
+	case AUDIO_WAVE:
+		wave_player_init(player);
 		break;
 	}
 

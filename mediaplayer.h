@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include "system.h"
 #include "vgm.h"
+#include "wave.h"
+#include "render_audio.h"
 
 typedef struct chip_info chip_info;
 typedef void (*chip_run_fun)(void *context, uint32_t cycle);
@@ -25,6 +27,8 @@ typedef struct {
 	vgm_header          *vgm;
 	vgm_extended_header *vgm_ext;
 	data_block          *ym_seek_block;
+	wave_header         *wave;
+	audio_source        *audio;
 	chip_info           *chips;
 	uint32_t            num_chips;
 	uint32_t            current_offset;
