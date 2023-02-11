@@ -1361,6 +1361,43 @@ void render_save_screenshot(char *path)
 	screenshot_path = path;
 }
 
+#ifndef DISABLE_ZLIB
+static apng_state *apng;
+static FILE *apng_file;
+#endif
+uint8_t render_saving_video(void)
+{
+#ifdef DISABLE_ZLIB
+	return apng_file != NULL;
+#else
+	return 0;
+#endif
+}
+
+void render_end_video(void)
+{
+#ifndef DISABLE_ZLIB
+	if (apng) {
+		puts("Ending recording");
+		end_apng(apng_file, apng);
+		apng = NULL;
+		apng_file = NULL;
+	}
+#endif
+}
+void render_save_video(char *path)
+{
+	render_end_video();
+#ifndef DISABLE_ZLIB
+	apng_file = fopen(path, "wb");
+	if (apng_file) {
+		printf("Saving video to %s\n", path);
+	} else {
+		warning("Failed to open %s for writing\n", path);
+	}
+#endif
+}
+
 uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, window_close_handler close_handler)
 {
 	uint8_t win_idx = 0xFF;
@@ -1546,6 +1583,19 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 			}
 #endif
 		}
+#ifndef DISABLE_ZLIB
+		if (apng_file) {
+			if (!apng) {
+				//TODO: more precise frame rate
+				apng = start_apng(apng_file, width, height, video_standard == VID_PAL ? 50.0 : 60.0);
+			}
+			save_png24_frame(
+				apng_file,
+				buffer + overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard],
+				apng, width, height, LINEBUF_SIZE*sizeof(uint32_t)
+			);
+		}
+#endif
 	} else {
 #endif
 		//TODO: Support SYNC_AUDIO_THREAD/SYNC_EXTERNAL for render API framebuffers

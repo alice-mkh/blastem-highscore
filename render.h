@@ -101,6 +101,9 @@ typedef int (*render_thread_fun)(void*);
 
 uint32_t render_map_color(uint8_t r, uint8_t g, uint8_t b);
 void render_save_screenshot(char *path);
+uint8_t render_saving_video(void);
+void render_end_video(void);
+void render_save_video(char *path);
 uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, window_close_handler close_handler);
 void render_destroy_window(uint8_t which);
 uint32_t *render_get_framebuffer(uint8_t which, int *pitch);
