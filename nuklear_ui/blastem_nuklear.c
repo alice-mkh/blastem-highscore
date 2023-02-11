@@ -2377,7 +2377,7 @@ static void texture_init(void)
 	if (!font) {
 		fatal_error("Failed to find default font path\n");
 	}
-	def_font = nk_font_atlas_add_from_memory(atlas, font, font_size, render_height() / 16, NULL);
+	def_font = nk_font_atlas_add_from_memory(atlas, font, font_size, render_height() / 24, NULL);
 	free(font);
 	if (fb_context) {
 		nk_rawfb_font_stash_end(fb_context);
