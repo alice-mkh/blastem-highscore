@@ -5,6 +5,7 @@
 #include "system.h"
 #include "vgm.h"
 #include "wave.h"
+#include "flac.h"
 #include "render_audio.h"
 
 typedef struct chip_info chip_info;
@@ -28,6 +29,7 @@ typedef struct {
 	vgm_extended_header *vgm_ext;
 	data_block          *ym_seek_block;
 	wave_header         *wave;
+	flac_file           *flac;
 	audio_source        *audio;
 	chip_info           *chips;
 	uint32_t            num_chips;
