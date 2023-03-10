@@ -3,6 +3,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include "flac.h"
 
 typedef struct system_header system_header;
 typedef struct system_media system_media;
@@ -111,6 +112,7 @@ enum {
 
 typedef struct {
 	FILE       *f;
+	flac_file  *flac;
 	uint32_t   file_offset;
 	uint32_t   fake_pregap;
 	uint32_t   pregap_lba;
@@ -142,7 +144,7 @@ struct system_media {
 	uint32_t     cur_sector;
 	media_type   type;
 	uint8_t      in_fake_pregap;
-	uint8_t      byte_storage;
+	uint8_t      byte_storage[3];
 };
 
 #define OPT_ADDRESS_LOG (1U << 31U)

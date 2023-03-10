@@ -111,17 +111,21 @@ static uint8_t bin_seek(system_media *media, uint32_t sector)
 			if (track) {
 				lba -= media->tracks[track - 1].end_lba;
 			}
-			if (media->tracks[track].has_subcodes) {
-				if (!media->tmp_buffer) {
-					media->tmp_buffer = calloc(1, 96);
+			if (media->tracks[track].flac) {
+				flac_seek(media->tracks[track].flac, (media->tracks[track].file_offset + lba * media->tracks[track].sector_bytes) / 4);
+			} else {
+				if (media->tracks[track].has_subcodes) {
+					if (!media->tmp_buffer) {
+						media->tmp_buffer = calloc(1, 96);
+					}
+					fseek(media->tracks[track].f, media->tracks[track].file_offset + (lba + 1) * media->tracks[track].sector_bytes - 96, SEEK_SET);
+					int bytes = fread(media->tmp_buffer, 1, 96, media->tracks[track].f);
+					if (bytes != 96) {
+						fprintf(stderr, "Only read %d subcode bytes\n", bytes);
+					}
 				}
-				fseek(media->tracks[track].f, media->tracks[track].file_offset + (lba + 1) * media->tracks[track].sector_bytes - 96, SEEK_SET);
-				int bytes = fread(media->tmp_buffer, 1, 96, media->tracks[track].f);
-				if (bytes != 96) {
-					fprintf(stderr, "Only read %d subcode bytes\n", bytes);
-				}
+				fseek(media->tracks[track].f, media->tracks[track].file_offset + lba * media->tracks[track].sector_bytes, SEEK_SET);
 			}
-			fseek(media->tracks[track].f, media->tracks[track].file_offset + lba * media->tracks[track].sector_bytes, SEEK_SET);
 		}
 	}
 	return track;
@@ -156,12 +160,23 @@ static uint8_t bin_read(system_media *media, uint32_t offset)
 		return 0;
 	} else if ((media->tracks[media->cur_track].sector_bytes < 2352 && offset < 16) || offset > (media->tracks[media->cur_track].sector_bytes + 16)) {
 		return fake_read(media->cur_sector, offset);
+	} else if (media->tracks[media->cur_track].flac) {
+		if (offset & 3) {
+			return media->byte_storage[(offset & 3) - 1];
+		} else {
+			int16_t samples[2];
+			flac_get_sample(media->tracks[media->cur_track].flac, samples, 2);
+			media->byte_storage[0] = samples[0] >> 8;
+			media->byte_storage[1] = samples[1];
+			media->byte_storage[2] = samples[1] >> 8;
+			return samples[0];
+		}
 	} else {
 		if (media->tracks[media->cur_track].need_swap) {
 			if (offset & 1) {
-				return media->byte_storage;
+				return media->byte_storage[0];
 			}
-			media->byte_storage = fgetc(media->tracks[media->cur_track].f);
+			media->byte_storage[0] = fgetc(media->tracks[media->cur_track].f);
 		}
 		return fgetc(media->tracks[media->cur_track].f);
 	}
@@ -198,6 +213,7 @@ uint8_t parse_cue(system_media *media)
 	int track = -1;
 	uint8_t audio_byte_swap = 0;
 	FILE *f = NULL;
+	flac_file *flac = NULL;
 	int track_of_file = -1;
 	uint8_t has_index_0 = 0;
 	uint32_t extra_offset = 0;
@@ -215,6 +231,7 @@ uint8_t parse_cue(system_media *media)
 					warning("Expected track %d, but found track %d in CUE sheet\n", track + 1, file_track);
 				}
 				tracks[track].f = f;
+				tracks[track].flac = flac;
 
 
 				cmd = cmd_start(end);
@@ -259,11 +276,12 @@ uint8_t parse_cue(system_media *media)
 							memcpy(fname + dirlen + 1, cmd, end-cmd);
 							fname[dirlen + 1 + (end-cmd)] = 0;
 						}
+						flac = NULL;
 						f = fopen(fname, "rb");
 						if (!f) {
 							fatal_error("Failed to open %s specified by FILE command in CUE sheet %s.%s\n", fname, media->name, media->extension);
 						}
-						free(fname);
+
 						track_of_file = -1;
 						for (end++; *end && *end != '\n' && *end != '\r'; end++)
 						{
@@ -276,19 +294,29 @@ uint8_t parse_cue(system_media *media)
 								} else if (startswith(end, "WAVE")) {
 									audio_byte_swap = 0;
 									wave_header wave;
-									if (!wave_read_header(f, &wave)) {
-										fatal_error("Wave file %s specified by cute sheet %s.%s is not valid\n", fname, media->name, media->extension);
+									if (wave_read_header(f, &wave)) {
+										if (wave.audio_format != 1 || wave.num_channels != 2 || wave.sample_rate != 44100 || wave.bits_per_sample != 16) {
+											warning("BlastEm only suports WAVE tracks in 16-bit stereo PCM format at 44100 hz, file %s does not match\n", fname);
+										}
+										extra_offset = wave.format_header.size + sizeof(wave.data_header) + sizeof(wave.chunk);
+									} else {
+										fseek(f, 0, SEEK_SET);
+										flac = flac_file_from_file(f);
+										if (!flac) {
+											fatal_error("WAVE file %s in cue sheet %s.%s is neither a valid WAVE nor a valid FLAC file\n", fname, media->name, media->extension);
+										}
+										if (flac->sample_rate != 44100 || flac->bits_per_sample != 16 || flac->channels != 2) {
+											warning("FLAC files in a CUE sheet should match CD audio specs, %s does not\n", fname);
+										}
+
 									}
-									if (wave.audio_format != 1 || wave.num_channels != 2 || wave.sample_rate != 44100 || wave.bits_per_sample != 16) {
-										warning("BlastEm only suports WAVE tracks in 16-bit stereo PCM format at 44100 hz, file %s does not match\n", fname);
-									}
-									extra_offset = wave.format_header.size + sizeof(wave.data_header) + sizeof(wave.chunk);
 								} else {
 									warning("Unsupported FILE type in CUE sheet. Only BINARY and MOTOROLA are supported\n");
 								}
 								break;
 							}
 						}
+						free(fname);
 					}
 				}
 			} else if (track >= 0) {
@@ -344,10 +372,22 @@ uint8_t parse_cue(system_media *media)
 		for (int track = 0; track < media->num_tracks; track++) {
 			if (track == media->num_tracks - 1 && tracks[track].f) {
 				uint32_t start_lba =tracks[track].fake_pregap ? tracks[track].start_lba : tracks[track].pregap_lba;
-				tracks[track].end_lba = start_lba + (file_size(tracks[track].f) - tracks[track].file_offset)/ tracks[track].sector_bytes;
+				uint32_t fsize;
+				if (tracks[track].flac) {
+					fsize = tracks[track].flac->total_samples * 4;
+				} else {
+					fsize = file_size(tracks[track].f);
+				}
+				tracks[track].end_lba = start_lba + (fsize - tracks[track].file_offset)/ tracks[track].sector_bytes;
 			} else if (tracks[track].f != f) {
 				uint32_t start_lba =tracks[track-1].fake_pregap ? tracks[track-1].start_lba : tracks[track-1].pregap_lba;
-				tracks[track-1].end_lba = start_lba + (file_size(tracks[track-1].f) - tracks[track-1].file_offset)/ tracks[track-1].sector_bytes;
+				uint32_t fsize;
+				if (tracks[track-1].flac) {
+					fsize = tracks[track-1].flac->total_samples * 4;
+				} else {
+					fsize = file_size(tracks[track-1].f);
+				}
+				tracks[track-1].end_lba = start_lba + (fsize - tracks[track-1].file_offset)/ tracks[track-1].sector_bytes;
 				offset = tracks[track-1].end_lba;
 			}
 			if (!tracks[track].fake_pregap) {
@@ -359,7 +399,7 @@ uint8_t parse_cue(system_media *media)
 		//replace cue sheet with first sector
 		free(media->buffer);
 		media->buffer = calloc(2048, 1);
-		if (tracks[0].type == TRACK_DATA && tracks[0].sector_bytes == 2352) {
+		if (tracks[0].type == TRACK_DATA && tracks[0].sector_bytes == 2352 && !tracks[0].flac) {
 			// if the first track is a data track, don't trust the CUE sheet and look at the MM:SS:FF from first sector
 			uint8_t msf[3];
 			fseek(tracks[0].f, 12, SEEK_SET);
@@ -588,10 +628,12 @@ void cdimage_serialize(system_media *media, serialize_buffer *buf)
 		save_int32(buf, 0);
 	}
 	save_int8(buf, media->in_fake_pregap);
-	save_int8(buf, media->byte_storage);
+	save_int8(buf, media->byte_storage[0]);
 	if (media->tmp_buffer) {
 		save_buffer8(buf, media->tmp_buffer, 96);
 	}
+	save_int8(buf, media->byte_storage[1]);
+	save_int8(buf, media->byte_storage[2]);
 }
 
 void cdimage_deserialize(deserialize_buffer *buf, void *vmedia)
@@ -607,8 +649,12 @@ void cdimage_deserialize(deserialize_buffer *buf, void *vmedia)
 		fseek(media->tracks[media->cur_track].f, seekpos, SEEK_SET);
 	}
 	media->in_fake_pregap = load_int8(buf);
-	media->byte_storage = load_int8(buf);
+	media->byte_storage[0] = load_int8(buf);
 	if (media->tmp_buffer) {
 		load_buffer8(buf, media->tmp_buffer, 96);
+	}
+	if (buf->size - buf->cur_pos >= 2) {
+		media->byte_storage[1] = load_int8(buf);
+		media->byte_storage[2] = load_int8(buf);
 	}
 }

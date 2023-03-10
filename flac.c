@@ -17,6 +17,11 @@ static void seek_buffer(flac_file *f, uint32_t offset, uint8_t relative)
 	f->offset = relative ? f->offset + offset : offset;
 }
 
+static uint32_t tell_buffer(flac_file *f)
+{
+	return f->offset;
+}
+
 static uint8_t read_byte_file(flac_file *f)
 {
 	int result = fgetc(f->read_data);
@@ -29,6 +34,11 @@ static uint8_t read_byte_file(flac_file *f)
 static void seek_file(flac_file *f, uint32_t offset, uint8_t relative)
 {
 	fseek(f->read_data, offset, relative ? SEEK_CUR : SEEK_SET);
+}
+
+static uint32_t tell_file(flac_file *f)
+{
+	return ftell(f->read_data);
 }
 
 static void read_chars(flac_file *f, char *dest, uint32_t count)
@@ -44,6 +54,19 @@ static uint16_t read16(flac_file *f)
 	uint16_t ret = f->read_byte(f) << 8;
 	ret |= f->read_byte(f);
 	return ret;
+}
+
+static uint64_t read64(flac_file *f)
+{
+	uint64_t value = ((uint64_t)f->read_byte(f)) << 56;
+	value |= ((uint64_t)f->read_byte(f)) << 48;
+	value |= ((uint64_t)f->read_byte(f)) << 40;
+	value |= ((uint64_t)f->read_byte(f)) << 32;
+	value |= ((uint64_t)f->read_byte(f)) << 24;
+	value |= f->read_byte(f) << 16;
+	value |= f->read_byte(f) << 8;
+	value |= f->read_byte(f);
+	return value;
 }
 
 static uint32_t read_bits(flac_file *f, uint32_t num_bits)
@@ -127,6 +150,18 @@ static void parse_streaminfo(flac_file *f)
 	f->seek(f, 16, 1);//MD5
 }
 
+static void parse_seektable(flac_file *f, uint32_t size)
+{
+	f->num_seekpoints = size / 18;
+	f->seekpoints = calloc(f->num_seekpoints, sizeof(flac_seekpoint));
+	for (uint32_t i = 0; i < f->num_seekpoints; i++)
+	{
+		f->seekpoints[i].sample_number = read64(f);
+		f->seekpoints[i].offset = read64(f);
+		f->seekpoints[i].sample_count = read16(f);
+	}
+}
+
 static uint8_t parse_header(flac_file *f)
 {
 	char id[4];
@@ -139,10 +174,13 @@ static uint8_t parse_header(flac_file *f)
 		read_meta_block_header(f, &header);
 		if (header.type == STREAMINFO) {
 			parse_streaminfo(f);
+		} else if (header.type == SEEKTABLE) {
+			parse_seektable(f, header.size);
 		} else {
 			f->seek(f, header.size, 1);
 		}
 	} while (!header.is_last);
+	f->first_frame_offset = f->tell(f);
 	return 1;
 }
 
@@ -152,6 +190,7 @@ flac_file *flac_file_from_buffer(void *buffer, uint32_t size)
 	f->read_data = buffer;
 	f->read_byte = read_byte_buffer;
 	f->seek = seek_buffer;
+	f->tell = tell_buffer;
 	f->buffer_size = size;
 	if (parse_header(f)) {
 		return f;
@@ -166,6 +205,7 @@ flac_file *flac_file_from_file(FILE *file)
 	f->read_data = file;
 	f->read_byte = read_byte_file;
 	f->seek = seek_file;
+	f->tell = tell_file;
 	if (parse_header(f)) {
 		return f;
 	}
@@ -186,7 +226,7 @@ static uint64_t read_utf64(flac_file *f)
 		mask >>= 1;
 		length++;
 	}
-	uint64_t value = byte + (mask - 1);
+	uint64_t value = byte & (mask - 1);
 	for (uint8_t i = 0; i < length; i++)
 	{
 		value <<= 6;
@@ -208,7 +248,7 @@ static uint32_t read_utf32(flac_file *f)
 		mask >>= 1;
 		length++;
 	}
-	uint32_t value = byte + (mask - 1);
+	uint32_t value = byte & (mask - 1);
 	for (uint8_t i = 0; i < length; i++)
 	{
 		value <<= 6;
@@ -579,4 +619,39 @@ uint8_t flac_get_sample(flac_file *f, int16_t *out, uint8_t desired_channels)
 	f->frame_sample_pos++;
 
 	return 1;
+}
+
+void flac_seek(flac_file *f, uint64_t sample_number)
+{
+	if (sample_number >= f->frame_start_sample && sample_number < f->frame_start_sample + f->frame_block_size) {
+		f->frame_sample_pos = sample_number - f->frame_start_sample;
+		return;
+	}
+	uint32_t best_seekpoint = f->num_seekpoints + 1;
+	if (f->num_seekpoints) {
+		uint64_t best_diff;
+		for (uint32_t i = 0; i < f->num_seekpoints; i++)
+		{
+			if (f->seekpoints[i].sample_number > sample_number) {
+				continue;
+			}
+			uint64_t diff = sample_number - f->seekpoints[i].sample_number;
+			if (best_seekpoint > f->num_seekpoints || diff < best_diff) {
+				best_seekpoint = i;
+				best_diff = diff;
+			}
+		}
+	}
+	//TODO: more efficient seeking
+	if (best_seekpoint > f->num_seekpoints) {
+		f->seek(f, f->first_frame_offset, 0);
+	} else if (f->seekpoints[best_seekpoint].sample_number > f->frame_start_sample || f->frame_start_sample > sample_number){
+		f->seek(f, f->seekpoints[best_seekpoint].offset + f->first_frame_offset, 0);
+	}
+	do {
+		if (!decode_frame(f)) {
+			return;
+		}
+	} while ((f->frame_start_sample + f->frame_block_size) <= sample_number);
+	f->frame_sample_pos = sample_number - f->frame_start_sample;
 }
