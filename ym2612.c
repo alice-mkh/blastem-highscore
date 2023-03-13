@@ -635,9 +635,11 @@ void ym_output_sample(ym2612_context *context)
 		if (context->channels[i].logfile) {
 			fwrite(&value, sizeof(value), 1, context->channels[i].logfile);
 		}
+#ifndef IS_LIB
 		if (context->scope) {
 			scope_add_sample(context->scope, context->channels[i].scope_channel, value, context->channels[i].phase_overflow);
 		}
+#endif
 		if (context->channels[i].lr & 0x80) {
 			left += (value * context->volume_mult) / context->volume_div;
 		} else if (context->zero_offset) {
@@ -1400,6 +1402,7 @@ void ym_deserialize(deserialize_buffer *buf, void *vcontext)
 
 void ym_enable_scope(ym2612_context *context, oscilloscope *scope, uint32_t master_clock)
 {
+#ifndef IS_LIB
 	static const char *names[] = {
 		"YM2612 #1",
 		"YM2612 #2",
@@ -1413,4 +1416,5 @@ void ym_enable_scope(ym2612_context *context, oscilloscope *scope, uint32_t mast
 	{
 		context->channels[i].scope_channel = scope_add_channel(scope, names[i], master_clock / (context->clock_inc * NUM_OPERATORS));
 	}
+#endif
 }

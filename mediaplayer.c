@@ -611,10 +611,15 @@ static void resume_player(system_header *system)
 			}
 			break;
 		case STATE_PAUSED:
+#ifndef IS_LIB
 			render_sleep_ms(15);
+#endif
 			break;
 		}
+	//TODO: Fix this for libretro build properly
+#ifndef IS_LIB
 		render_update_display();
+#endif
 	}
 }
 

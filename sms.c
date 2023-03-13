@@ -426,9 +426,11 @@ static void run_sms(system_header *system)
 
 		}
 		if (sms->vdp->frame != sms->last_frame) {
+#ifndef IS_LIB
 			if (sms->psg->scope) {
 				scope_render(sms->psg->scope);
 			}
+#endif
 			uint32_t elapsed = sms->vdp->frame - sms->last_frame;
 			sms->last_frame = sms->vdp->frame;
 			if (system->enter_debugger_frames) {
@@ -450,7 +452,9 @@ static void run_sms(system_header *system)
 		}
 		if (system->enter_debugger && sms->z80->pc) {
 			system->enter_debugger = 0;
+#ifndef IS_LIB
 			zdebugger(sms->z80, sms->z80->pc);
+#endif
 		}
 #ifdef NEW_CORE
 		if (sms->z80->nmi_cycle == CYCLE_NEVER) {
@@ -523,7 +527,9 @@ static void start_sms(system_header *system, char *statefile)
 
 	if (system->enter_debugger) {
 		system->enter_debugger = 0;
+#ifndef IS_LIB
 		zinsert_breakpoint(sms->z80, sms->z80->pc, (uint8_t *)zdebugger);
+#endif
 	}
 
 	run_sms(system);
@@ -653,6 +659,7 @@ static void config_updated(system_header *system)
 
 static void toggle_debug_view(system_header *system, uint8_t debug_view)
 {
+#ifndef IS_LIB
 	sms_context *sms = (sms_context *)system;
 	if (debug_view < DEBUG_OSCILLOSCOPE) {
 		vdp_toggle_debug_view(sms->vdp, debug_view);
@@ -666,6 +673,7 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 			psg_enable_scope(sms->psg, scope, sms->normal_clock);
 		}
 	}
+#endif
 }
 
 sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t force_region)

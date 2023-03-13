@@ -154,14 +154,20 @@ void rf5c164_run(rf5c164* pcm, uint32_t cycle)
 			int16_t left = (sample * (pcm->channels[pcm->cur_channel].regs[PAN] >> 4)) >> 5;
 			int16_t right = (sample * (pcm->channels[pcm->cur_channel].regs[PAN] & 0xF)) >> 5;
 			//printf("chan %d, raw %X, sample %d, left %d, right %d, ptr %X (raw %X)\n", pcm->cur_channel, pcm->channels[pcm->cur_channel].sample, sample, left, right, pcm->channels[pcm->cur_channel].cur_ptr >> 11, pcm->channels[pcm->cur_channel].cur_ptr);
+#ifndef IS_LIB
 			if (pcm->scope) {
 				scope_add_sample(pcm->scope, pcm->channels[pcm->cur_channel].scope_channel, sample, pcm->channels[pcm->cur_channel].trigger);
 			}
+#endif
 			pcm->left += left;
 			pcm->right += right;
+#ifdef IS_LIB
+		}
+#else
 		} else if (pcm->scope) {
 			scope_add_sample(pcm->scope, pcm->channels[pcm->cur_channel].scope_channel, 0, 0);
 		}
+#endif
 		write_if_not_sounding(pcm);
 		CHECK;
 	case 10:
@@ -246,6 +252,7 @@ uint8_t rf5c164_read(rf5c164* pcm, uint16_t address)
 
 void rf5c164_enable_scope(rf5c164* pcm, oscilloscope *scope)
 {
+#ifndef IS_LIB
 	static const char *names[] = {
 		"Richo #1",
 		"Richo #2",
@@ -261,6 +268,7 @@ void rf5c164_enable_scope(rf5c164* pcm, oscilloscope *scope)
 	{
 		pcm->channels[i].scope_channel = scope_add_channel(scope, names[i], 50000000 / (pcm->clock_step * 96));
 	}
+#endif
 }
 
 void rf5c164_serialize(rf5c164* pcm, serialize_buffer *buf)
