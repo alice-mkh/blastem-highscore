@@ -1136,11 +1136,13 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 		if (cd->enter_debugger) {
 			genesis_context *gen = cd->genesis;
 			cd->enter_debugger = 0;
+#ifndef IS_LIB
 			if (gen->header.debugger_type == DEBUGGER_NATIVE) {
 				debugger(context, address);
 			} else {
 				gdb_debug_enter(context, address);
 			}
+#endif
 		}
 		cd->m68k_pc = address;
 	}

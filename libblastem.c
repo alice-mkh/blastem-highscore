@@ -77,7 +77,11 @@ char *save_filename;
 tern_node *config;
 uint8_t use_native_states = 1;
 system_header *current_system;
-system_media media;
+static system_media media;
+const system_media *current_media(void)
+{
+	return &media;
+}
 
 RETRO_API void retro_init(void)
 {
@@ -238,10 +242,10 @@ RETRO_API bool retro_load_game(const struct retro_game_info *game)
 	media.size = game->size;
 	stype = detect_system_type(&media);
 	current_system = alloc_config_system(stype, &media, 0, 0);
-	
+
 	unsigned format = RETRO_PIXEL_FORMAT_XRGB8888;
 	retro_environment(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
-	
+
 	return current_system != NULL;
 }
 

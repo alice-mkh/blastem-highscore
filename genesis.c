@@ -418,7 +418,9 @@ static void sync_z80(genesis_context *gen, uint32_t mclks)
 				z80_run(z_context, z_context->current_cycle + 4);
 			}
 			gen->enter_z80_debugger = 0;
+#ifndef IS_LIB
 			zdebugger(z_context, z_context->pc);
+#endif
 		}
 		z80_run(z_context, mclks);
 	} else
@@ -485,9 +487,11 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 		gen->reset_cycle = CYCLE_NEVER;
 	}
 	if (v_context->frame != gen->last_frame) {
+#ifndef IS_LIB
 		if (gen->ym->scope) {
 			scope_render(gen->ym->scope);
 		}
+#endif
 		//printf("reached frame end %d | MCLK Cycles: %d, Target: %d, VDP cycles: %d, vcounter: %d, hslot: %d\n", gen->last_frame, mclks, gen->frame_end, v_context->cycles, v_context->vcounter, v_context->hslot);
 		uint32_t elapsed = v_context->frame - gen->last_frame;
 		gen->last_frame = v_context->frame;
@@ -556,11 +560,13 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 	if (address) {
 		if (gen->header.enter_debugger) {
 			gen->header.enter_debugger = 0;
+#ifndef IS_LIB
 			if (gen->header.debugger_type == DEBUGGER_NATIVE) {
 				debugger(context, address);
 			} else {
 				gdb_debug_enter(context, address);
 			}
+#endif
 		}
 #ifdef NEW_CORE
 		if (gen->header.save_state) {
@@ -1483,16 +1489,20 @@ static void start_genesis(system_header *system, char *statefile)
 		printf("Loaded %s\n", statefile);
 		if (gen->header.enter_debugger) {
 			gen->header.enter_debugger = 0;
+#ifndef IS_LIB
 			insert_breakpoint(gen->m68k, pc, gen->header.debugger_type == DEBUGGER_NATIVE ? debugger : gdb_debug_enter);
+#endif
 		}
 		adjust_int_cycle(gen->m68k, gen->vdp);
 		start_68k_context(gen->m68k, pc);
 	} else {
 		if (gen->header.enter_debugger) {
 			gen->header.enter_debugger = 0;
+#ifndef IS_LIB
 			uint32_t address = read_word(4, (void **)gen->m68k->mem_pointers, &gen->m68k->options->gen, gen->m68k) << 16
 				| read_word(6, (void **)gen->m68k->mem_pointers, &gen->m68k->options->gen, gen->m68k);
 			insert_breakpoint(gen->m68k, address, gen->header.debugger_type == DEBUGGER_NATIVE ? debugger : gdb_debug_enter);
+#endif
 		}
 		m68k_reset(gen->m68k);
 	}
@@ -1773,6 +1783,7 @@ static void stop_vgm_log(system_header *system)
 
 static void toggle_debug_view(system_header *system, uint8_t debug_view)
 {
+#ifndef IS_LIB
 	genesis_context *gen = (genesis_context *)system;
 	if (debug_view < DEBUG_OSCILLOSCOPE) {
 		vdp_toggle_debug_view(gen->vdp, debug_view);
@@ -1798,6 +1809,7 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 	} else if (debug_view == DEBUG_CD_GRAPHICS && gen->expansion) {
 		scd_toggle_graphics_debug(gen->expansion);
 	}
+#endif
 }
 
 static void *tmss_rom_write_16(uint32_t address, void *context, uint16_t value)

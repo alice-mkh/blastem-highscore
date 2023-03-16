@@ -927,17 +927,15 @@ static void handle_dest_clicked(uint32_t dest)
 	memcpy(button_key + pad_key_size, button_base, sizeof(button_base));
 
 	char *final_key;
-	for (int i = 0; i < SDL_CONTROLLER_BUTTON_MAX; i++)
+	for (int i = 0; i <= SDL_CONTROLLER_BUTTON_MAX; i++)
 	{
 		char *base;
 		const char *suffix;
 		size_t base_key_len;
-		if ( i < SDL_CONTROLLER_BUTTON_DPAD_UP) {
+		if ( i < SDL_CONTROLLER_BUTTON_DPAD_UP || i > SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
 			suffix = SDL_GameControllerGetStringForButton(i);
 			base_key_len = button_key_size;
 			base = button_key;
-
-
 		} else {
 			static const char *dir_keys[] = {"up", "down", "left", "right"};
 			suffix = dir_keys[i - SDL_CONTROLLER_BUTTON_DPAD_UP];

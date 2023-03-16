@@ -1055,7 +1055,9 @@ static uint8_t read_parse_command(debug_root *root, parsed_command *out, int ind
 #endif
 	do {
 		process_events();
+#ifndef IS_LIB
 		render_update_display();
+#endif
 #ifndef _WIN32
 		timeout.tv_sec = 0;
 		timeout.tv_usec = 16667;

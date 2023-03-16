@@ -443,7 +443,16 @@ void wave_frame(media_player *player)
 
 void flac_frame(media_player *player)
 {
-	render_sleep_ms(15);
+	for (uint32_t remaining_samples = player->flac->sample_rate / 60; remaining_samples > 0; remaining_samples--)
+	{
+		int16_t samples[2];
+		if (flac_get_sample(player->flac, samples, 2)) {
+			render_put_stereo_sample(player->audio, samples[0], samples[1]);
+		} else {
+			player->state = STATE_PAUSED;
+			return;
+		}
+	}
 }
 
 void vgm_init(media_player *player, uint32_t opts)
@@ -571,6 +580,14 @@ format_error:
 	free(player->wave);
 }
 
+static void flac_player_init(media_player *player)
+{
+	player->flac = flac_file_from_buffer(player->media->buffer, player->media->size);
+	if (player->flac) {
+		player->audio = render_audio_source("Audio File", player->flac->sample_rate, 1, 2);
+	}
+}
+
 static void resume_player(system_header *system)
 {
 	media_player *player = (media_player *)system;
@@ -594,10 +611,15 @@ static void resume_player(system_header *system)
 			}
 			break;
 		case STATE_PAUSED:
+#ifndef IS_LIB
 			render_sleep_ms(15);
+#endif
 			break;
 		}
+	//TODO: Fix this for libretro build properly
+#ifndef IS_LIB
 		render_update_display();
+#endif
 	}
 }
 
@@ -688,6 +710,9 @@ media_player *alloc_media_player(system_media *media, uint32_t opts)
 		break;
 	case AUDIO_WAVE:
 		wave_player_init(player);
+		break;
+	case AUDIO_FLAC:
+		flac_player_init(player);
 		break;
 	}
 

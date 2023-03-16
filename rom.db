@@ -1530,3 +1530,9 @@ SF-002 {
 		}
 	}
 }
+c8a3667631fdbd4d0073e42ada9f7199d09c0cfa {
+	# European version of this game specifies JU in header
+	# but is not entirely 60Hz tolerant
+	name Alisia Dragoon
+	regions E
+}

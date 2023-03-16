@@ -23,6 +23,7 @@ void psg_init(psg_context * context, uint32_t master_clock, uint32_t clock_div)
 
 void psg_enable_scope(psg_context *context, oscilloscope *scope, uint32_t master_clock)
 {
+#ifndef IS_LIB
 	context->scope = scope;
 	static const char *names[] = {
 		"PSG #1",
@@ -34,6 +35,7 @@ void psg_enable_scope(psg_context *context, oscilloscope *scope, uint32_t master
 	{
 		context->scope_channel[i] = scope_add_channel(scope, names[i], master_clock / context->clock_inc);
 	}
+#endif
 }
 
 void psg_free(psg_context *context)
@@ -146,9 +148,11 @@ void psg_run(psg_context * context, uint32_t cycles)
 			} else {
 				value = 0;
 			}
+#ifndef IS_LIB
 			if (context->scope) {
 				scope_add_sample(context->scope, context->scope_channel[i], value, trigger[i]);
 			}
+#endif
 		}
 		value = 0;
 		if (context->noise_out) {
@@ -160,9 +164,11 @@ void psg_run(psg_context * context, uint32_t cycles)
 				right_accum += value;
 			}
 		}
+#ifndef IS_LIB
 		if (context->scope) {
 			scope_add_sample(context->scope, context->scope_channel[3], value, trigger[3]);
 		}
+#endif
 
 		render_put_stereo_sample(context->audio, left_accum, right_accum);
 

@@ -1,6 +1,8 @@
 #include "oscilloscope.h"
 #include "render.h"
 #include "blastem.h"
+#include <stdlib.h>
+#include <string.h>
 
 #define INVALID_TRIGGER 0xFFFFFFFF
 #define WIDTH 1280
