@@ -37,6 +37,8 @@ void render_put_stereo_sample(audio_source *src, int16_t left, int16_t right);
 void render_pause_source(audio_source *src);
 void render_resume_source(audio_source *src);
 void render_free_source(audio_source *src);
+void render_end_audio(void);
+void render_save_audio(char *path);
 //interface for render backends
 void render_audio_initialized(render_audio_format format, uint32_t rate, uint8_t channels, uint32_t buffer_size, int sample_size);
 int mix_and_convert(unsigned char *byte_stream, int len, int *min_remaining_out);

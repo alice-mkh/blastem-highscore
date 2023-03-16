@@ -6,6 +6,7 @@
 #include "util.h"
 #include "config.h"
 #include "blastem.h"
+#include "wave.h"
 
 static uint8_t output_channels;
 static uint32_t buffer_samples, sample_rate;
@@ -17,6 +18,34 @@ static uint8_t num_inactive_audio_sources;
 
 static float overall_gain_mult, *mix_buf;
 static int sample_size;
+
+static FILE *wav_file;
+void render_end_audio(void)
+{
+	render_lock_audio();
+		if (wav_file) {
+			wave_finalize(wav_file);
+			fclose(wav_file);
+			wav_file = NULL;
+		}
+	render_unlock_audio();
+}
+
+void render_save_audio(char *path)
+{
+	render_end_audio();
+	FILE *f = fopen(path, "wb");
+	if (f) {
+		wave_init(f, sample_rate, 16, 2);
+		render_lock_audio();
+			wav_file = f;
+		render_unlock_audio();
+		printf("Saving audio to %s\n", path);
+	} else {
+		warning("Failed to open %s for writing\n", path);
+	}
+	free(path);
+}
 
 typedef void (*conv_func)(float *samples, void *vstream, int sample_count);
 
@@ -41,11 +70,17 @@ static void convert_s16(float *samples, void *vstream, int sample_count)
 		}
 		*stream = out_sample;
 	}
+	if (wav_file) {
+		fwrite(vstream, sizeof(int16_t), sample_count, wav_file);
+	}
 }
 
+static int16_t *wave_buffer;
+static int wave_buffer_samples;
 static void clamp_f32(float *samples, void *vstream, int sample_count)
 {
-	for (; sample_count > 0; sample_count--, samples++)
+	float *start = samples;
+	for (int cur_count = sample_count; cur_count > 0; cur_count--, samples++)
 	{
 		float sample = *samples;
 		if (sample > 1.0f) {
@@ -54,6 +89,16 @@ static void clamp_f32(float *samples, void *vstream, int sample_count)
 			sample = -1.0f;
 		}
 		*samples = sample;
+	}
+	if (wav_file) {
+		if (!wave_buffer) {
+			wave_buffer = calloc(sample_count, sizeof(int16_t));
+			wave_buffer_samples = sample_count;
+		} else if (sample_count < wave_buffer_samples) {
+			wave_buffer = realloc(wave_buffer, sizeof(int16_t) * sample_count);
+			wave_buffer_samples = sample_count;
+		}
+		convert_s16(start, wave_buffer, sample_count);
 	}
 }
 

@@ -418,9 +418,12 @@ void handle_binding_up(keybinding * binding)
 			if (allow_content_binds) {
 				if (render_saving_video()) {
 					render_end_video();
+					render_end_audio();
 				} else {
 					char *path = get_content_config_path("ui\0video_path\0", "ui\0video_template\0", "blastem_%c.apng");
 					render_save_video(path);
+					path = get_content_config_path("ui\0audio_path\0", "ui\0audio_template\0", "blastem_%c.wav");
+					render_save_audio(path);
 				}
 			}
 			break;
