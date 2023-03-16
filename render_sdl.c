@@ -1396,6 +1396,7 @@ void render_save_video(char *path)
 		warning("Failed to open %s for writing\n", path);
 	}
 #endif
+	free(path);
 }
 
 uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, window_close_handler close_handler)
