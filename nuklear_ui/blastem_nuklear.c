@@ -929,7 +929,7 @@ static void handle_dest_clicked(uint32_t dest)
 	memcpy(button_key + pad_key_size, button_base, sizeof(button_base));
 
 	char *final_key;
-	for (int i = 0; i <= SDL_CONTROLLER_BUTTON_MAX; i++)
+	for (int i = 0; i < SDL_CONTROLLER_BUTTON_MAX; i++)
 	{
 		char *base;
 		const char *suffix;
