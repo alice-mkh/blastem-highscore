@@ -285,7 +285,38 @@ static void migrate_pads(char *key, tern_val val, uint8_t valtype, void *data)
 	*pads = tern_insert_node(*pads, key, dupe_tree(val.ptrval));
 }
 
-#define CONFIG_VERSION 6
+static void update_menu_binding(char *key, tern_val val, uint8_t valtype, void *data)
+{
+	tern_node **key_bindings = data;
+	if (valtype != TVAL_PTR) {
+		return;
+	}
+	if (strcmp(val.ptrval, "ui.exit")) {
+		return;
+	}
+	*key_bindings = tern_insert_ptr(*key_bindings, key, strdup("ui.menu"));
+}
+
+static void update_pad_menu_binding(char *key, tern_val val, uint8_t valtype, void *data)
+{
+	tern_node **pads = data;
+	if (valtype != TVAL_NODE) {
+		return;
+	}
+	tern_node *buttons = tern_find_node(val.ptrval, "buttons");
+	if (buttons) {
+		tern_foreach(buttons, update_menu_binding, &buttons);
+		val.ptrval = tern_insert_node(val.ptrval, "buttons", buttons);
+	}
+	tern_node *axes = tern_find_node(val.ptrval, "axes");
+	if (axes) {
+		tern_foreach(axes, update_menu_binding, &axes);
+		val.ptrval = tern_insert_node(val.ptrval, "axes", axes);
+	}
+	*pads = tern_insert_node(*pads, key, val.ptrval);
+}
+
+#define CONFIG_VERSION 7
 static tern_node *migrate_config(tern_node *config, int from_version)
 {
 	tern_node *def_config = parse_bundled_config("default.cfg");
@@ -364,6 +395,18 @@ static tern_node *migrate_config(tern_node *config, int from_version)
 	case 5: {
 		char *binding_o = tern_find_path_default(config, "bindings\0keys\0o\0", (tern_val){.ptrval = "ui.oscilloscope"}, TVAL_PTR).ptrval;
 		config = tern_insert_path(config, "bindings\0keys\0o\0", (tern_val){.ptrval = strdup(binding_o)}, TVAL_PTR);
+	}
+	case 6: {
+		tern_node *key_bindings = tern_find_path(config, "bindings\0keys\0", TVAL_NODE).ptrval;
+		if (key_bindings) {
+			tern_foreach(key_bindings, update_menu_binding, &key_bindings);
+			config = tern_insert_path(config, "bindings\0keys\0", (tern_val){.ptrval = key_bindings}, TVAL_NODE);
+		}
+		tern_node *pad_bindings = tern_find_path(config, "bindings\0pads\0", TVAL_NODE).ptrval;
+		if (pad_bindings) {
+			tern_foreach(pad_bindings, update_pad_menu_binding, &pad_bindings);
+			config = tern_insert_path(config, "bindings\0pads\0", (tern_val){.ptrval = pad_bindings}, TVAL_NODE);
+		}
 	}
 	}
 	char buffer[16];

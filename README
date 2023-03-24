@@ -17,13 +17,12 @@ Usage
 
 This version of BlastEm has a GUI that allows access to most configuration options.
 Simply start BlastEm without passing a ROM filename on the command line to access
-the main menu. You can also access the menu by hitting the button mapped to the ui.exit
+the main menu. You can also access the menu by hitting the button mapped to the ui.menu
 action (default Esc).
 
-If Open GL is disabled or unavaible, or you explicitly request it, the old ROM-based UI
-will be used instead. This UI does not support configuration so you will need to modify
-the configuration file manually if you use it. See the rest of this README for instructions
-on modifying the configuration file.
+If you explicitly request it, you can still use the old ROM-based UI instead. This UI does
+not support configuration so you will need to modify the configuration file manually if you
+use it. See the rest of this README for instructions on modifying the configuration file.
 
 Some operations are currently only supported through the command line. To get a
 list of supported command line options on Linux or OSX type:
@@ -158,8 +157,9 @@ ui.vdp_debug_mode            Cycles the mode/palette of the VDP debug view
 ui.enter_debugger            Enters the debugger for the main CPU of the
 							 currently emulated system
 ui.screenshot                Takes an internal screenshot
-ui.exit                      Returns to the menu ROM if currently in a game
-                             that was launched from the menu. Exits otherwise
+ui.menu                      Opens the in-game menu, or exits the menu if it
+                             is currently open.
+ui.exit                      Quits the emulator
 ui.save_state                Saves a savestate to the quicksave slot
 ui.set_speed.N               Selects a specific machine speed specified by N
                              which should be a number between 0-9. Speeds are

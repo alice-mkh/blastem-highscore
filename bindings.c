@@ -39,6 +39,7 @@ typedef enum {
 	UI_SCREENSHOT,
 	UI_RECORD_VIDEO,
 	UI_VGM_LOG,
+	UI_MENU,
 	UI_EXIT,
 	UI_PLANE_DEBUG,
 	UI_VRAM_DEBUG,
@@ -438,7 +439,7 @@ void handle_binding_up(keybinding * binding)
 				}
 			}
 			break;
-		case UI_EXIT:
+		case UI_MENU:
 #ifndef DISABLE_NUKLEAR
 			if (is_nuklear_active()) {
 				show_pause_menu();
@@ -457,6 +458,8 @@ void handle_binding_up(keybinding * binding)
 			}
 #endif
 			break;
+		case UI_EXIT:
+			exit(0);
 		case UI_PLANE_DEBUG:
 		case UI_VRAM_DEBUG:
 		case UI_CRAM_DEBUG:
@@ -696,6 +699,8 @@ int parse_binding_target(int device_num, const char * target, tern_node * padbut
 			*subtype_a = UI_RECORD_VIDEO;
 		} else if (!strcmp(target + 3, "vgm_log")) {
 			*subtype_a = UI_VGM_LOG;
+		} else if(!strcmp(target + 3, "menu")) {
+			*subtype_a = UI_MENU;
 		} else if(!strcmp(target + 3, "exit")) {
 			*subtype_a = UI_EXIT;
 		} else if (!strcmp(target + 3, "plane_debug")) {

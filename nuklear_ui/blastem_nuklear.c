@@ -478,12 +478,12 @@ void view_key_bindings(struct nk_context *context)
 		"gamepads.2.start", "gamepads.2.mode"
 	};
 	static const char *general_binds[] = {
-		"ui.exit", "ui.save_state", "ui.load_state", "ui.toggle_fullscreen", "ui.soft_reset", "ui.reload",
-		"ui.screenshot", "ui.vgm_log", "ui.sms_pause", "ui.toggle_keyboard_captured", "ui.release_mouse"
+		"ui.menu", "ui.save_state", "ui.load_state", "ui.toggle_fullscreen", "ui.soft_reset", "ui.reload",
+		"ui.screenshot", "ui.vgm_log", "ui.sms_pause", "ui.toggle_keyboard_captured", "ui.release_mouse", "ui.exit"
 	};
 	static const char *general_names[] = {
 		"Show Menu", "Quick Save", "Quick Load", "Toggle Fullscreen", "Soft Reset", "Reload Media",
-		"Internal Screenshot", "Toggle VGM Log", "SMS Pause", "Capture Keyboard", "Release Mouse"
+		"Internal Screenshot", "Toggle VGM Log", "SMS Pause", "Capture Keyboard", "Release Mouse", "Exit"
 	};
 	static const char *speed_binds[] = {
 		"ui.next_speed", "ui.prev_speed",
@@ -631,7 +631,8 @@ const char *translate_binding_option(const char *option)
 		conf_names = tern_insert_ptr(conf_names, "ui.enter_debugger", "Enter CPU Debugger");
 		conf_names = tern_insert_ptr(conf_names, "ui.screenshot", "Take Screenshot");
 		conf_names = tern_insert_ptr(conf_names, "ui.vgm_log", "Toggle VGM Log");
-		conf_names = tern_insert_ptr(conf_names, "ui.exit", "Show Menu");
+		conf_names = tern_insert_ptr(conf_names, "ui.menu", "Show Menu");
+		conf_names = tern_insert_ptr(conf_names, "ui.exit", "Exit");
 		conf_names = tern_insert_ptr(conf_names, "ui.save_state", "Quick Save");
 		conf_names = tern_insert_ptr(conf_names, "ui.load_state", "Quick Load");
 		conf_names = tern_insert_ptr(conf_names, "ui.set_speed.0", "Set Speed 0");
@@ -698,9 +699,10 @@ static void view_button_binding(struct nk_context *context)
 	static const char *emu_control[] = {
 		"ui.save_state",
 		"ui.load_state",
-		"ui.exit",
+		"ui.menu",
 		"ui.toggle_fullscreen",
 		"ui.screenshot",
+		"ui.exit",
 		"ui.release_mouse",
 		"ui.toggle_keyboard_captured"
 	};
