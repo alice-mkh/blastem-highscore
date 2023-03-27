@@ -146,6 +146,8 @@ uint8_t render_should_release_on_exit(void);
 void render_set_external_sync(uint8_t ext_sync_on);
 void render_reset_mappings(void);
 void render_update_display(void);
+int render_ui_to_pixels_x(int ui);
+int render_ui_to_pixels_y(int ui);
 #ifndef IS_LIB
 uint8_t render_create_thread(render_thread *thread, const char *name, render_thread_fun fun, void *data);
 #endif

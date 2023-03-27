@@ -297,9 +297,9 @@ void render_set_external_sync(uint8_t ext_sync_on)
 	}
 }
 
+static int tex_width, tex_height;
 #ifndef DISABLE_OPENGL
 static GLuint textures[3], buffers[2], vshader, fshader, program, un_textures[2], un_width, un_height, un_texsize, at_pos;
-static int tex_width, tex_height;
 
 static GLfloat vertex_data_default[] = {
 	-1.0f, -1.0f,
@@ -810,6 +810,17 @@ int lock_joystick_index(int joystick, int desired_index)
 	return desired_index;
 }
 
+static float ui_scale_x = 1.0f, ui_scale_y = 1.0f;
+int render_ui_to_pixels_x(int ui)
+{
+	return ui * ui_scale_x + 0.5f;
+}
+
+int render_ui_to_pixels_y(int ui)
+{
+	return ui * ui_scale_y + 0.5f;
+}
+
 static int32_t handle_event(SDL_Event *event)
 {
 	if (custom_event_handler) {
@@ -868,7 +879,7 @@ static int32_t handle_event(SDL_Event *event)
 		break;
 	}
 	case SDL_MOUSEMOTION:
-		handle_mouse_moved(event->motion.which, event->motion.x, event->motion.y + overscan_top[video_standard], event->motion.xrel, event->motion.yrel);
+		handle_mouse_moved(event->motion.which, event->motion.x * ui_scale_x + 0.5f, event->motion.y * ui_scale_y + 0.5f + overscan_top[video_standard], event->motion.xrel, event->motion.yrel);
 		break;
 	case SDL_MOUSEBUTTONDOWN:
 		handle_mousedown(event->button.which, event->button.button);
@@ -883,10 +894,7 @@ static int32_t handle_event(SDL_Event *event)
 			if (!main_window) {
 				break;
 			}
-			main_width = event->window.data1;
-			main_height = event->window.data2;
 			need_ui_fb_resize = 1;
-			update_aspect();
 #ifndef DISABLE_OPENGL
 			if (render_gl) {
 				if (on_context_destroyed) {
@@ -895,12 +903,26 @@ static int32_t handle_event(SDL_Event *event)
 				gl_teardown();
 				SDL_GL_DeleteContext(main_context);
 				main_context = SDL_GL_CreateContext(main_window);
+				SDL_GL_GetDrawableSize(main_window, &main_width, &main_height);
+				update_aspect();
 				gl_setup();
 				if (on_context_created) {
 					on_context_created();
 				}
+			} else {
+#endif
+				SDL_GetRendererOutputSize(main_renderer, &main_width, &main_height);
+				update_aspect();
+#ifndef DISABLE_OPENGL
 			}
 #endif
+			if (main_width != event->window.data1 || main_height != event->window.data2) {
+				debug_message("Window resized - UI units %dx%d, pixels %dx%d\n", event->window.data1, event->window.data2, main_width, main_height);
+			} else {
+				debug_message("Window resized: %dx%d\n", main_width, main_height);
+			}
+			ui_scale_x = (float)main_width / (float)event->window.data1;
+			ui_scale_y = (float)main_height / (float)event->window.data2;
 			break;
 		case SDL_WINDOWEVENT_CLOSE:
 			if (main_window && SDL_GetWindowID(main_window) == event->window.windowID) {
@@ -1002,7 +1024,7 @@ static void init_audio()
 
 void window_setup(void)
 {
-	uint32_t flags = SDL_WINDOW_RESIZABLE;
+	uint32_t flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
 	if (is_fullscreen) {
 		flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 	}
@@ -1089,6 +1111,9 @@ void window_setup(void)
 	if (!main_window) {
 		fatal_error("Unable to create SDL window: %s\n", SDL_GetError());
 	}
+	SDL_GetWindowSize(main_window, &main_width, &main_height);
+	debug_message("Window created with size: %d x %d\n", main_width, main_height);
+	int orig_width = main_width, orig_height = main_height;
 #ifndef DISABLE_OPENGL
 	if (gl_enabled)
 	{
@@ -1123,6 +1148,7 @@ void window_setup(void)
 #endif
 				}
 			}
+			SDL_GL_GetDrawableSize(main_window, &main_width, &main_height);
 		} else {
 			warning("OpenGL 2.0 is unavailable, falling back to SDL2 renderer\n");
 		}
@@ -1138,6 +1164,7 @@ void window_setup(void)
 		if (!main_renderer) {
 			fatal_error("unable to create SDL renderer: %s\n", SDL_GetError());
 		}
+		SDL_GetRendererOutputSize(main_renderer, &main_width, &main_height);
 		SDL_RendererInfo rinfo;
 		SDL_GetRendererInfo(main_renderer, &rinfo);
 		debug_message("SDL2 Render Driver: %s\n", rinfo.name);
@@ -1148,8 +1175,13 @@ void window_setup(void)
 	}
 #endif
 
-	SDL_GetWindowSize(main_window, &main_width, &main_height);
-	debug_message("Window created with size: %d x %d\n", main_width, main_height);
+	if (main_width != orig_width || main_height != orig_height) {
+		debug_message("True window resolution %d x %d\n", main_width, main_height);
+	}
+	ui_scale_x = (float)main_width / (float)orig_width;
+	ui_scale_y = (float)main_height / (float)orig_height;
+
+
 	update_aspect();
 	render_alloc_surfaces();
 	def.ptrval = "off";
@@ -1158,6 +1190,11 @@ void window_setup(void)
 
 void render_init(int width, int height, char * title, uint8_t fullscreen)
 {
+#ifdef SDL_HINT_WINDOWS_DPI_SCALING
+	//In some ways, the other DPI scaling option for SDL2 on Windows is better for BlastEm's needs,
+	//but setting this makes it more consistent with how high DPI support works on other platforms
+	SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "1");
+#endif
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) < 0) {
 		fatal_error("Unable to init SDL: %s\n", SDL_GetError());
 	}

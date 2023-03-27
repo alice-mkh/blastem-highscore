@@ -23,6 +23,7 @@
 #include <GL/glew.h>
 #endif
 #endif
+#include "../render.h"
 
 
 NK_API struct nk_context*   nk_sdl_init(SDL_Window *win);
@@ -118,7 +119,7 @@ nk_sdl_device_create(void)
         "}\n";
 
     struct nk_sdl_device *dev = &sdl.ogl;
-    
+
     nk_buffer_init_default(&dev->cmds);
     dev->prog = glCreateProgram();
     dev->vert_shdr = glCreateShader(GL_VERTEX_SHADER);
@@ -148,7 +149,7 @@ nk_sdl_device_create(void)
         dev->vp = offsetof(struct nk_sdl_vertex, position);
         dev->vt = offsetof(struct nk_sdl_vertex, uv);
         dev->vc = offsetof(struct nk_sdl_vertex, col);
-        
+
         /* Allocate buffers */
         glGenBuffers(1, &dev->vbo);
         glGenBuffers(1, &dev->ebo);
@@ -233,7 +234,7 @@ nk_sdl_render(enum nk_anti_aliasing AA, int max_vertex_buffer, int max_element_b
         /* Bind buffers */
         glBindBuffer(GL_ARRAY_BUFFER, dev->vbo);
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, dev->ebo);
-        
+
         {
             /* buffer setup */
             glEnableVertexAttribArray((GLuint)dev->attrib_pos);
@@ -445,7 +446,7 @@ nk_sdl_handle_event(SDL_Event *evt)
     } else if (evt->type == SDL_MOUSEBUTTONDOWN || evt->type == SDL_MOUSEBUTTONUP) {
         /* mouse button */
         int down = evt->type == SDL_MOUSEBUTTONDOWN;
-        const int x = evt->button.x, y = evt->button.y;
+        const int x = render_ui_to_pixels_x(evt->button.x), y = render_ui_to_pixels_y(evt->button.y);
         if (evt->button.button == SDL_BUTTON_LEFT) {
             if (evt->button.clicks > 1)
                 nk_input_button(ctx, NK_BUTTON_DOUBLE, x, y, down);
@@ -458,9 +459,9 @@ nk_sdl_handle_event(SDL_Event *evt)
     } else if (evt->type == SDL_MOUSEMOTION) {
         /* mouse motion */
         if (ctx->input.mouse.grabbed) {
-            int x = (int)ctx->input.mouse.prev.x, y = (int)ctx->input.mouse.prev.y;
-            nk_input_motion(ctx, x + evt->motion.xrel, y + evt->motion.yrel);
-        } else nk_input_motion(ctx, evt->motion.x, evt->motion.y);
+            int x = render_ui_to_pixels_x((int)ctx->input.mouse.prev.x), y = render_ui_to_pixels_y((int)ctx->input.mouse.prev.y);
+            nk_input_motion(ctx, x + render_ui_to_pixels_x(evt->motion.xrel), y + render_ui_to_pixels_y(evt->motion.yrel));
+        } else nk_input_motion(ctx, render_ui_to_pixels_x(evt->motion.x), render_ui_to_pixels_y(evt->motion.y));
         return 1;
     } else if (evt->type == SDL_TEXTINPUT) {
         /* text input */

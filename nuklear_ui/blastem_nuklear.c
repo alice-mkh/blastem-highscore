@@ -2327,11 +2327,6 @@ static void context_destroyed(void)
 	}
 }
 
-static void fb_resize(void)
-{
-	nk_rawfb_resize_fb(fb_context, NULL, render_width(), render_height(), 0);
-}
-
 #ifndef DISABLE_OPENGL
 static struct nk_image load_image_texture(uint32_t *buf, uint32_t width, uint32_t height)
 {
@@ -2418,10 +2413,26 @@ static void style_init(void)
 	context->style.combo.button.text_hover = context->style.property.inc_button.text_hover;
 }
 
+static void fb_resize(void)
+{
+	nk_rawfb_resize_fb(fb_context, NULL, render_width(), render_height(), 0);
+	style_init();
+	texture_init();
+}
+
 static void context_created(void)
 {
 	context = nk_sdl_init(render_get_window());
-	nk_sdl_device_create();
+#ifndef DISABLE_OPENGL
+	if (render_has_gl()) {
+		nk_sdl_device_create();
+	} else {
+#endif
+		fb_context = nk_rawfb_init(NULL, context, render_width(), render_height(), 0);
+		render_set_ui_fb_resize_handler(fb_resize);
+#ifndef DISABLE_OPENGL
+	}
+#endif
 	style_init();
 	texture_init();
 }
