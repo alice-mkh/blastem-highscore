@@ -194,7 +194,6 @@ NK_API void
 nk_sdl_render(enum nk_anti_aliasing AA, int max_vertex_buffer, int max_element_buffer)
 {
     struct nk_sdl_device *dev = &sdl.ogl;
-    int width, height;
     int display_width, display_height;
     struct nk_vec2 scale;
     GLfloat ortho[4][4] = {
@@ -203,13 +202,12 @@ nk_sdl_render(enum nk_anti_aliasing AA, int max_vertex_buffer, int max_element_b
         {0.0f, 0.0f,-1.0f, 0.0f},
         {-1.0f,1.0f, 0.0f, 1.0f},
     };
-    SDL_GetWindowSize(sdl.win, &width, &height);
     SDL_GL_GetDrawableSize(sdl.win, &display_width, &display_height);
-    ortho[0][0] /= (GLfloat)width;
-    ortho[1][1] /= (GLfloat)height;
+    ortho[0][0] /= (GLfloat)display_width;
+    ortho[1][1] /= (GLfloat)display_height;
 
-    scale.x = (float)display_width/(float)width;
-    scale.y = (float)display_height/(float)height;
+    scale.x = 1.0f;
+    scale.y = 1.0f;
 
     /* setup global state */
     glViewport(0,0,display_width,display_height);
@@ -289,7 +287,7 @@ nk_sdl_render(enum nk_anti_aliasing AA, int max_vertex_buffer, int max_element_b
             if (!cmd->elem_count) continue;
             glBindTexture(GL_TEXTURE_2D, (GLuint)cmd->texture.id);
             glScissor((GLint)(cmd->clip_rect.x * scale.x),
-                (GLint)((height - (GLint)(cmd->clip_rect.y + cmd->clip_rect.h)) * scale.y),
+                (GLint)((display_height - (GLint)(cmd->clip_rect.y + cmd->clip_rect.h)) * scale.y),
                 (GLint)(cmd->clip_rect.w * scale.x),
                 (GLint)(cmd->clip_rect.h * scale.y));
             glDrawElements(GL_TRIANGLES, (GLsizei)cmd->elem_count, GL_UNSIGNED_SHORT, offset);
