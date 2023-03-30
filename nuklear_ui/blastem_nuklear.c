@@ -584,7 +584,7 @@ static controller_info selected_controller_info;
 #define LEFTSTICK  0x10000000
 #define RIGHTSTICK 0x20000000
 enum {
-	UP,DOWN,RIGHT,LEFT,NUM_AXIS_DIRS
+	DOWN, UP,RIGHT,LEFT,NUM_AXIS_DIRS
 };
 
 static char * config_ps_names[] = {
