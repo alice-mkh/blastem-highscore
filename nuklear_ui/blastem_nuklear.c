@@ -733,8 +733,13 @@ static void view_button_binding(struct nk_context *context)
 		bind_option_group(context, "Debugging", debugger, sizeof(debugger)/sizeof(*debugger));
 		bind_option_group(context, "Speed Control", speeds, sizeof(speeds)/sizeof(*speeds));
 
-		nk_layout_row_static(context, context->style.font->height, (render_width() - 80)/4, 1);
+		nk_layout_row_static(context, context->style.font->height, (render_width() - 80)/4, 2);
 		if (nk_button_label(context, "Back")) {
+			pop_view();
+		}
+		if (nk_button_label(context, "Clear")) {
+			*current_bind_dest = NULL;
+			controller_binding_changed = 1;
 			pop_view();
 		}
 		nk_end(context);
@@ -757,7 +762,7 @@ static void binding_box(struct nk_context *context, pad_bind_config *bindings, c
 			labels[i] = get_axis_label(&selected_controller_info, binds[i] & ~AXIS);
 			conf_vals[i] = &bindings->triggers[(binds[i] & ~AXIS) - SDL_CONTROLLER_AXIS_TRIGGERLEFT];
 		} else if (binds[i] & STICKDIR) {
-			static char const * dirs[] = {"Up", "Down", "Right", "Left"};
+			static char const * dirs[] = {"Down", "Up", "Right", "Left"};
 			labels[i] = dirs[binds[i] & 3];
 			conf_vals[i] = &(binds[i] & LEFTSTICK ? bindings->left_stick : bindings->right_stick)[binds[i] & 3];
 		} else {
@@ -828,11 +833,11 @@ static void axis_iter(char *key, tern_val val, uint8_t valtype, void *data)
 	{
 	case SDL_CONTROLLER_AXIS_LEFTX:
 	case SDL_CONTROLLER_AXIS_LEFTY:
-		bindings->left_stick[(axis - SDL_CONTROLLER_AXIS_LEFTX) * 2 + is_negative] = val.ptrval;
+		bindings->left_stick[(SDL_CONTROLLER_AXIS_LEFTY - axis) * 2 + is_negative] = val.ptrval;
 		break;
 	case SDL_CONTROLLER_AXIS_RIGHTX:
 	case SDL_CONTROLLER_AXIS_RIGHTY:
-		bindings->right_stick[(axis - SDL_CONTROLLER_AXIS_RIGHTX) * 2 + is_negative] = val.ptrval;
+		bindings->right_stick[(SDL_CONTROLLER_AXIS_RIGHTX - axis) * 2 + is_negative] = val.ptrval;
 		break;
 	case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
 	case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
