@@ -1001,6 +1001,8 @@ static void handle_dest_clicked(uint32_t dest)
 	if (dest == SIMILAR_CONTROLLERS) {
 		free(key);
 	}
+	free(bindings);
+	bindings = NULL;
 	pop_view();
 	config_dirty = 1;
 }
