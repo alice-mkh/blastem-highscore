@@ -837,7 +837,7 @@ static void axis_iter(char *key, tern_val val, uint8_t valtype, void *data)
 		break;
 	case SDL_CONTROLLER_AXIS_RIGHTX:
 	case SDL_CONTROLLER_AXIS_RIGHTY:
-		bindings->right_stick[(SDL_CONTROLLER_AXIS_RIGHTX - axis) * 2 + is_negative] = val.ptrval;
+		bindings->right_stick[(SDL_CONTROLLER_AXIS_RIGHTY - axis) * 2 + is_negative] = val.ptrval;
 		break;
 	case SDL_CONTROLLER_AXIS_TRIGGERLEFT:
 	case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:
