@@ -1177,14 +1177,27 @@ void set_bindings(void)
 		tern_foreach(mice, process_mouse, buttonmaps);
 	}
 	tern_node * speed_nodes = tern_find_path(config, "clocks\0speeds\0", TVAL_NODE).ptrval;
+	free(speeds);
 	speeds = malloc(sizeof(uint32_t));
 	speeds[0] = 100;
+	num_speeds = 1;
 	process_speeds(speed_nodes, NULL);
 	for (int i = 0; i < num_speeds; i++)
 	{
 		if (!speeds[i]) {
 			warning("Speed index %d was not set to a valid percentage!", i);
 			speeds[i] = 100;
+		}
+	}
+}
+
+void update_pad_bindings(void)
+{
+	for (int i = 0; i < MAX_JOYSTICKS; i++)
+	{
+		if (joysticks[i].num_buttons || joysticks[i].num_axes || joysticks[i].num_dpads) {
+			reset_joystick_bindings(i);
+			handle_joy_added(i);
 		}
 	}
 }

@@ -381,6 +381,8 @@ void setup_saves(system_media *media, system_header *context)
 void apply_updated_config(void)
 {
 	render_config_updated();
+	set_bindings();
+	update_pad_bindings();
 	if (current_system && current_system->config_updated) {
 		current_system->config_updated(current_system);
 	}
