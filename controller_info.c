@@ -225,7 +225,10 @@ void save_controller_mapping(int joystick, char *mapping_string)
 	persist_config_at(config, info_config, "controller_types.cfg");
 	const char *parts[] = {guid_string, ",", mapping_string};
 	char * full = alloc_concat_m(3, parts);
+	uint8_t gc_events = render_are_gamepad_events_enabled();
+	render_enable_gamepad_events(0);
 	SDL_GameControllerAddMapping(full);
+	render_enable_gamepad_events(gc_events);
 	free(full);
 	handle_joy_added(joystick);
 #endif

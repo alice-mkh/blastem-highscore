@@ -778,6 +778,10 @@ void render_enable_gamepad_events(uint8_t enabled)
 		}
 	}
 }
+uint8_t render_are_gamepad_events_enabled(void)
+{
+	return gc_events_enabled;
+}
 
 static uint32_t overscan_top[NUM_VID_STD] = {2, 21, 51};
 static uint32_t overscan_bot[NUM_VID_STD] = {1, 17, 48};
