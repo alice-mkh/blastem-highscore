@@ -1289,7 +1289,7 @@ static void view_controller_mappings(struct nk_context *context)
 
 				last_hat = hat_moved;
 				last_hat_value = hat_value;
-			} else if (axis_moved >= 0 && abs(axis_value) > 1000 && (
+			} else if (axis_moved >= 0 && abs(axis_value) > 4000 && (
 					axis_moved != last_axis || (
 						axis_value/abs(axis_value) != last_axis_value/abs(axis_value) && current_button >= SDL_CONTROLLER_BUTTON_DPAD_UP
 					)
@@ -2443,7 +2443,7 @@ static void handle_event(SDL_Event *event)
 		hat_value = event->jhat.value;
 	}
 	else if (event->type == SDL_JOYAXISMOTION) {
-		if (event->jaxis.axis == axis_moved || abs(event->jaxis.value) > abs(axis_value) || abs(event->jaxis.value) > 1000) {
+		if (event->jaxis.axis == axis_moved || abs(event->jaxis.value) > abs(axis_value) || abs(event->jaxis.value) > 4000) {
 			axis_moved = event->jaxis.axis;
 			axis_value = event->jaxis.value;
 		}
