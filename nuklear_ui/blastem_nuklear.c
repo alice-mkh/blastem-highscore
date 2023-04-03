@@ -1044,7 +1044,7 @@ void view_controller_bindings(struct nk_context *context)
 	if (nk_begin(context, "Controller Bindings", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
 		if (!bindings) {
 			bindings = calloc(1, sizeof(*bindings));
-			tern_node *pad = get_binding_node_for_pad(selected_controller);
+			tern_node *pad = get_binding_node_for_pad(selected_controller, &selected_controller_info);
 			if (pad) {
 				tern_foreach(tern_find_node(pad, "buttons"), button_iter, bindings);
 				tern_foreach(tern_find_node(pad, "axes"), axis_iter, bindings);
@@ -1488,6 +1488,123 @@ void view_controller_type(struct nk_context *context)
 		nk_end(context);
 	}
 }
+static uint8_t stick_nav_disabled;
+static SDL_GameController *current_controller;
+static uint8_t deadzones_dirty;
+void stick_deadzone_widget(float left, float top, float size, SDL_GameControllerAxis x_axis)
+{
+	float crosshair_size = context->style.font->height;
+	nk_stroke_rect(&context->current->buffer, nk_rect(left, top, size, size), context->style.window.rounding, context->style.window.border, nk_rgb(255, 255, 255));
+	float deadzone_size = selected_controller_info.stick_deadzone * size / 65535.0f;
+	int16_t raw_x = SDL_GameControllerGetAxis(current_controller, x_axis);
+	int16_t raw_y = SDL_GameControllerGetAxis(current_controller, x_axis + 1);
+	if (raw_x > selected_controller_info.stick_deadzone) {
+		float points[] = {
+			left + size * 0.5f + deadzone_size, top + size * 0.5f - deadzone_size,
+			left + size, top,
+			left + size, top + size,
+			left + size * 0.5f + deadzone_size, top + size * 0.5f + deadzone_size,
+		};
+		nk_fill_polygon(&context->current->buffer, points, sizeof(points)/(2 * sizeof(float)), context->style.checkbox.cursor_normal.data.color);
+	} else if (raw_x < -selected_controller_info.stick_deadzone) {
+		float points[] = {
+			left, top,
+			left + size * 0.5f - deadzone_size, top + size * 0.5f - deadzone_size,
+			left + size * 0.5f - deadzone_size, top + size * 0.5f + deadzone_size,
+			left, top + size,
+		};
+		nk_fill_polygon(&context->current->buffer, points, sizeof(points)/(2 * sizeof(float)), context->style.checkbox.cursor_normal.data.color);
+	}
+	if (raw_y > selected_controller_info.stick_deadzone) {
+		float points[] = {
+			left, top + size,
+			left + size, top + size,
+			left + size * 0.5f + deadzone_size, top + size * 0.5f + deadzone_size,
+			left + size * 0.5f - deadzone_size, top + size * 0.5f + deadzone_size,
+		};
+		nk_fill_polygon(&context->current->buffer, points, sizeof(points)/(2 * sizeof(float)), context->style.checkbox.cursor_normal.data.color);
+	} else if (raw_y < -selected_controller_info.stick_deadzone) {
+		float points[] = {
+			left, top,
+			left + size, top,
+			left + size * 0.5f + deadzone_size, top + size * 0.5f - deadzone_size,
+			left + size * 0.5f - deadzone_size, top + size * 0.5f - deadzone_size,
+		};
+		nk_fill_polygon(&context->current->buffer, points, sizeof(points)/(2 * sizeof(float)), context->style.checkbox.cursor_normal.data.color);
+	}
+	nk_stroke_rect(&context->current->buffer, nk_rect(left + 0.5f * size - deadzone_size, top + 0.5f * size - deadzone_size, 2 * deadzone_size, 2 * deadzone_size), context->style.window.rounding, 0.5f * context->style.window.border, nk_rgb(200, 200, 200));
+	//nk_layout_space_push(context, nk_rect(left, top, size, size));
+	float x = raw_x * size / 65535.0f + size / 2.0f - crosshair_size / 2.0f;
+	float y = raw_y * size / 65535.0f + size / 2.0f - crosshair_size / 2.0f;
+	nk_draw_symbol(&context->current->buffer, NK_SYMBOL_X, nk_rect(left + x, top + y, crosshair_size, crosshair_size), nk_rgb(0, 0, 0), nk_rgb(255, 255, 255), 1, context->style.font);
+}
+
+void trigger_deadzone_widget(float left, float top, float size, SDL_GameControllerAxis axis)
+{
+	float crosshair_size = context->style.font->height;
+	nk_stroke_rect(&context->current->buffer, nk_rect(left, top, size, crosshair_size * 1.5f), context->style.window.rounding, context->style.window.border, nk_rgb(255, 255, 255));
+	float deadzone_size = selected_controller_info.trigger_deadzone * size / 32767.0f;
+	int16_t raw = SDL_GameControllerGetAxis(current_controller, axis);
+	if (raw < 0) {
+		raw = 0;
+	}
+	if (raw > selected_controller_info.trigger_deadzone) {
+		nk_fill_rect(&context->current->buffer, nk_rect(left + deadzone_size, top, size - deadzone_size, 1.5f * crosshair_size), context->style.window.rounding, context->style.checkbox.cursor_normal.data.color);
+	}
+	nk_stroke_line(&context->current->buffer, left + deadzone_size, top, left + deadzone_size, top + 1.5f * crosshair_size, 0.5f * context->style.window.border, nk_rgb(200, 200, 200));
+	float x = raw * size / 32767.0f - crosshair_size / 2.0f;
+	nk_draw_symbol(&context->current->buffer, NK_SYMBOL_X, nk_rect(left + x, top + 0.25f * crosshair_size, crosshair_size, crosshair_size), nk_rgb(0, 0, 0), nk_rgb(255, 255, 255), 1, context->style.font);
+}
+
+void view_deadzones(struct nk_context *context)
+{
+	if (nk_begin(context, "Deadzones", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
+		nk_layout_space_begin(context, NK_STATIC, render_height() - 3 * context->style.font->height, 4);
+
+		float left = render_width() / 8.0f, top = render_height() / 8.0f;
+		float size = render_height() / 3.0f;
+		stick_deadzone_widget(left, top, size, SDL_CONTROLLER_AXIS_LEFTX);
+		stick_deadzone_widget(left + 1.25f * size, top, size, SDL_CONTROLLER_AXIS_RIGHTX);
+
+		top += size + context->style.font->height;
+		nk_layout_space_push(context, nk_rect(left, top, size * 2, context->style.font->height));
+		int val = selected_controller_info.stick_deadzone;
+		nk_property_int(context, "Stick Deadzone", 250, &val, 32000, 250, 1.0f);
+		if (val != selected_controller_info.stick_deadzone) {
+			selected_controller_info.stick_deadzone = val;
+			deadzones_dirty = 1;
+		}
+
+		top += 2.0f * context->style.font->height;
+		trigger_deadzone_widget(left, top, size, SDL_CONTROLLER_AXIS_TRIGGERLEFT);
+		trigger_deadzone_widget(left + 1.25f * size, top, size, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+
+		top += context->style.font->height * 2.5f;
+		nk_layout_space_push(context, nk_rect(left, top, size * 2, context->style.font->height));
+		val = selected_controller_info.trigger_deadzone;
+		nk_property_int(context, "Trigger Deadzone", 250, &val, 32000, 250, 1.0f);
+		if (val != selected_controller_info.trigger_deadzone) {
+			selected_controller_info.trigger_deadzone = val;
+			deadzones_dirty = 1;
+		}
+
+		nk_layout_space_end(context);
+
+		nk_layout_row_static(context, context->style.font->height, (render_width() - 2 * context->style.font->height) / 2, 2);
+		if (nk_button_label(context, "Back")) {
+			stick_nav_disabled = 0;
+			if (current_controller) {
+				SDL_GameControllerClose(current_controller);
+				current_controller = NULL;
+			}
+			if (deadzones_dirty) {
+				save_controller_info(selected_controller, &selected_controller_info);
+			}
+			pop_view();
+		}
+		nk_end(context);
+	}
+}
 
 void view_controllers(struct nk_context *context)
 {
@@ -1498,10 +1615,12 @@ void view_controllers(struct nk_context *context)
 		int bindings_width = font->width(font->userdata, font->height, "Bindings", strlen("Bindings")) + context->style.button.padding.x * 2;
 		int remap_width = font->width(font->userdata, font->height, "Remap", strlen("Remap")) + context->style.button.padding.x * 2;
 		int change_type_width = font->width(font->userdata, font->height, "Change Type", strlen("Change Type")) + context->style.button.padding.x * 2;
-		int total = bindings_width + remap_width + change_type_width;
+		int deadzones_width = font->width(font->userdata, font->height, "Deadzones", strlen("Deadzones")) + context->style.button.padding.x * 2;
+		int total = bindings_width + remap_width + change_type_width + deadzones_width;
 		float bindings_ratio = (float)bindings_width / total;
 		float remap_ratio = (float)remap_width / total;
 		float change_type_ratio = (float)change_type_width / total;
+		float deadzones_ratio = (float)deadzones_width / total;
 
 
 		uint8_t found_controller = 0;
@@ -1563,8 +1682,19 @@ void view_controllers(struct nk_context *context)
 						initial_controller_config = 0;
 						push_view(view_controller_type);
 					}
+					button_start += change_type_width + context->style.window.spacing.x;
+					deadzones_width = deadzones_ratio * button_area_width;
+					nk_layout_space_push(context, nk_rect(button_start, height/2, deadzones_width, inner_height/2));
+					if (nk_button_label(context, "Deadzones")) {
+						selected_controller = i;
+						selected_controller_info = info;
+						current_controller = render_get_controller(i);
+						stick_nav_disabled = 1;
+						deadzones_dirty = 0;
+						push_view(view_deadzones);
+					}
 				}
-				//nk_layout_row_end(context);
+				nk_layout_space_end(context);
 			}
 		}
 		if (!found_controller) {
@@ -2321,6 +2451,9 @@ static void handle_event(SDL_Event *event)
 		click = 1;
 	} else if (event->type == SDL_MOUSEBUTTONUP && event->button.button == 0) {
 		click = 0;
+	}
+	if (stick_nav_disabled && event->type == SDL_CONTROLLERAXISMOTION) {
+		return;
 	}
 	nk_sdl_handle_event(event);
 }

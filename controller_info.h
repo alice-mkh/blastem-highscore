@@ -39,6 +39,8 @@ enum {
 
 typedef struct {
 	char const *name;
+	int16_t    stick_deadzone;
+	int16_t    trigger_deadzone;
 	uint8_t    type;
 	uint8_t    subtype;
 	uint8_t    variant;

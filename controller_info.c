@@ -82,6 +82,9 @@ static void load_ctype_config(void)
 	}
 }
 
+#define DEFAULT_DEADZONE 4000
+#define DEFAULT_DEADZONE_STR "4000"
+
 controller_info get_controller_info(int joystick)
 {
 #ifndef USE_FBDEV
@@ -141,6 +144,8 @@ controller_info get_controller_info(int joystick)
 			}
 		}
 		res.name = control ? SDL_GameControllerName(control) : SDL_JoystickName(stick);
+		res.stick_deadzone = atoi(tern_find_ptr_default(info, "stick_deadzone", DEFAULT_DEADZONE_STR));
+		res.trigger_deadzone = atoi(tern_find_ptr_default(info, "trigger_deadzone", DEFAULT_DEADZONE_STR));
 		if (control) {
 			SDL_GameControllerClose(control);
 		}
@@ -151,7 +156,9 @@ controller_info get_controller_info(int joystick)
 			.type = TYPE_UNKNOWN,
 			.subtype = SUBTYPE_UNKNOWN,
 			.variant = VARIANT_NORMAL,
-			.name = SDL_JoystickName(stick)
+			.name = SDL_JoystickName(stick),
+			.stick_deadzone = DEFAULT_DEADZONE,
+			.trigger_deadzone = DEFAULT_DEADZONE
 		};
 	}
 	const char *name = SDL_GameControllerName(control);
@@ -161,6 +168,8 @@ controller_info get_controller_info(int joystick)
 		if (strstr(name, heuristics[i].name)) {
 			controller_info res = heuristics[i].info;
 			res.name = name;
+			res.stick_deadzone = DEFAULT_DEADZONE;
+			res.trigger_deadzone = DEFAULT_DEADZONE;
 			return res;
 		}
 	}
@@ -172,7 +181,9 @@ controller_info get_controller_info(int joystick)
 		.type = TYPE_GENERIC_MAPPING,
 		.subtype = SUBTYPE_UNKNOWN,
 		.variant = VARIANT_NORMAL,
-		.name = name
+		.name = name,
+		.stick_deadzone = DEFAULT_DEADZONE,
+		.trigger_deadzone = DEFAULT_DEADZONE
 	};
 }
 
@@ -208,6 +219,13 @@ void save_controller_info(int joystick, controller_info *info)
 	tern_node *existing = tern_find_node(info_config, guid_string);
 	existing = tern_insert_ptr(existing, "subtype", strdup(subtype_names[info->subtype]));
 	existing = tern_insert_ptr(existing, "variant", strdup(variant_names[info->variant]));
+	char buffer[32];
+	snprintf(buffer, sizeof(buffer), "%d", info->stick_deadzone);
+	buffer[31] = 0;
+	existing = tern_insert_ptr(existing, "stick_deadzone", strdup(buffer));
+	snprintf(buffer, sizeof(buffer), "%d", info->trigger_deadzone);
+	buffer[31] = 0;
+	existing = tern_insert_ptr(existing, "trigger_deadzone", strdup(buffer));
 	info_config = tern_insert_node(info_config, guid_string, existing);
 	persist_config_at(config, info_config, "controller_types.cfg");
 	handle_joy_added(joystick);

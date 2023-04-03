@@ -1,6 +1,7 @@
 #ifndef BINDINGS_H_
 #define BINDINGS_H_
 #include <stdint.h>
+#include "controller_info.h"
 
 typedef enum {
 	MOUSE_NONE,     //mouse is ignored
@@ -12,7 +13,7 @@ typedef enum {
 void set_bindings(void);
 void update_pad_bindings(void);
 void bindings_set_mouse_mode(uint8_t mode);
-tern_node *get_binding_node_for_pad(int padnum);
+tern_node *get_binding_node_for_pad(int padnum, controller_info *info);
 void handle_keydown(int keycode, uint8_t scancode);
 void handle_keyup(int keycode, uint8_t scancode);
 void handle_joydown(int joystick, int button);
