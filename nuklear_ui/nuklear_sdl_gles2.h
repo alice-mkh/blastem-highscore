@@ -423,6 +423,10 @@ nk_sdl_handle_event(SDL_Event *evt)
 			nk_input_key(ctx, NK_KEY_UP, down);
 		} else if (evt->cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_DOWN) {
 			nk_input_key(ctx, NK_KEY_DOWN, down);
+		} else if (evt->cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_LEFT) {
+			nk_input_key(ctx, NK_KEY_LEFT, down);
+		} else if (evt->cbutton.button == SDL_CONTROLLER_BUTTON_DPAD_RIGHT) {
+			nk_input_key(ctx, NK_KEY_RIGHT, down);
 		} else if (evt->cbutton.button == SDL_CONTROLLER_BUTTON_A || evt->cbutton.button == SDL_CONTROLLER_BUTTON_START) {
 			nk_input_key(ctx, NK_KEY_ENTER, down);
 		}
