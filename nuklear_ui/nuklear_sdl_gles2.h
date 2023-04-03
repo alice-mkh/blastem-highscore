@@ -23,7 +23,9 @@
 #include <GL/glew.h>
 #endif
 #endif
+#include "../render_sdl.h"
 #include "../render.h"
+#include "../controller_info.h"
 
 
 NK_API struct nk_context*   nk_sdl_init(SDL_Window *win);
@@ -432,7 +434,9 @@ nk_sdl_handle_event(SDL_Event *evt)
 		}
 	} else if (evt->type == SDL_CONTROLLERAXISMOTION) {
 		if (evt->caxis.axis == SDL_CONTROLLER_AXIS_LEFTY || evt->caxis.axis ==  SDL_CONTROLLER_AXIS_RIGHTY) {
-			int down = abs(evt->caxis.value) > 2000;
+			int joystick = render_find_joystick_index(evt->caxis.which);
+			controller_info info = get_controller_info(joystick);
+			int down = abs(evt->caxis.value) > info.stick_deadzone;
 			if (evt->caxis.value >= 0) {
 				if (ctx->input.keyboard.keys[NK_KEY_UP].down) {
 					nk_input_key(ctx, NK_KEY_UP, 0);

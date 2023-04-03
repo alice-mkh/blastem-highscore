@@ -705,7 +705,7 @@ void render_set_event_handler(event_handler handler)
 	custom_event_handler = handler;
 }
 
-static int find_joystick_index(SDL_JoystickID instanceID)
+int render_find_joystick_index(SDL_JoystickID instanceID)
 {
 	for (int i = 0; i < MAX_JOYSTICKS; i++) {
 		if (joysticks[i] && SDL_JoystickInstanceID(joysticks[i]) == instanceID) {
@@ -838,16 +838,16 @@ static int32_t handle_event(SDL_Event *event)
 		handle_keyup(event->key.keysym.sym, scancode_map[event->key.keysym.scancode]);
 		break;
 	case SDL_JOYBUTTONDOWN:
-		handle_joydown(find_joystick_index(event->jbutton.which), event->jbutton.button);
+		handle_joydown(render_find_joystick_index(event->jbutton.which), event->jbutton.button);
 		break;
 	case SDL_JOYBUTTONUP:
-		handle_joyup(lock_joystick_index(find_joystick_index(event->jbutton.which), -1), event->jbutton.button);
+		handle_joyup(lock_joystick_index(render_find_joystick_index(event->jbutton.which), -1), event->jbutton.button);
 		break;
 	case SDL_JOYHATMOTION:
-		handle_joy_dpad(lock_joystick_index(find_joystick_index(event->jhat.which), -1), event->jhat.hat, event->jhat.value);
+		handle_joy_dpad(lock_joystick_index(render_find_joystick_index(event->jhat.which), -1), event->jhat.hat, event->jhat.value);
 		break;
 	case SDL_JOYAXISMOTION:
-		handle_joy_axis(lock_joystick_index(find_joystick_index(event->jaxis.which), -1), event->jaxis.axis, event->jaxis.value);
+		handle_joy_axis(lock_joystick_index(render_find_joystick_index(event->jaxis.which), -1), event->jaxis.axis, event->jaxis.value);
 		break;
 	case SDL_JOYDEVICEADDED:
 		if (event->jdevice.which < MAX_JOYSTICKS) {
@@ -868,7 +868,7 @@ static int32_t handle_event(SDL_Event *event)
 		}
 		break;
 	case SDL_JOYDEVICEREMOVED: {
-		int index = find_joystick_index(event->jdevice.which);
+		int index = render_find_joystick_index(event->jdevice.which);
 		if (index >= 0) {
 			SDL_JoystickClose(joysticks[index]);
 			joysticks[index] = NULL;
