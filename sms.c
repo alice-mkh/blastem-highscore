@@ -154,7 +154,7 @@ static void update_mem_map(uint32_t location, sms_context *sms, uint8_t value)
 	}
 }
 
-static void *mapper_write(uint32_t location, void *vcontext, uint8_t value)
+void *sms_sega_mapper_write(uint32_t location, void *vcontext, uint8_t value)
 {
 	z80_context *z80 = vcontext;
 	sms_context *sms = z80->system;
@@ -679,24 +679,12 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t force_region)
 {
 	sms_context *sms = calloc(1, sizeof(sms_context));
-	uint32_t rom_size = nearest_pow2(media->size);
-	memmap_chunk memory_map[6];
-	if (media->size > 0xC000)  {
-		sms->header.info.map_chunks = 6;
-		uint8_t *ram_reg_overlap = sms->ram + sizeof(sms->ram) - 4;
-		memory_map[0] = (memmap_chunk){0x0000, 0x0400,  0xFFFF, .flags = MMAP_READ, .buffer = media->buffer};
-		memory_map[1] = (memmap_chunk){0x0400, 0x4000,  0xFFFF, .ptr_index = 0, .flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE};
-		memory_map[2] = (memmap_chunk){0x4000, 0x8000,  0x3FFF, .ptr_index = 1, .flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE};
-		memory_map[3] = (memmap_chunk){0x8000, 0xC000,  0x3FFF, .ptr_index = 2, .flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE, .write_8 = cart_ram_write};
-		memory_map[4] = (memmap_chunk){0xC000, 0xFFFC,  sizeof(sms->ram)-1, .ptr_index = 0, .flags = MMAP_READ|MMAP_WRITE|MMAP_CODE, .buffer = sms->ram};
-		memory_map[5] = (memmap_chunk){0xFFFC, 0x10000, 0x0003, .ptr_index = 0, .flags = MMAP_READ, .buffer = ram_reg_overlap, .write_8 = mapper_write};
-	} else {
-		sms->header.info.map_chunks = 2;
-		memory_map[0] = (memmap_chunk){0x0000, 0xC000,  rom_size-1,         0, 0, .flags = MMAP_READ, .buffer = media->buffer};
-		memory_map[1] = (memmap_chunk){0xC000, 0x10000, sizeof(sms->ram)-1, 0, 0, .flags = MMAP_READ|MMAP_WRITE|MMAP_CODE, .buffer = sms->ram};
+	tern_node *rom_db = get_rom_db();
+	const memmap_chunk base_map[] = {
+		{0xC000, 0x10000, sizeof(sms->ram)-1, .flags = MMAP_READ|MMAP_WRITE|MMAP_CODE, .buffer = sms->ram}
 	};
-	sms->header.info.map = malloc(sizeof(memmap_chunk) * sms->header.info.map_chunks);
-	memcpy(sms->header.info.map, memory_map, sizeof(memmap_chunk) * sms->header.info.map_chunks);
+	sms->header.info = configure_rom_sms(rom_db, media->buffer, media->size, base_map, sizeof(base_map)/sizeof(base_map[0]));
+	uint32_t rom_size = sms->header.info.rom_size;
 	z80_options *zopts = malloc(sizeof(z80_options));
 	tern_node *model_def;
 	uint8_t is_gamegear = !strcasecmp(media->extension, "gg");

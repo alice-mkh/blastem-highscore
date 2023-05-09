@@ -1136,3 +1136,140 @@ rom_info configure_rom(tern_node *rom_db, void *vrom, uint32_t rom_size, void *l
 
 	return info;
 }
+
+void *sms_sega_mapper_write(uint32_t location, void *vcontext, uint8_t value);
+void sms_memmap_heuristics(rom_info *info, memmap_chunk const *base_map, uint32_t num_base_chunks)
+{
+	uint32_t num_chunks = num_base_chunks + (info->rom_size > 0xC000 ? 5 : 1);
+	memmap_chunk *chunks = calloc(num_chunks, sizeof(memmap_chunk));
+	info->map = chunks;
+	info->map_chunks = num_chunks;
+	if (info->rom_size > 0xC000) {
+		//TODO: codemasters header
+		info->mapper_type = MAPPER_SMS_SEGA;
+		memcpy(chunks + 4, base_map, sizeof(memmap_chunk) * num_base_chunks);
+		chunks[0].start = 0;
+		chunks[0].end = 0x400;
+		chunks[0].mask = 0xFFFF;
+		chunks[0].flags = MMAP_READ;
+		chunks[0].buffer = info->rom;
+		chunks[1].start = 0x400;
+		chunks[1].end = 0x4000;
+		chunks[1].mask = 0xFFFF;
+		chunks[1].ptr_index = 0;
+		chunks[1].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
+		chunks[2].start = 0x4000;
+		chunks[2].end = 0x8000;
+		chunks[2].mask = 0x3FFF;
+		chunks[2].ptr_index = 1;
+		chunks[2].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
+		chunks[3].start = 0x8000;
+		chunks[3].end = 0xC000;
+		chunks[3].mask = 0x3FFF;
+		chunks[3].ptr_index = 2;
+		chunks[3].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
+		chunks[5].start = 0xFFFC;
+		chunks[5].end = 0x10000;
+		chunks[5].mask = 3;
+		chunks[5].flags = MMAP_READ;
+		chunks[5].write_8 = sms_sega_mapper_write;
+		if (chunks[4].end > 0xFFFC) {
+			//mapper regs overlap RAM from base map
+			chunks[4].end = 0xFFFC;
+		}
+	} else {
+		info->mapper_type = MAPPER_NONE;
+		memcpy(chunks + 1, base_map, sizeof(memmap_chunk) * num_base_chunks);
+		chunks[0].start = 0;
+		chunks[0].end = 0xC000;
+		chunks[0].mask = nearest_pow2(info->rom_size)-1;
+		chunks[0].flags = MMAP_READ;
+		chunks[0].buffer = info->rom;
+	}
+}
+
+void configure_rom_sms_heuristics(rom_info *info, uint32_t header_offset, memmap_chunk const *base_map, uint32_t num_base_chunks)
+{
+	sms_memmap_heuristics(info, base_map, num_base_chunks);
+}
+
+uint8_t check_sms_sega_header(uint8_t *rom, char *product_code, uint32_t offset)
+{
+	if (memcmp(rom + offset, "TMR SEGA", strlen("TMR SEGA"))) {
+		return 0;
+	}
+	char *cur = product_code + 4;
+	uint8_t begin = rom[offset + 0xE] >> 4;
+	if (begin < 0xA) {
+		*(cur++) = begin + '0';
+	} else {
+		*(cur++) = '1';
+		*(cur++) = begin - 0xA + '0';
+	}
+	uint8_t *src = rom + offset + 0xD;
+	for (int i = 0; i < 2; i++, src--)
+	{
+		*(cur++) = (*src >> 4) + '0';
+		*(cur++) = (*src & 0xF) + '0';
+	}
+	*cur = 0;
+	return 1;
+}
+
+rom_info configure_rom_sms(tern_node *rom_db, uint8_t *rom, uint32_t rom_size, memmap_chunk const *base_chunks, uint32_t num_base_chunks)
+{
+	uint32_t expanded_size = nearest_pow2(rom_size);
+	if (expanded_size > rom_size) {
+		//generally carts with odd-sized ROMs have 2 power of 2 sized ROMs with the larger one first
+		//TODO: Handle cases in which the 2nd ROM/part is a maller power of 2 than just half the first one
+		uint32_t mirror_start = expanded_size >> 1;
+		uint32_t mirror_size = expanded_size >> 2;
+		if (mirror_start + mirror_size >= rom_size) {
+			memcpy(rom + mirror_start + mirror_size, rom + mirror_start, mirror_size);
+		}
+	}
+	char product_code[] = "sms:000000";
+	uint8_t found_header = 0;
+	uint32_t offset = 0;
+	if (rom_size >= 0x8000) {
+		offset = 0x7FF0;
+		found_header = check_sms_sega_header(rom, product_code, offset);
+	}
+	if (!found_header && rom_size >= 0x4000) {
+		offset = 0x3FF0;
+		found_header = check_sms_sega_header(rom, product_code, offset);
+	}
+	if (!found_header && rom_size >= 0x2000) {
+		offset = 0x1FF0;
+		found_header = check_sms_sega_header(rom, product_code, offset);
+	}
+	debug_message("Product Code: %s\n", product_code);
+	uint8_t raw_hash[20];
+	sha1(rom, rom_size, raw_hash);
+	uint8_t hex_hash[41];
+	bin_to_hex(hex_hash, raw_hash, 20);
+	debug_message("SHA1: %s\n", hex_hash);
+	tern_node * entry = tern_find_node(rom_db, hex_hash);
+	if (!entry) {
+		entry = tern_find_node(rom_db, product_code);
+	}
+	rom_info info = {0};
+	info.rom_size = rom_size;
+	info.rom = rom;
+	if (!entry) {
+		debug_message("Not found in ROM DB, examining header\n\n");
+		configure_rom_sms_heuristics(&info, offset, base_chunks, num_base_chunks);
+		return info;
+	}
+	char *dbreg = tern_find_ptr(entry, "regions");
+	info.regions = 0;
+	if (dbreg) {
+		while (*dbreg != 0)
+		{
+			info.regions |= translate_region_char(*(dbreg++));
+		}
+	}
+	//TODO: check for and handle map from db
+	sms_memmap_heuristics(&info, base_chunks, num_base_chunks);
+	return info;
+}
