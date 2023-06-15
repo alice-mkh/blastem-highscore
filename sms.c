@@ -165,7 +165,7 @@ void *sms_sega_mapper_write(uint32_t location, void *vcontext, uint8_t value)
 	return vcontext;
 }
 
-static void *cart_ram_write(uint32_t location, void *vcontext, uint8_t value)
+void *sms_cart_ram_write(uint32_t location, void *vcontext, uint8_t value)
 {
 	z80_context *z80 = vcontext;
 	sms_context *sms = z80->system;
@@ -710,6 +710,13 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 			vdp_type = VDP_GENESIS;
 		} else {
 			warning("Unrecognized VDP type %s\n", vdp_str);
+		}
+	}
+	for (uint32_t i = 0; i < sms->header.info.map_chunks; i++)
+	{
+		memmap_chunk *chunk = sms->header.info.map + i;
+		if ((chunk->flags == MMAP_READ) && !chunk->buffer && chunk->start > 0xC000) {
+			chunk->buffer = sms->ram + ((chunk->start - 0xC000) & 0x1FFF);
 		}
 	}
 	if (is_gamegear) {
