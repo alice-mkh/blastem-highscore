@@ -1421,6 +1421,36 @@ T-122026 {
 		2 gamepad3.2
 	}
 }
+T-122036 {
+	name Outworld 2375 AD
+	HeartbeatTrainer {
+		size 512
+	}
+	device_overrides {
+		1 heartbeat_trainer.1
+		2 gamepad3.2
+	}
+}
+T-122016 {
+	name NHLPA Hockey
+	HeartbeatTrainer {
+		size 512
+	}
+	device_overrides {
+		1 heartbeat_trainer.1
+		2 gamepad3.2
+	}
+}
+T-50086 {
+	name PGA Tour Golf II
+	HeartbeatTrainer {
+		size 512
+	}
+	device_overrides {
+		1 heartbeat_trainer.1
+		2 gamepad3.2
+	}
+}
 T-172116 {
 	name Triple Play: Gold Edition
 	SRAM {
