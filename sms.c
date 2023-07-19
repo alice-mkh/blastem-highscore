@@ -178,6 +178,34 @@ void *sms_cart_ram_write(uint32_t location, void *vcontext, uint8_t value)
 	return vcontext;
 }
 
+static z80_context *codemasters_write(uint8_t bank, z80_context *z80, uint8_t value)
+{
+	sms_context *sms = z80->system;
+	if (value != sms->bank_regs[bank]) {
+		sms->bank_regs[bank] = value;
+		value &= 0x7F;
+		z80->mem_pointers[bank] = sms->rom + (value << 14 & (sms->rom_size-1));
+		z80_invalidate_code_range(z80, bank * 0x4000, bank * 0x4000 + 0x4000);
+	}
+	return z80;
+}
+
+void *sms_codemasters_bank0_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	return codemasters_write(0, vcontext, value);
+}
+
+void *sms_codemasters_bank1_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	return codemasters_write(1, vcontext, value);
+}
+
+void *sms_codemasters_bank2_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	//TODO: Handle Ernie Els Golf cart RAM
+	return codemasters_write(2, vcontext, value);
+}
+
 uint8_t debug_commands(system_header *system, char *input_buf)
 {
 	sms_context *sms = (sms_context *)system;

@@ -1170,6 +1170,9 @@ rom_info configure_rom(tern_node *rom_db, void *vrom, uint32_t rom_size, void *l
 
 void *sms_sega_mapper_write(uint32_t location, void *vcontext, uint8_t value);
 void *sms_cart_ram_write(uint32_t location, void *vcontext, uint8_t value);
+void *sms_codemasters_bank0_write(uint32_t location, void *vcontext, uint8_t value);
+void *sms_codemasters_bank1_write(uint32_t location, void *vcontext, uint8_t value);
+void *sms_codemasters_bank2_write(uint32_t location, void *vcontext, uint8_t value);
 void map_iter_fun_sms(char *key, tern_val val, uint8_t valtype, void *data)
 {
 	map_iter_state *state = data;
@@ -1228,6 +1231,30 @@ void map_iter_fun_sms(char *key, tern_val val, uint8_t valtype, void *data)
 	}
 }
 
+uint8_t has_codemasters_header(uint8_t *rom, uint32_t rom_size)
+{
+	if (rom_size < 0x8000) {
+		return 0;
+	}
+	//Date and time fields should be valid BCD
+	for (uint32_t i = 0x7FE1; i < 0x7FE6; i++)
+	{
+		if ((rom[i] & 0xF0) > 0x90) {
+			return 0;
+		}
+		if ((rom[i] & 0xF) > 0x9) {
+			return 0;
+		}
+	}
+	uint16_t checksum = rom[0x7FE6] | rom[0x7FE7] << 8;
+	uint16_t complement = rom[0x7FE8] | rom[0x7FE9] << 8;
+	if (complement != (0x10000 - checksum)) {
+		return 0;
+	}
+	puts("Detected codemasters mapper");
+	return 1;
+}
+
 void sms_memmap_heuristics(rom_info *info, memmap_chunk const *base_map, uint32_t num_base_chunks)
 {
 	uint32_t num_chunks = num_base_chunks + (info->rom_size > 0xC000 ? 5 : 1);
@@ -1235,40 +1262,63 @@ void sms_memmap_heuristics(rom_info *info, memmap_chunk const *base_map, uint32_
 	info->map = chunks;
 	info->map_chunks = num_chunks;
 	if (info->rom_size > 0xC000) {
-		//TODO: codemasters header
-		info->mapper_type = MAPPER_SMS_SEGA;
-		memcpy(chunks + 4, base_map, sizeof(memmap_chunk) * num_base_chunks);
-		chunks[0].start = 0;
-		chunks[0].end = 0x400;
-		chunks[0].mask = 0xFFFF;
-		chunks[0].flags = MMAP_READ;
-		chunks[0].buffer = info->rom;
-		chunks[1].start = 0x400;
-		chunks[1].end = 0x4000;
-		chunks[1].mask = 0x3FFF;
-		chunks[1].ptr_index = 0;
-		chunks[1].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
-		chunks[2].start = 0x4000;
-		chunks[2].end = 0x8000;
-		chunks[2].mask = 0x3FFF;
-		chunks[2].ptr_index = 1;
-		chunks[2].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
-		chunks[3].start = 0x8000;
-		chunks[3].end = 0xC000;
-		chunks[3].mask = 0x3FFF;
-		chunks[3].ptr_index = 2;
-		chunks[3].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
-		chunks[3].write_8 = sms_cart_ram_write;
-		chunks[num_chunks - 1].start = 0xFFFC;
-		chunks[num_chunks - 1].end = 0x10000;
-		chunks[num_chunks - 1].mask = 3;
-		chunks[num_chunks - 1].flags = MMAP_READ;
-		chunks[num_chunks - 1].write_8 = sms_sega_mapper_write;
-		for (uint32_t i = 4; i < num_chunks - 1; i++)
-		{
-			if (chunks[i].end > 0xFFFC) {
-				//mapper regs overlap RAM from base map
-				chunks[i].end = 0xFFFC;
+		if (has_codemasters_header(info->rom, info->rom_size)) {
+			info->mapper_type = MAPPER_SMS_CODEMASTERS;
+			memcpy(chunks + 3, base_map, sizeof(memmap_chunk) * num_base_chunks);
+			num_chunks--;
+			chunks[0].start = 0;
+			chunks[0].end = 0x4000;
+			chunks[0].mask = 0x3FFF;
+			chunks[0].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
+			chunks[0].ptr_index = 0;
+			chunks[0].write_8 = sms_codemasters_bank0_write;
+			chunks[1].start = 0x4000;
+			chunks[1].end = 0x8000;
+			chunks[1].mask = 0x3FFF;
+			chunks[1].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
+			chunks[1].ptr_index = 1;
+			chunks[1].write_8 = sms_codemasters_bank1_write;
+			chunks[2].start = 0x8000;
+			chunks[2].end = 0xC000;
+			chunks[2].mask = 0x3FFF;
+			chunks[2].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
+			chunks[2].ptr_index = 2;
+			chunks[2].write_8 = sms_codemasters_bank2_write;
+		} else {
+			info->mapper_type = MAPPER_SMS_SEGA;
+			memcpy(chunks + 4, base_map, sizeof(memmap_chunk) * num_base_chunks);
+			chunks[0].start = 0;
+			chunks[0].end = 0x400;
+			chunks[0].mask = 0xFFFF;
+			chunks[0].flags = MMAP_READ;
+			chunks[0].buffer = info->rom;
+			chunks[1].start = 0x400;
+			chunks[1].end = 0x4000;
+			chunks[1].mask = 0x3FFF;
+			chunks[1].ptr_index = 0;
+			chunks[1].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
+			chunks[2].start = 0x4000;
+			chunks[2].end = 0x8000;
+			chunks[2].mask = 0x3FFF;
+			chunks[2].ptr_index = 1;
+			chunks[2].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
+			chunks[3].start = 0x8000;
+			chunks[3].end = 0xC000;
+			chunks[3].mask = 0x3FFF;
+			chunks[3].ptr_index = 2;
+			chunks[3].flags = MMAP_READ|MMAP_PTR_IDX|MMAP_CODE;
+			chunks[3].write_8 = sms_cart_ram_write;
+			chunks[num_chunks - 1].start = 0xFFFC;
+			chunks[num_chunks - 1].end = 0x10000;
+			chunks[num_chunks - 1].mask = 3;
+			chunks[num_chunks - 1].flags = MMAP_READ;
+			chunks[num_chunks - 1].write_8 = sms_sega_mapper_write;
+			for (uint32_t i = 4; i < num_chunks - 1; i++)
+			{
+				if (chunks[i].end > 0xFFFC) {
+					//mapper regs overlap RAM from base map
+					chunks[i].end = 0xFFFC;
+				}
 			}
 		}
 	} else {
