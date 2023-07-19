@@ -266,7 +266,7 @@ char *utf16be_to_utf8(uint8_t *buf, uint32_t max_size)
 			*(cur_out++) = 0x80 | (code & 0x3F);
 		} else {
 			//TODO: Deal with surrogate pairs
-			*(cur_out++) = 0xF0 | code >> 12;
+			*(cur_out++) = 0xE0 | code >> 12;
 			*(cur_out++) = 0x80 | (code >> 6 & 0x3F);
 			*(cur_out++) = 0x80 | (code & 0x3F);
 		}

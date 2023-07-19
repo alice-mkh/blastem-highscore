@@ -909,6 +909,14 @@ MK-1304 {
 		2 gamepad3.2
 	}
 }
+00004016 {
+	name Forgotten Worlds
+	#Immediage game over with a 6-button controller due to a bad detection routine
+	device_overrides {
+		1 gamepad3.1
+		2 gamepad3.2
+	}
+}
 #Automatically hook up the mouse in the appropriate port for the games I've tested
 T-76076 {
 	name Nobunaga's Ambition
@@ -1413,6 +1421,36 @@ cda73e4caf53cbc8f0750b69e5e7f394ad3735d1 {
 }
 T-122026 {
 	name Outback Joey
+	HeartbeatTrainer {
+		size 512
+	}
+	device_overrides {
+		1 heartbeat_trainer.1
+		2 gamepad3.2
+	}
+}
+T-122036 {
+	name Outworld 2375 AD
+	HeartbeatTrainer {
+		size 512
+	}
+	device_overrides {
+		1 heartbeat_trainer.1
+		2 gamepad3.2
+	}
+}
+T-122016 {
+	name NHLPA Hockey
+	HeartbeatTrainer {
+		size 512
+	}
+	device_overrides {
+		1 heartbeat_trainer.1
+		2 gamepad3.2
+	}
+}
+T-50086 {
+	name PGA Tour Golf II
 	HeartbeatTrainer {
 		size 512
 	}
