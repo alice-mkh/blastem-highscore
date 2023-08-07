@@ -751,7 +751,7 @@ static void * z80_vdp_port_write(uint32_t vdp_port, void * vcontext, uint8_t val
 		sync_sound(gen, context->Z80_CYCLE);
 		psg_write(gen->psg, value);
 	} else {
-		vdp_test_port_write(gen->vdp, value);
+		vdp_test_port_write(gen->vdp, value << 8 | value);
 	}
 	return context;
 }
