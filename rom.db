@@ -1574,3 +1574,17 @@ c8a3667631fdbd4d0073e42ada9f7199d09c0cfa {
 	name Alisia Dragoon
 	regions E
 }
+de10115ce6a7eb416de9cd167df9cf24e34687b1 {
+	name Super Mario 2 1998
+	map {
+		0 {
+			device ROM
+			last 3FFFFF
+		}
+		A13000 {
+			device fixed
+			last A130FF
+			value 0A0A
+		}
+	}
+}
