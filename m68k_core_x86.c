@@ -2372,6 +2372,12 @@ void translate_m68k_stop(m68k_options *opts, m68kinst *inst)
 	}
 	code_ptr loop_top = code->cur;
 		call(code, opts->do_sync);
+		cmp_irdisp(code, 0, opts->gen.context_reg, offsetof(m68k_context, should_return), SZ_B);
+		code_ptr no_return = code->cur + 1;
+		jcc(code, CC_Z, no_return);
+		mov_irdisp(code, (intptr_t)loop_top, opts->gen.context_reg, offsetof(m68k_context, resume_pc), SZ_PTR);
+		retn(code);
+		*no_return = code->cur - (no_return+1);
 		cmp_rr(code, opts->gen.cycles, opts->gen.limit, SZ_D);
 		code_ptr normal_cycle_up = code->cur + 1;
 		jcc(code, CC_A, code->cur + 2);
