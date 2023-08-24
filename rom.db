@@ -1588,3 +1588,45 @@ de10115ce6a7eb416de9cd167df9cf24e34687b1 {
 		}
 	}
 }
+d0cd594ddb321f707ddba8a044fa3e9b906e720a {
+	name Othello
+	map {
+		0 {
+			device ROM
+			last 7FFF
+		}
+		8000 {
+			device RAM
+			size 800
+			last BFFF
+		}
+	}
+}
+242c29989149b94ff27d59a94f067d0f1c84b4a7 {
+	name Othello
+	map {
+		0 {
+			device ROM
+			last 7FFF
+		}
+		8000 {
+			device RAM
+			size 800
+			last BFFF
+		}
+	}
+}
+2681786bffccf58b59410c331865d30a4d027087 {
+	name The Castle
+	map {
+		0 {
+			device ROM
+			last 7FFF
+		}
+		8000 {
+			device RAM
+			size 2000
+			last BFFF
+		}
+	}
+}
