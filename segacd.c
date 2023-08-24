@@ -1472,6 +1472,38 @@ static void *main_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	return main_gate_write16(address, vcontext, value16);
 }
 
+uint8_t laseractive_regs[256];
+
+static uint16_t laseractive_read16(uint32_t address, void *vcontext)
+{
+	printf("LaserActive 16-bit register read %X\n", address);
+	return 0xFFFF;
+}
+
+static uint8_t laseractive_read8(uint32_t address, void *vcontext)
+{
+	printf("LaserActive 8-bit register read %X\n", address);
+	if (address == 0xFDFE81) {
+		return 0x80 | (laseractive_regs[0x41] & 1);
+	} else if (address >= 0xFDFE41 && address < 0xFDFE80 && (address & 1)) {
+		return laseractive_regs[address & 0xFF];
+	}
+	return 0xFF;
+}
+
+static void *laseractive_write16(uint32_t address, void *vcontext, uint16_t value)
+{
+	printf("LaserActive 16-bit register write %X: %X\n", address, value);
+	return vcontext;
+}
+
+static void *laseractive_write8(uint32_t address, void *vcontext, uint8_t value)
+{
+	printf("LaserActive 8-bit register write %X: %X\n", address, value);
+	laseractive_regs[address & 0xFF] = value;
+	return vcontext;
+}
+
 segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8_t force_region, rom_info *info)
 {
 	static memmap_chunk sub_cpu_map[] = {
@@ -1483,7 +1515,8 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 			.read_16 = word_ram_1M_read16, .write_16 = word_ram_1M_write16, .read_8 = word_ram_1M_read8, .write_8 = word_ram_1M_write8, .shift = 1},
 		{0xFE0000, 0xFF0000, 0x003FFF, .flags=MMAP_READ | MMAP_WRITE | MMAP_ONLY_ODD},
 		{0xFF0000, 0xFF8000, 0x003FFF, .read_16 = pcm_read16, .write_16 = pcm_write16, .read_8 = pcm_read8, .write_8 = pcm_write8},
-		{0xFF8000, 0xFF8200, 0x0001FF, .read_16 = sub_gate_read16, .write_16 = sub_gate_write16, .read_8 = sub_gate_read8, .write_8 = sub_gate_write8}
+		{0xFF8000, 0xFF8200, 0x0001FF, .read_16 = sub_gate_read16, .write_16 = sub_gate_write16, .read_8 = sub_gate_read8, .write_8 = sub_gate_write8},
+		{0xFD0000, 0xFE0000, 0xFFFFFF, .read_16 = laseractive_read16, .write_16 = laseractive_write16, .read_8 = laseractive_read8, .write_8 = laseractive_write8}
 	};
 
 	segacd_context *cd = calloc(sizeof(segacd_context), 1);

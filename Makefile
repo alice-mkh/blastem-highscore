@@ -92,7 +92,7 @@ endif
 LDFLAGS:=-lm $(GLES_LIB)
 else
 CFLAGS+= -DGLEW_STATIC -Iglew/include
-LDFLAGS:=-lm glew/lib/libGLEW.a
+LDFLAGS:=-lm glew/lib/libGLEW.a -lEGL
 endif
 
 ifeq ($(OS),Darwin)
