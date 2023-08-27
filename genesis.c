@@ -1607,16 +1607,18 @@ static void load_save(system_header *system)
 			if (read > 0) {
 				printf("Loaded internal BRAM from %s\n", bram_name);
 			}
+		} else {
+			segacd_format_bram(cd->bram, 8 * 1024);
 		}
 		free(bram_name);
 		bram_name = path_append(system->save_dir, "cart.bram");
 		f = fopen(bram_name, "rb");
+		long configured_size = 0x2000 << cd->bram_cart_id;
 		if (f) {
 			long existing_size = nearest_pow2(file_size(f));
 			if (existing_size > 1 * 1024 * 1024) {
 				existing_size = 1 * 1024 * 1024;
 			}
-			long configured_size = 0x2000 << cd->bram_cart_id;
 			if (existing_size != configured_size) {
 				if (existing_size > configured_size) {
 					free(cd->bram_cart);
@@ -1632,6 +1634,8 @@ static void load_save(system_header *system)
 			if (read > 0) {
 				printf("Loaded BRAM cart from %s\n", bram_name);
 			}
+		} else {
+			segacd_format_bram(cd->bram_cart, configured_size);
 		}
 		free(bram_name);
 	}

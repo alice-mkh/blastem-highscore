@@ -66,5 +66,6 @@ void scd_toggle_graphics_debug(segacd_context *cd);
 void segacd_set_speed_percent(segacd_context *cd, uint32_t percent);
 void segacd_serialize(segacd_context *cd, serialize_buffer *buf, uint8_t all);
 void segacd_register_section_handlers(segacd_context *cd, deserialize_buffer *buf);
+void segacd_format_bram(uint8_t *buffer, size_t size);
 
 #endif //SEGACD_H_

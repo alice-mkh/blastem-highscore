@@ -1801,3 +1801,31 @@ void segacd_set_speed_percent(segacd_context *cd, uint32_t percent)
 	rf5c164_adjust_master_clock(&cd->pcm, new_clock);
 	cdd_fader_set_speed_percent(&cd->fader, percent);
 }
+
+static uint8_t *copy_chars(uint8_t *dst, uint8_t *str)
+{
+	size_t len = strlen(str);
+	memcpy(dst, str, len);
+	return dst + len;
+}
+
+void segacd_format_bram(uint8_t *buffer, size_t size)
+{
+	memset(buffer, 0, size);
+	uint16_t free_blocks = (size / 64) - 3;
+	uint8_t *cur = buffer + size - 0x40;
+	cur = copy_chars(cur, "___________");
+	cur += 4;
+	*(cur++) = 0x40;
+	for (int i = 0; i < 4; i++)
+	{
+		*(cur++) = free_blocks >> 8;
+		*(cur++) = free_blocks;
+	}
+	cur += 8;
+	cur = copy_chars(cur, "SEGA_CD_ROM");
+	++cur;
+	*(cur++) = 1;
+	cur += 3;
+	copy_chars(cur, "RAM_CARTRIDGE___");
+}
