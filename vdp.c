@@ -592,11 +592,11 @@ void vdp_print_sprite_table(vdp_context * context)
 //6 would trigger regsiter write 0110
 //7 is a mystery //0111
 #define CRAM_READ 8  //1000
-//9 is also a mystery //1001
+//writes go nowhere, acts 8-bit wide like VRAM //1001
 //A would trigger register write 1010
 //B is a mystery 1011
 #define VRAM_READ8 0xC //1100
-//D is a mystery 1101
+//writes go nowhere, acts 16-bit wide like VSRAM/CRAM 1101
 //E would trigger register write 1110
 //F is a mystery 1111
 
@@ -1122,7 +1122,7 @@ static void external_slot(vdp_context * context)
 
 			break;
 		default:
-			if (!(context->cd & 4) && !start->partial && (context->regs[REG_MODE_2] & (BIT_128K_VRAM|BIT_MODE_5)) != (BIT_128K_VRAM|BIT_MODE_5)) {
+			if (!(context->cd & 6) && !start->partial && (context->regs[REG_MODE_2] & (BIT_128K_VRAM|BIT_MODE_5)) != (BIT_128K_VRAM|BIT_MODE_5)) {
 				start->partial = 1;
 				return;
 			}
