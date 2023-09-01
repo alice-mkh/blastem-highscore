@@ -1246,18 +1246,25 @@ static void read_map_scroll(uint16_t column, uint16_t vsram_off, uint32_t line, 
 		v_offset_mask = 0x7;
 		vscroll_shift = 3;
 	}
-	//TODO: Further research on vscroll latch behavior and the "first column bug"
+	//TODO: Further research on vscroll latch behavior
 	if (context->regs[REG_MODE_3] & BIT_VSCROLL) {
 		if (!column) {
 			if (context->regs[REG_MODE_4] & BIT_H40) {
-				//Based on observed behavior documented by Eke-Eke, I'm guessing the VDP
-				//ends up fetching the last value on the VSRAM bus in the H40 case
-				//getting the last latched value should be close enough for now
-				if (!vsram_off) {
-					context->vscroll_latch[0] = context->vscroll_latch[1];
+				//Pre MD2VA4, behavior seems to vary from console to console
+				//On some consoles it's a stable AND, on some it's always zero and others it's an "unstable" AND
+				if (context->vsram_size == MIN_VSRAM_SIZE) {
+					// For now just implement the AND behavior
+					if (!vsram_off) {
+						context->vscroll_latch[0] &= context->vscroll_latch[1];
+						context->vscroll_latch[1] = context->vscroll_latch[0];
+					}
+				} else {
+					//MD2VA4 and later use the column 0 value
+					context->vscroll_latch[vsram_off] = context->vsram[vsram_off];
 				}
 			} else {
 				//supposedly it's always forced to 0 in the H32 case
+				//TODO: repeat H40 tests in H32 mode to confirm
 				context->vscroll_latch[0] = context->vscroll_latch[1] = 0;
 			}
 		} else if (context->regs[REG_MODE_3] & BIT_VSCROLL) {
