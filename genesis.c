@@ -285,12 +285,28 @@ uint16_t read_dma_value(uint32_t address)
 		uint32_t word_ram_end = cd->base + 0x240000;
 		if (address >= word_ram && address < word_ram_end) {
 			//FIXME: first word should just be garbage
-			address -= 2;
+			if (!cd->has_vdp_dma_value) {
+				cd->vdp_dma_value = read_word(genesis->m68k->last_prefetch_address, (void **)genesis->m68k->mem_pointers, &genesis->m68k->options->gen, genesis->m68k);
+				cd->has_vdp_dma_value = 1;
+			}
+			uint16_t ret = cd->vdp_dma_value;
+			cd->vdp_dma_value = read_word(address, (void **)genesis->m68k->mem_pointers, &genesis->m68k->options->gen, genesis->m68k);
+			return ret;
 		}
 	}
 
 	return read_word(address, (void **)genesis->m68k->mem_pointers, &genesis->m68k->options->gen, genesis->m68k);
 }
+
+void vdp_dma_started(void)
+{
+	genesis_context *genesis = (genesis_context *)current_system;
+	if (genesis->expansion) {
+		segacd_context *cd = genesis->expansion;
+		cd->has_vdp_dma_value = 0;
+	}
+}
+
 
 static uint16_t get_open_bus_value(system_header *system)
 {

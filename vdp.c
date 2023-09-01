@@ -4635,6 +4635,7 @@ int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_c
 					//sticking with 3 slots for now until I can do some more captures
 					vdp_run_context_full(context, context->cycles + 12 * ((context->regs[REG_MODE_2] & BIT_MODE_5) && (context->regs[REG_MODE_4] & BIT_H40) ? 4 : 5));
 					context->flags |= FLAG_DMA_RUN;
+					vdp_dma_started();
 					return 1;
 				} else {
 					context->flags |= FLAG_DMA_RUN;
