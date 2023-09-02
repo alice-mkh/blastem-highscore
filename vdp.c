@@ -1170,7 +1170,7 @@ static void external_slot(vdp_context * context)
 				address = mode4_address_map[address & 0x3FFF];
 			}
 			//TODO: 128K VRAM support
-			context->prefetch = context->vdpmem[context->address & 0xFFFF];
+			context->prefetch = context->vdpmem[address & 0xFFFF];
 			context->prefetch |= context->fifo[context->fifo_write].value & 0xFF00;
 			context->flags |= FLAG_READ_FETCHED;
 			//Should this happen after the prefetch or after the read?
