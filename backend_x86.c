@@ -227,6 +227,11 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 					cmp_irdisp(code, 0, opts->context_reg, opts->mem_ptr_off + sizeof(void*) * memmap[chunk].ptr_index, SZ_PTR);
 					code_ptr not_null = code->cur + 1;
 					jcc(code, CC_NZ, code->cur + 2);
+					uint32_t stack_off;
+					if (need_addr_pop) {
+						stack_off = code->stack_off;
+						pop_r(code, adr_reg);
+					}
 					call(code, opts->save_context);
 					if (is_write) {
 						call_args_abi(code, cfun, 3, opts->scratch2, opts->context_reg, opts->scratch1);
@@ -238,6 +243,9 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 						mov_rr(code, RAX, opts->scratch1, size);
 					}
 					jmp(code, opts->load_context);
+					if (need_addr_pop) {
+						code->stack_off = stack_off;
+					}
 
 					*not_null = code->cur - (not_null + 1);
 				}
