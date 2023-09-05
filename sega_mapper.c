@@ -204,6 +204,10 @@ void* write_med_ram7_b(uint32_t address, void *vcontext, uint8_t value)
 m68k_context * write_bank_reg_w(uint32_t address, m68k_context * context, uint16_t value)
 {
 	genesis_context * gen = context->system;
+	if (gen->mapper_type == MAPPER_SEGA_MED_V2 && (address & 0xF0) < 0xF0) {
+		// ignore writes to other MED extended registers for now
+		return context;
+	}
 	address &= 0xE;
 	address >>= 1;
 	if (!address) {
@@ -256,10 +260,8 @@ m68k_context * write_bank_reg_b(uint32_t address, m68k_context * context, uint8_
 {
 	genesis_context * gen = context->system;
 	if (gen->mapper_type == MAPPER_SEGA_MED_V2) {
-		address &= 0xF;
-		if (!address) {
-			//not sure if this is correct, possible byte sized writes are always rejected to $A130F0
-			write_bank_reg_w(address, context, value << 8 | value);
+		if ((address & 0xFF) == 0xF0) {
+			write_bank_reg_w(address, context, value << 8 | gen->bank_regs[0]);
 		} else if (address > 2 && (address & 1)) {
 			write_bank_reg_w(address, context, value);
 		}
@@ -267,6 +269,28 @@ m68k_context * write_bank_reg_b(uint32_t address, m68k_context * context, uint8_
 		write_bank_reg_w(address, context, value);
 	}
 	return context;
+}
+
+uint16_t med_reg_read_w(uint32_t address, void *vcontext)
+{
+	m68k_context *context = vcontext;
+	switch (address & 0xFE)
+	{
+	case 0xE4:
+		//ensure USB serial read returns "not-ready" status
+		return 0x02;
+	default:
+		return read_word(context->last_prefetch_address, (void **)context->mem_pointers, &context->options->gen, context);
+	}
+}
+
+uint8_t med_reg_read_b(uint32_t address, void *vcontext)
+{
+	uint16_t value = med_reg_read_w(address, vcontext);
+	if (address & 1) {
+		return value;
+	}
+	return value >> 8;
 }
 
 void sega_mapper_serialize(genesis_context *gen, serialize_buffer *buf)

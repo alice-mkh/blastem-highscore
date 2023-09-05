@@ -8,6 +8,8 @@ m68k_context * write_sram_area_w(uint32_t address, m68k_context * context, uint1
 m68k_context * write_sram_area_b(uint32_t address, m68k_context * context, uint8_t value);
 m68k_context * write_bank_reg_w(uint32_t address, m68k_context * context, uint16_t value);
 m68k_context * write_bank_reg_b(uint32_t address, m68k_context * context, uint8_t value);
+uint16_t med_reg_read_w(uint32_t address, void *vcontext);
+uint8_t med_reg_read_b(uint32_t address, void *vcontext);
 void* write_med_ram0_w(uint32_t address, void *vcontext, uint16_t value);
 void* write_med_ram1_w(uint32_t address, void *vcontext, uint16_t value);
 void* write_med_ram2_w(uint32_t address, void *vcontext, uint16_t value);

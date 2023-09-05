@@ -340,6 +340,10 @@ void add_memmap_header(rom_info *info, uint8_t *rom, uint32_t size, memmap_chunk
 		info->map[8].mask = 0xFF;
 		info->map[8].write_16 = (write_16_fun)write_bank_reg_w;
 		info->map[8].write_8 = (write_8_fun)write_bank_reg_b;
+		if (is_med_ssf) {
+			info->map[8].read_16 = med_reg_read_w;
+			info->map[8].read_8 = med_reg_read_b;
+		}
 		return;
 	} else if(!memcmp("SEGA MEGAWIFI", rom + 0x100, strlen("SEGA MEGAWIFI"))) {
 		info->mapper_type = MAPPER_NONE;
@@ -719,7 +723,7 @@ char *map_node_common(char *key, tern_val val, uint8_t valtype, map_iter_state *
 	memmap_chunk *map = state->info->map + state->index;
 	map->start = start;
 	map->end = end + 1;
-	
+
 	if (!strcmp(dtype, "ROM")) {
 		uint32_t expanded_size = nearest_pow2(state->rom_size);
 		if (offset >= expanded_size) {
