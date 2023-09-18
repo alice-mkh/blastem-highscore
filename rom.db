@@ -1630,3 +1630,57 @@ d0cd594ddb321f707ddba8a044fa3e9b906e720a {
 		}
 	}
 }
+b620c2bebd5bab39bc9258a925169b4c93614599 {
+	name A Bug's Life
+	map {
+		0 {
+			device ROM
+			last 3FFFFF
+		}
+		A13000 {
+			device fixed
+			last A13001
+			value 2828
+		}
+		A13002 {
+			device fixed
+			last A13003
+			value 0101
+		}
+		A13004 {
+			device fixed
+			last A13005
+			value 1F1F
+		}
+	}
+}
+5649fa1fbfb28d58b0608e8ebc5dc7bd5c4c9678 {
+	name The Lion King II
+	map {
+		0 {
+			device ROM
+			last 3FFFFF
+		}
+		400000 {
+			device RAM
+			size 2
+			last 400007
+			bus both
+		}
+	}
+}
+6c68e4c7a5a14f926dc69ea5d5a452d9ead29a8e {
+	name Tiny Toon Adventures 3
+	map {
+		0 {
+			device ROM
+			last 3FFFFF
+		}
+		400000 {
+			device RAM
+			size 2
+			last 400007
+			bus both
+		}
+	}
+}
