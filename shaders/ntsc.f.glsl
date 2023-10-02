@@ -2,6 +2,8 @@
 // NTSC composite simulator for BlastEm
 // Shader by Sik, based on BlastEm's default shader
 //
+// Now with gamma correction (NTSC = 2.5 gamma, sRGB = 2.2 gamma)
+//
 // It works by converting from RGB to YIQ and then encoding it into NTSC, then
 // trying to decode it back. The lossy nature of the encoding process results in
 // the rainbow effect. It also accounts for the differences between H40 and H32
@@ -62,6 +64,10 @@ void main()
 	
 	// Horizontal distance of half a colorburst cycle
 	mediump float factorX = (1.0 / texsize.x) / 170.667 * 0.5 * (width - 27.0);
+	
+	// sRGB has a gamma of 2.2 while NTSC has a gamma of 2.5
+	// Use this value to do gamma correction of every RGB value
+	mediump float gamma = 2.5 / 2.2;
 	
 	// Where we store the sampled pixels.
 	// [0] = current pixel
@@ -142,7 +148,8 @@ void main()
 		0.125 * raw[6] * cos(phase[6]);
 	
 	// Convert YIQ back to RGB and output it
-	gl_FragColor = yiq2rgba(vec3(y_mix, i_mix, q_mix));
+	gl_FragColor = pow(yiq2rgba(vec3(y_mix, i_mix, q_mix)),
+	                   vec4(gamma, gamma, gamma, 1.0));
 	
 	// If you're curious to see what the raw composite signal looks like,
 	// comment out the above and uncomment the line below instead
