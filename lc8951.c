@@ -1,5 +1,6 @@
 #include "lc8951.h"
 #include "backend.h"
+#include "cdimage.h"
 
 enum {
 	COMIN,
@@ -62,6 +63,7 @@ enum {
 //CTRL1
 #define BIT_SYIEN  0x80
 #define BIT_SYDEN  0x40
+#define BIT_DSCREN 0x20
 
 //STAT0
 #define BIT_CRCOK  0x80
@@ -315,11 +317,7 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 
 	uint8_t sync_detected = 0, sync_ignored = 0;
 	if (byte == 0) {
-		// HACK!: The (sector_offset < 0x10) check is not correct, but without it Thunderhawk gets stuck
-		// It has a sector that contains the sync pattern in the main data area
-		// From the LC8951 datasheet, I would expect tohis to trigger a short block, but either
-		// it's sync detection is fancier than I thought or I have a bug that is confusing the BIOS
-		if (context->sync_counter == 11 && ((sector_offset & 3) == 3) && (sector_offset < 0x10)) {
+		if (context->sync_counter == 11) {
 			if (context->ctrl1 & BIT_SYDEN) {
 				sync_detected = 1;
 			} else {
@@ -333,6 +331,11 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 		context->sync_counter++;
 	} else {
 		context->sync_counter = 0;
+	}
+
+	//TODO: figure out if chip tries to avoid descrambling sync signal
+	if (context->ctrl1 & BIT_DSCREN) {
+		byte = cdrom_scramble(&context->scrambler_lsfr, byte);
 	}
 
 	uint8_t sync_inserted = 0;
@@ -359,6 +362,7 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 			context->regs[STAT0] |= BIT_ILSYNC;
 		}
 		context->sector_counter = 0;
+		context->scrambler_lsfr = 1;
 
 		//header/status regs no longer considered "valid"
 		context->regs[STAT3] |= BIT_VALST;
@@ -373,7 +377,7 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 				context->regs[PTL] = block_start;
 				context->regs[PTH] = block_start >> 8;
 			}
-			printf("Decoding block starting at %X (WRRQ: %d)\n", context->regs[PTL] | (context->regs[PTH] << 8), !!(context->ctrl0 & BIT_WRRQ));
+			printf("Decoding block starting at %X (WRRQ: %d, sector_offset: %X)\n", context->regs[PTL] | (context->regs[PTH] << 8), !!(context->ctrl0 & BIT_WRRQ), sector_offset);
 			//Based on measurements of a Wondermega M1 (LC8951) with SYDEN, SYIEN and DECEN only
 			context->decode_end = context->cycle + 22030 * context->clock_step;
 		}

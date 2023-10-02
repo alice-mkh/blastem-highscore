@@ -142,6 +142,7 @@ struct system_media {
 	uint32_t     cur_track;
 	uint32_t     size;
 	uint32_t     cur_sector;
+	uint16_t     cdrom_scramble_lsfr;
 	media_type   type;
 	uint8_t      in_fake_pregap;
 	uint8_t      byte_storage[3];

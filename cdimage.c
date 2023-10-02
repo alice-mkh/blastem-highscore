@@ -6,6 +6,16 @@
 #include "util.h"
 #include "wave.h"
 
+uint8_t cdrom_scramble(uint16_t *lsfr, uint8_t data)
+{
+	data ^= *lsfr;
+	uint16_t new_bit = *lsfr;
+	*lsfr >>= 1;
+	new_bit = (new_bit ^ *lsfr) & 1;
+	*lsfr |= new_bit << 14;
+	return data;
+}
+
 static char* cmd_start(char *cur)
 {
 	while (*cur && isblank(*cur))
@@ -127,6 +137,9 @@ static uint8_t bin_seek(system_media *media, uint32_t sector)
 				fseek(media->tracks[track].f, media->tracks[track].file_offset + lba * media->tracks[track].sector_bytes, SEEK_SET);
 			}
 		}
+		if (media->tracks[track].type == TRACK_DATA) {
+			media->cdrom_scramble_lsfr = 1;
+		}
 	}
 	return track;
 }
@@ -154,32 +167,38 @@ static uint8_t fake_read(uint32_t sector, uint32_t offset)
 
 static uint8_t bin_read(system_media *media, uint32_t offset)
 {
+	uint8_t retval;
 	if (media->in_fake_pregap == FAKE_DATA) {
-		return fake_read(media->cur_sector, offset);
+		retval = fake_read(media->cur_sector, offset);
 	} else if (media->in_fake_pregap == FAKE_AUDIO) {
-		return 0;
+		retval = 0;
 	} else if ((media->tracks[media->cur_track].sector_bytes < 2352 && offset < 16) || offset > (media->tracks[media->cur_track].sector_bytes + 16)) {
-		return fake_read(media->cur_sector, offset);
+		retval = fake_read(media->cur_sector, offset);
 	} else if (media->tracks[media->cur_track].flac) {
 		if (offset & 3) {
-			return media->byte_storage[(offset & 3) - 1];
+			retval = media->byte_storage[(offset & 3) - 1];
 		} else {
 			int16_t samples[2];
 			flac_get_sample(media->tracks[media->cur_track].flac, samples, 2);
 			media->byte_storage[0] = samples[0] >> 8;
 			media->byte_storage[1] = samples[1];
 			media->byte_storage[2] = samples[1] >> 8;
-			return samples[0];
+			retval = samples[0];
 		}
 	} else {
 		if (media->tracks[media->cur_track].need_swap) {
 			if (offset & 1) {
-				return media->byte_storage[0];
+				retval = media->byte_storage[0];
 			}
 			media->byte_storage[0] = fgetc(media->tracks[media->cur_track].f);
+		} else {
+			retval = fgetc(media->tracks[media->cur_track].f);
 		}
-		return fgetc(media->tracks[media->cur_track].f);
 	}
+	if (offset >= 12 && media->tracks[media->cur_track].type == TRACK_DATA) {
+		retval = cdrom_scramble(&media->cdrom_scramble_lsfr, retval);
+	}
+	return retval;
 }
 
 static uint8_t bin_subcode_read(system_media *media, uint32_t offset)

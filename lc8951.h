@@ -23,6 +23,7 @@ typedef struct {
 	uint8_t  comin[8];
 
 	uint16_t dac;
+	uint16_t scrambler_lsfr;
 	uint8_t  comin_write;
 	uint8_t  comin_count;
 	uint8_t  ifctrl;
