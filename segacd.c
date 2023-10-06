@@ -1270,7 +1270,10 @@ static uint16_t main_gate_read16(uint32_t address, void *vcontext)
 		if (dst == DST_MAIN_CPU) {
 			if (cd->gate_array[GA_CDC_CTRL] & BIT_DSR) {
 				cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
-				lc8951_resume_transfer(&cd->cdc, scd_cycle);
+				//Using the sub CPU's cycle count here is a bit of a hack
+				//needed to ensure the interrupt does not get triggered prematurely
+				//because the sub CPU execution granularity is too high
+				lc8951_resume_transfer(&cd->cdc, cd->m68k->current_cycle);
 			} else {
 				printf("Read of CDC host data with DSR clear at %u\n", scd_cycle);
 			}
