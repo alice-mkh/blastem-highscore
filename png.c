@@ -337,7 +337,7 @@ static uint32_t pixel_true_alpha(uint8_t **cur, uint8_t **last, uint8_t bpp, uin
 	if (*last) {
 		(*last)++;
 	}
-	return alpha << 24 | red << 16 | green << 8 | blue;
+	return ((uint32_t)alpha) << 24 | red << 16 | green << 8 | blue;
 }
 
 static filter_fun filters[] = {filter_none, filter_sub, filter_up, filter_avg, filter_paeth};

@@ -26,7 +26,7 @@ static void sha1_chunk(uint8_t *chunk, uint32_t *hash)
 	memcpy(state, hash, sizeof(state));
 	for (uint32_t src = 0; src < 64; src += 4)
 	{
-		w[src >> 2] = chunk[src] << 24 | chunk[src+1] << 16 | chunk[src+2] << 8 | chunk[src+3];
+		w[src >> 2] = ((uint32_t)chunk[src]) << 24 | chunk[src+1] << 16 | chunk[src+2] << 8 | chunk[src+3];
 	}
 	for (uint32_t cur = 16; cur < 80; cur++)
 	{

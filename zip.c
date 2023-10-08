@@ -106,6 +106,7 @@ zip_file *zip_open(const char *filename)
 	z->entries = entries;
 	z->file = f;
 	z->num_entries = cur_entry - entries;
+	free(buf);
 	return z;
 	
 fail_entries:

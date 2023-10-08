@@ -279,9 +279,9 @@ int render_fullscreen()
 uint32_t render_map_color(uint8_t r, uint8_t g, uint8_t b)
 {
 #ifdef USE_GLES
-	return 255 << 24 | b << 16 | g << 8 | r;
+	return 255UL << 24 | b << 16 | g << 8 | r;
 #else
-	return 255 << 24 | r << 16 | g << 8 | b;
+	return 255UL << 24 | r << 16 | g << 8 | b;
 #endif
 }
 
@@ -425,7 +425,7 @@ static void gl_setup()
 			//TODO: Fixme for PAL + invalid display mode
 			glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, tex_width, tex_height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, texture_buf);
 		} else {
-			uint32_t blank = 255 << 24;
+			uint32_t blank = 255UL << 24;
 			glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, 1, 1, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, &blank);
 		}
 	}

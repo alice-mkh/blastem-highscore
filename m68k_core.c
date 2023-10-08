@@ -1221,8 +1221,8 @@ void m68k_reset(m68k_context * context)
 		context->aregs[8] = context->aregs[7];
 	}
 	context->status = 0x27;
-	context->aregs[7] = reset_vec[0] << 16 | reset_vec[1];
-	uint32_t address = reset_vec[2] << 16 | reset_vec[3];
+	context->aregs[7] = ((uint32_t)reset_vec[0]) << 16 | reset_vec[1];
+	uint32_t address = ((uint32_t)reset_vec[2]) << 16 | reset_vec[3];
 	//interrupt mask may have changed so force a sync
 	context->options->sync_components(context, address);
 	start_68k_context(context, address);

@@ -40,7 +40,7 @@ typedef struct {
 	cpu_options     gen;
 
 	int8_t          dregs[8];
-	int8_t          aregs[8];
+	int8_t          aregs[9];
 	int8_t			flag_regs[5];
 	FILE            *address_log;
 	code_ptr        read_16;

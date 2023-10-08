@@ -150,7 +150,7 @@ uint32_t m68k_decode_op_ex(uint16_t opcode, uint32_t address, m68k_fetch_fun fet
 			dst->addr_mode = MODE_ABSOLUTE;
 			ext = fetch(address, data);
 			address += 2;
-			dst->params.immed = ext << 16 | fetch(address, data);
+			dst->params.immed = ((uint32_t)ext) << 16 | fetch(address, data);
 			address += 2;
 			break;
 		case 3:
@@ -268,7 +268,7 @@ uint32_t m68k_decode_op_ex(uint16_t opcode, uint32_t address, m68k_fetch_fun fet
 				dst->params.immed = ext;
 				break;
 			case OPSIZE_LONG:
-				dst->params.immed = ext << 16 | fetch(address, data);
+				dst->params.immed = ((uint32_t)ext) << 16 | fetch(address, data);
 				address += 2;
 				break;
 			}
