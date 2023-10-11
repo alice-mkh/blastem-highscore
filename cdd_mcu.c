@@ -20,14 +20,14 @@
 //track pitch 1.6 um
 //1250 physical tracks in between
 //linear speed 1.2 m/s - 1.4 m/s
-// 1.3 m = 1300 mm
+// 1.2 m = 1200 mm
 // circumference at 46 mm ~ 144.51 mm
 // circumference at 50 mm ~ 157.08 mm
 // avg is 150.795
 // 75 sectors per second
-// 17.3333 mm "typical" length of a sector
-// ~8.7 sectors per track in lead-in area
-#define LEADIN_SECTORS 10875
+// 16 mm "typical" length of a sector
+// ~9.4 sectors per track in lead-in area
+#define LEADIN_SECTORS 11780
 
 static uint32_t cd_block_to_mclks(uint32_t cycles)
 {
@@ -82,12 +82,14 @@ static uint8_t checksum(uint8_t *vbuffer)
 
 #define MIN_CIRCUMFERENCE 144.51f
 #define MAX_CIRCUMFERENCE 364.42f
-#define SECTOR_LENGTH 17.3333f
+#define SECTOR_LENGTH 16.0f
 // max diameter for program area 116 mm
 // circumference ~ 364.42 mm
-// ~ 21 sectors per physical track at edge
-// ~8 sectors per physical track at start of lead-in
-#define COARSE_SEEK_TRACKS 57 //estimate based on seek test
+// ~ 23 sectors per physical track at edge
+// ~9 sectors per physical track at start of lead-in
+// seek test suggests average somewhere around 54-60 tracks for a long seek, with a peak around 80
+// Sonic CD title screen seems to need a much higher value to get reasonable sync
+#define COARSE_SEEK_TRACKS 60
 static void handle_seek(cdd_mcu *context)
 {
 	uint32_t old_coarse = context->coarse_seek;
@@ -102,7 +104,7 @@ static void handle_seek(cdd_mcu *context)
 			//TODO: better estimate of sectors per track at current head location
 			//TODO: drive will periodically lose tracking when seeking which slows
 			//things down from this ideal speed I'm curently estimating
-			float circumference = (MAX_CIRCUMFERENCE-MIN_CIRCUMFERENCE) * ((float)context->head_pba) / (74 * 60 * SECTORS_PER_SECOND) + MIN_CIRCUMFERENCE;
+			float circumference = (MAX_CIRCUMFERENCE-MIN_CIRCUMFERENCE) * ((float)context->head_pba) / ((74 * 60 + 41) * SECTORS_PER_SECOND + LEADIN_SECTORS + 22) + MIN_CIRCUMFERENCE;
 			float sectors_per_track = circumference / SECTOR_LENGTH;
 			uint32_t max_seek = sectors_per_track * COARSE_SEEK_TRACKS;
 			uint32_t min_seek = sectors_per_track;
