@@ -125,13 +125,15 @@ static void handle_seek(cdd_mcu *context)
 				}
 			} else {
 				uint32_t seek_amount;
-				for (seek_amount = max_seek; seek_amount >= min_seek; seek_amount >>= 1)
+				for (seek_amount = max_seek; seek_amount >= min_seek;)
 				{
-					if (context->head_pba - context->seek_pba >= seek_amount) {
+					uint32_t next_seek = seek_amount >> 1;
+					if (context->head_pba - context->seek_pba > next_seek) {
 						break;
 					}
+					seek_amount = next_seek;
 				}
-				if (seek_amount >= min_seek) {
+				if (seek_amount >= min_seek && context->head_pba >= seek_amount) {
 					context->head_pba -= seek_amount;
 				} else if (context->head_pba >= min_seek){
 					context->head_pba -= min_seek;
