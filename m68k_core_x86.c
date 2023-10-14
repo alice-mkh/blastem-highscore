@@ -2602,6 +2602,7 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	{
 		opts->dregs[i] = opts->aregs[i] = -1;
 	}
+	opts->aregs[8] = -1;
 #ifdef X86_64
 	opts->dregs[0] = R10;
 	opts->dregs[1] = R11;
