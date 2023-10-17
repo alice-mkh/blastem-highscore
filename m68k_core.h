@@ -27,6 +27,7 @@ typedef struct m68kinst m68kinst;
 typedef void (*start_fun)(uint8_t * addr, void * context);
 typedef struct m68k_context m68k_context;
 typedef m68k_context *(*sync_fun)(m68k_context * context, uint32_t address);
+typedef m68k_context *(*int_ack_fun)(m68k_context * context);
 
 typedef struct {
 	code_ptr impl;
@@ -61,7 +62,10 @@ typedef struct {
 	code_ptr		set_sr;
 	code_ptr		set_ccr;
 	code_ptr        bp_stub;
+	code_ptr        save_context_scratch;
+	code_ptr        load_context_scratch;
 	sync_fun        sync_components;
+	int_ack_fun     int_ack;
 	code_info       extra_code;
 	movem_fun       *big_movem;
 	uint32_t        num_movem;
@@ -79,7 +83,6 @@ typedef struct {
 struct m68k_context {
 	uint8_t         flags[5];
 	uint8_t         status;
-	uint16_t        int_ack;
 	uint32_t        dregs[8];
 	uint32_t        aregs[9];
 	uint32_t		target_cycle; //cycle at which the next synchronization or interrupt occurs
@@ -88,17 +91,22 @@ struct m68k_context {
 	uint32_t        int_cycle;
 	uint32_t        int_num;
 	uint32_t        last_prefetch_address;
+	uint32_t        scratch1;
+	uint32_t        scratch2;
 	uint16_t        *mem_pointers[NUM_MEM_AREAS];
 	code_ptr        resume_pc;
 	code_ptr        reset_handler;
 	m68k_options    *options;
 	void            *system;
+	void            *host_sp_entry;
+	void            *stack_storage[10];
 	m68k_breakpoint *breakpoints;
 	uint32_t        num_breakpoints;
 	uint32_t        bp_storage;
 	uint8_t         int_pending;
 	uint8_t         trace_pending;
 	uint8_t         should_return;
+	uint8_t         stack_storage_count;
 	uint8_t         ram_code_flags[];
 };
 
@@ -108,7 +116,7 @@ typedef m68k_context *(*m68k_reset_handler)(m68k_context *context);
 void translate_m68k_stream(uint32_t address, m68k_context * context);
 void start_68k_context(m68k_context * context, uint32_t address);
 void resume_68k(m68k_context *context);
-void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components);
+void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components, int_ack_fun int_ack);
 m68k_context * init_68k_context(m68k_options * opts, m68k_reset_handler reset_handler);
 void m68k_reset(m68k_context * context);
 void m68k_options_free(m68k_options *opts);

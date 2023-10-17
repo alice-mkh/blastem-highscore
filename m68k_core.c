@@ -1206,7 +1206,9 @@ void start_68k_context(m68k_context * context, uint32_t address)
 void resume_68k(m68k_context *context)
 {
 	code_ptr addr = context->resume_pc;
-	context->resume_pc = NULL;
+	if (!context->stack_storage_count) {
+		context->resume_pc = NULL;
+	}
 	m68k_options * options = context->options;
 	context->should_return = 0;
 	options->start_context(addr, context);
@@ -1220,6 +1222,8 @@ void m68k_reset(m68k_context * context)
 		//switching from user to system mode so swap stack pointers
 		context->aregs[8] = context->aregs[7];
 	}
+	context->resume_pc = NULL;
+	context->stack_storage_count = 0;
 	context->status = 0x27;
 	context->aregs[7] = ((uint32_t)reset_vec[0]) << 16 | reset_vec[1];
 	uint32_t address = ((uint32_t)reset_vec[2]) << 16 | reset_vec[3];

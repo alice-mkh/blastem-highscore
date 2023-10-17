@@ -11,7 +11,11 @@
 
 #define SCD_MCLKS 50000000
 #define SCD_PERIPH_RESET_CLKS (SCD_MCLKS / 10)
-#define TIMER_TICK_CLKS 1536
+#define TIMER_TICK_CLKS 1536/*1792*/
+
+//TODO: do some logic analyzer captuers to get actual values
+#define REFRESH_INTERVAL 259
+#define REFRESH_DELAY 2
 
 enum {
 	GA_SUB_CPU_CTRL,
@@ -632,15 +636,13 @@ static void calculate_target_cycle(m68k_context * context)
 	}
 	context->target_cycle = context->sync_cycle < context->int_cycle ? context->sync_cycle : context->int_cycle;
 	if (context->int_cycle == cdc_cycle && context->int_num == 5) {
-		uint32_t before = context->target_cycle - 2 * cd->cdc.clock_step;
+		uint32_t before = cdc_cycle - cd->m68k->options->gen.clock_divider * 158; //divs worst case
 		if (before < context->target_cycle) {
-			if (before > context->current_cycle) {
+			while (before <= context->current_cycle) {
+				before += cd->cdc.clock_step;
+			}
+			if (before < context->target_cycle) {
 				context->target_cycle = context->sync_cycle = before;
-			} else {
-				before = context->target_cycle - cd->cdc.clock_step;
-				if (before > context->current_cycle) {
-					context->target_cycle = context->sync_cycle = before;
-				}
 			}
 		}
 	}
@@ -650,6 +652,15 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 {
 	m68k_context *m68k = vcontext;
 	segacd_context *cd = m68k->system;
+	uint32_t before_cycle = m68k->current_cycle - m68k->options->gen.clock_divider * 4;
+	if (before_cycle >= cd->last_refresh_cycle) {
+		uint32_t num_refresh = (before_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
+		uint32_t num_full = (m68k->current_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
+		cd->last_refresh_cycle = cd->last_refresh_cycle + num_full * REFRESH_INTERVAL;
+		m68k->current_cycle += num_refresh * REFRESH_DELAY;
+	}
+	
+	
 	uint32_t reg = address >> 1;
 	switch (reg)
 	{
@@ -674,7 +685,7 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 		if (dst == DST_SUB_CPU) {
 			if (cd->gate_array[GA_CDC_CTRL] & BIT_DSR) {
 				cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
-				lc8951_resume_transfer(&cd->cdc, cd->cdc.cycle);
+				lc8951_resume_transfer(&cd->cdc);
 			}
 			calculate_target_cycle(cd->m68k);
 
@@ -738,6 +749,14 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 {
 	m68k_context *m68k = vcontext;
 	segacd_context *cd = m68k->system;
+	uint32_t before_cycle = m68k->current_cycle - m68k->options->gen.clock_divider * 4;
+	if (before_cycle >= cd->last_refresh_cycle) {
+		uint32_t num_refresh = (before_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
+		uint32_t num_full = (m68k->current_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
+		cd->last_refresh_cycle = cd->last_refresh_cycle + num_full * REFRESH_INTERVAL;
+		m68k->current_cycle += num_refresh * REFRESH_DELAY;
+	}
+	
 	uint32_t reg = address >> 1;
 	switch (reg)
 	{
@@ -831,7 +850,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 				lc8951_set_dma_multiple(&cd->cdc, 6);
 			}
 			if ((old_dest < DST_MAIN_CPU || old_dest == 6) && dest >= DST_MAIN_CPU && dest != 6) {
-				lc8951_resume_transfer(&cd->cdc, m68k->current_cycle);
+				lc8951_resume_transfer(&cd->cdc);
 			}
 			calculate_target_cycle(m68k);
 		}
@@ -878,6 +897,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_TIMER:
 		timers_run(cd, m68k->current_cycle);
 		cd->gate_array[reg] = value & 0xFF;
+		cd->timer_value = 0;
 		calculate_target_cycle(m68k);
 		break;
 	case GA_INT_MASK:
@@ -1119,10 +1139,6 @@ static void scd_peripherals_run(segacd_context *cd, uint32_t cycle)
 	rf5c164_run(&cd->pcm, cycle);
 }
 
-//TODO: do some logic analyzer captuers to get actual values
-#define REFRESH_INTERVAL 256
-#define REFRESH_DELAY 2
-
 static m68k_context *sync_components(m68k_context * context, uint32_t address)
 {
 	segacd_context *cd = context->system;
@@ -1146,7 +1162,15 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 		}
 		cd->m68k_pc = address;
 	}
-	switch (context->int_ack)
+	calculate_target_cycle(context);
+	return context;
+}
+
+static m68k_context *int_ack(m68k_context *context)
+{	
+	segacd_context *cd = context->system;
+	scd_peripherals_run(cd, context->current_cycle);
+	switch (context->int_pending)
 	{
 	case 1:
 		cd->graphics_int_cycle = CYCLE_NEVER;
@@ -1167,8 +1191,15 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 		cd->cdd.subcode_int_pending = 0;
 		break;
 	}
-	context->int_ack = 0;
-	calculate_target_cycle(context);
+	//the Sega CD responds to these exclusively with !VPA which means its a slow
+	//6800 operation. documentation says these can take between 10 and 19 cycles.
+	//actual results measurements seem to suggest it's actually between 9 and 18
+	//Base 68K core has added 4 cycles for a normal int ack cycle already
+	//We add 5 + the current cycle count (in 68K cycles) mod 10 to simulate the
+	//additional variable delay from the use of the 6800 cycle
+	uint32_t cycle_count = context->current_cycle / context->options->gen.clock_divider;
+	context->current_cycle += 5 + (cycle_count % 10);
+	
 	return context;
 }
 
@@ -1177,7 +1208,10 @@ void scd_run(segacd_context *cd, uint32_t cycle)
 	uint8_t m68k_run = !can_main_access_prog(cd);
 	while (cycle > cd->m68k->current_cycle) {
 		if (m68k_run && !cd->sub_paused_wordram) {
-			uint32_t start = cd->m68k->current_cycle;
+			uint32_t num_refresh = (cd->m68k->current_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
+			cd->last_refresh_cycle = cd->last_refresh_cycle + num_refresh * REFRESH_INTERVAL;
+			cd->m68k->current_cycle += num_refresh * REFRESH_DELAY;
+
 
 			cd->m68k->sync_cycle = cd->enter_debugger ? cd->m68k->current_cycle + 1 : cycle;
 			if (cd->need_reset) {
@@ -1237,6 +1271,7 @@ void scd_adjust_cycle(segacd_context *cd, uint32_t deduction)
 static uint16_t main_gate_read16(uint32_t address, void *vcontext)
 {
 	m68k_context *m68k = vcontext;
+	gen_update_refresh_free_access(m68k);
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
 	uint32_t scd_cycle = gen_cycle_to_scd(m68k->current_cycle, gen);
@@ -1270,10 +1305,7 @@ static uint16_t main_gate_read16(uint32_t address, void *vcontext)
 		if (dst == DST_MAIN_CPU) {
 			if (cd->gate_array[GA_CDC_CTRL] & BIT_DSR) {
 				cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
-				//Using the sub CPU's cycle count here is a bit of a hack
-				//needed to ensure the interrupt does not get triggered prematurely
-				//because the sub CPU execution granularity is too high
-				lc8951_resume_transfer(&cd->cdc, cd->m68k->current_cycle);
+				lc8951_resume_transfer(&cd->cdc);
 			} else {
 				printf("Read of CDC host data with DSR clear at %u\n", scd_cycle);
 			}
@@ -1328,23 +1360,34 @@ static void dump_prog_ram(segacd_context *cd)
 static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 {
 	m68k_context *m68k = vcontext;
+	gen_update_refresh_free_access(m68k);
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
 	uint32_t scd_cycle = gen_cycle_to_scd(m68k->current_cycle, gen);
-	scd_run(cd, scd_cycle);
 	uint32_t reg = (address & 0x1FF) >> 1;
+	if (reg != GA_SUB_CPU_CTRL) {
+		scd_run(cd, scd_cycle);
+	}
 	switch (reg)
 	{
 	case GA_SUB_CPU_CTRL: {
+		if ((value & BIT_IFL2) && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN2)) {
+			if (cd->int2_cycle != CYCLE_NEVER) {
+				scd_run(cd, scd_cycle - 4 * cd->m68k->options->gen.clock_divider);
+				while (cd->int2_cycle != CYCLE_NEVER && cd->m68k->current_cycle < scd_cycle) {
+					scd_run(cd, cd->m68k->current_cycle + cd->m68k->options->gen.clock_divider);
+				}
+			}
+			cd->int2_cycle = scd_cycle;
+			
+		}
+		scd_run(cd, scd_cycle);
 		uint8_t old_access = can_main_access_prog(cd);
 		cd->busreq = value & BIT_SBRQ;
 		uint8_t old_reset = cd->reset;
 		cd->reset = value & BIT_SRES;
 		if (cd->reset && !old_reset) {
 			cd->need_reset = 1;
-		}
-		if (value & BIT_IFL2) {
-			cd->int2_cycle = scd_cycle;
 		}
 		/*cd->gate_array[reg] &= 0x7FFF;
 		cd->gate_array[reg] |= value & 0x8000;*/
@@ -1362,7 +1405,7 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 			dump_prog_ram(cd);
 			uint16_t dst = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
 			if (dst == DST_PROG_RAM) {
-				lc8951_resume_transfer(&cd->cdc, cd->cdc.cycle);
+				lc8951_resume_transfer(&cd->cdc);
 			}
 		}
 		break;
@@ -1395,7 +1438,7 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 
 				uint16_t dst = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
 				if (dst == DST_WORD_RAM) {
-					lc8951_resume_transfer(&cd->cdc, cd->cdc.cycle);
+					lc8951_resume_transfer(&cd->cdc);
 				}
 
 				m68k_invalidate_code_range(m68k, cd->base + 0x200000, cd->base + 0x240000);
@@ -1587,7 +1630,7 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 	sub_cpu_map[0].buffer = sub_cpu_map[1].buffer = cd->prog_ram;
 	sub_cpu_map[4].buffer = cd->bram;
 	m68k_options *mopts = malloc(sizeof(m68k_options));
-	init_m68k_opts(mopts, sub_cpu_map, sizeof(sub_cpu_map) / sizeof(*sub_cpu_map), 4, sync_components);
+	init_m68k_opts(mopts, sub_cpu_map, sizeof(sub_cpu_map) / sizeof(*sub_cpu_map), 4, sync_components, int_ack);
 	cd->m68k = init_68k_context(mopts, NULL);
 	cd->m68k->system = cd;
 	cd->int2_cycle = CYCLE_NEVER;

@@ -293,20 +293,12 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 	}
 }
 
-void lc8951_resume_transfer(lc8951 *context, uint32_t cycle)
+void lc8951_resume_transfer(lc8951 *context)
 {
 	if (context->triggered && context->transfer_end == CYCLE_NEVER && (context->ifctrl & BIT_DOUTEN)) {
 		uint16_t transfer_size = context->regs[DBCL] | (context->regs[DBCH] << 8);
-		//HACK!!! Work around Sub CPU running longer than we would like and dragging other components with it
-		uint32_t step_diff = (context->cycle - cycle) / context->clock_step;
-		if (step_diff) {
-			context->cycle -= step_diff * context->clock_step;
-		}
 		context->transfer_end = context->cycle + transfer_size * context->cycles_per_byte;
 		context->next_byte_cycle = context->cycle;
-		if (step_diff) {
-			lc8951_run(context, cycle);
-		}
 	}
 }
 

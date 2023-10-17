@@ -43,7 +43,7 @@ uint8_t lc8951_reg_read(lc8951 *context);
 void lc8951_ar_write(lc8951 *context, uint8_t value);
 void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8_t byte);
 uint32_t lc8951_next_interrupt(lc8951 *context);
-void lc8951_resume_transfer(lc8951 *context, uint32_t cycle);
+void lc8951_resume_transfer(lc8951 *context);
 void lc8951_adjust_cycles(lc8951 *context, uint32_t deduction);
 void lc8951_serialize(lc8951 *context, serialize_buffer *buf);
 void lc8951_deserialize(deserialize_buffer *buf, void *vcontext);

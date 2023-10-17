@@ -88,6 +88,7 @@ genesis_context *alloc_config_genesis(void *rom, uint32_t rom_size, void *lock_o
 genesis_context *alloc_config_genesis_cdboot(system_media *media, uint32_t system_opts, uint8_t force_region);
 void genesis_serialize(genesis_context *gen, serialize_buffer *buf, uint32_t m68k_pc, uint8_t all);
 void genesis_deserialize(deserialize_buffer *buf, genesis_context *gen);
+void gen_update_refresh_free_access(m68k_context *context);
 
 #endif //GENESIS_H_
 

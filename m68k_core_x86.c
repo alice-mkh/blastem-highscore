@@ -2584,7 +2584,7 @@ void m68k_breakpoint_patch(m68k_context *context, uint32_t address, m68k_debug_h
 	call(&native, opts->bp_stub);
 }
 
-void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components)
+void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components, int_ack_fun int_ack)
 {
 	memset(opts, 0, sizeof(*opts));
 	opts->gen.memmap = memmap;
@@ -2636,6 +2636,7 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	opts->gen.scratch1 = RCX;
 	opts->gen.align_error_mask = 1;
 	opts->sync_components = sync_components;
+	opts->int_ack = int_ack;
 
 
 	opts->gen.native_code_map = malloc(sizeof(native_map_slot) * NATIVE_MAP_CHUNKS);
@@ -2649,6 +2650,9 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	code_info *code = &opts->gen.code;
 	init_code_info(code);
 
+	opts->save_context_scratch = code->cur;
+	mov_rrdisp(code, opts->gen.scratch1, opts->gen.context_reg, offsetof(m68k_context, scratch1), SZ_D);
+	mov_rrdisp(code, opts->gen.scratch2, opts->gen.context_reg, offsetof(m68k_context, scratch2), SZ_D);
 	opts->gen.save_context = code->cur;
 	for (int i = 0; i < 5; i++)
 		if (opts->flag_regs[i] >= 0) {
@@ -2666,6 +2670,9 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	mov_rrdisp(code, opts->gen.cycles, opts->gen.context_reg, offsetof(m68k_context, current_cycle), SZ_D);
 	retn(code);
 
+	opts->load_context_scratch = code->cur;
+	mov_rdispr(code, opts->gen.context_reg, offsetof(m68k_context, scratch1), opts->gen.scratch1, SZ_D);
+	mov_rdispr(code, opts->gen.context_reg, offsetof(m68k_context, scratch2), opts->gen.scratch2, SZ_D);
 	opts->gen.load_context = code->cur;
 	for (int i = 0; i < 5; i++)
 	{
@@ -2699,9 +2706,40 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	mov_rdispr(code, RSP, 20, opts->gen.scratch2, SZ_D);
 	mov_rdispr(code, RSP, 24, opts->gen.context_reg, SZ_D);
 #endif
+	movzx_rdispr(code, opts->gen.context_reg, offsetof(m68k_context, stack_storage_count), opts->gen.scratch1, SZ_B, SZ_D);
+	mov_rrdisp(code, RSP, opts->gen.context_reg, offsetof(m68k_context, host_sp_entry), SZ_PTR);
+	cmp_ir(code, 0, opts->gen.scratch1, SZ_D);
+	code_ptr normal_start = code->cur + 1;
+	jcc(code, CC_Z, normal_start);
+	uint32_t stack_off_save = code->stack_off;
+	mov_rr(code, opts->gen.context_reg, opts->gen.scratch2, SZ_PTR);
+#ifdef X86_64
+	shl_ir(code, 3, opts->gen.scratch1, SZ_D);
+#else
+	shl_ir(code, 2, opts->gen.scratch1, SZ_D);
+#endif
+	add_ir(code, offsetof(m68k_context, stack_storage) - sizeof(void *), opts->gen.scratch2, SZ_PTR);
+	add_rr(code, opts->gen.scratch1, opts->gen.scratch2, SZ_PTR);
+	code_ptr loop_top = code->cur;
+	cmp_ir(code, 0, opts->gen.scratch1, SZ_D);
+	code_ptr loop_bot = code->cur + 1;
+	jcc(code, CC_Z, loop_bot);
+	sub_ir(code, sizeof(void*), opts->gen.scratch1, SZ_D);
+	mov_rindr(code, opts->gen.scratch2, opts->gen.cycles, SZ_PTR);
+	sub_ir(code, sizeof(void*), opts->gen.scratch2, SZ_PTR);
+	push_r(code, opts->gen.cycles);
+	jmp(code, loop_top);
+	*loop_bot = code->cur - (loop_bot + 1);
+	call_noalign(code, opts->load_context_scratch);
+	push_rdisp(code, opts->gen.context_reg, offsetof(m68k_context, resume_pc));
+	retn(code);
+	
+	code->stack_off = stack_off_save;
+	*normal_start = code->cur - (normal_start + 1);
 	call(code, opts->gen.load_context);
 	call_r(code, opts->gen.scratch2);
 	call(code, opts->gen.save_context);
+	mov_irdisp(code, 0, opts->gen.context_reg, offsetof(m68k_context, stack_storage_count), SZ_B);
 	restore_callee_save_regs(code);
 	retn(code);
 
@@ -2733,18 +2771,39 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	code_ptr skip_sync = code->cur + 1;
 	jcc(code, CC_C, code->cur + 2);
 	opts->do_sync = code->cur;
-	push_r(code, opts->gen.scratch1);
-	push_r(code, opts->gen.scratch2);
-	call(code, opts->gen.save_context);
+	call(code, opts->save_context_scratch);
 	xor_rr(code, opts->gen.scratch1, opts->gen.scratch1, SZ_D);
 	call_args_abi(code, (code_ptr)opts->sync_components, 2, opts->gen.context_reg, opts->gen.scratch1);
 	mov_rr(code, RAX, opts->gen.context_reg, SZ_PTR);
-	call(code, opts->gen.load_context);
-	pop_r(code, opts->gen.scratch2);
-	pop_r(code, opts->gen.scratch1);
+	cmp_irdisp(code, 0, RAX, offsetof(m68k_context, should_return), SZ_B);
+	code_ptr do_return = code->cur + 1;
+	jcc(code, CC_NZ, do_return);
+	call(code, opts->load_context_scratch);
 	*skip_sync = code->cur - (skip_sync+1);
 	retn(code);
-
+	stack_off_save = code->stack_off;
+	*do_return = code->cur - (do_return + 1);
+	pop_r(code, opts->gen.scratch1);
+	mov_rrdisp(code, opts->gen.scratch1, opts->gen.context_reg, offsetof(m68k_context, resume_pc), SZ_PTR);
+	mov_rdispr(code, opts->gen.context_reg, offsetof(m68k_context, host_sp_entry), opts->gen.scratch2, SZ_PTR);
+	mov_rr(code, opts->gen.context_reg, opts->aregs[7], SZ_PTR);
+	xor_rr(code, opts->gen.scratch1, opts->gen.scratch1, SZ_B);
+	add_ir(code, offsetof(m68k_context, stack_storage), opts->aregs[7], SZ_PTR);
+	loop_top  = code->cur;
+	cmp_rr(code, opts->gen.scratch2, RSP, SZ_PTR);
+	code_ptr done_stack_save = code->cur + 1;
+	jcc(code, CC_Z, done_stack_save);
+	pop_r(code, opts->gen.cycles);
+	add_ir(code, 1, opts->gen.scratch1, SZ_B);
+	mov_rrind(code, opts->gen.cycles, opts->aregs[7], SZ_PTR);
+	add_ir(code, sizeof(void*), opts->aregs[7], SZ_PTR);
+	jmp(code, loop_top);
+	*done_stack_save = code->cur - (done_stack_save + 1);
+	mov_rrdisp(code, opts->gen.scratch1, opts->gen.context_reg, offsetof(m68k_context, stack_storage_count), SZ_B);
+	restore_callee_save_regs(code);
+	retn(code);
+	code->stack_off = stack_off_save;
+	
 	opts->gen.handle_code_write = (code_ptr)m68k_handle_code_write;
 
 	check_alloc_code(code, 256);
@@ -3107,32 +3166,12 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	areg_to_native(opts, 7, opts->gen.scratch2);
 	call(code, opts->write_16);
 	//interrupt ack cycle
-	//the Genesis responds to these exclusively with !VPA which means its a slow
-	//6800 operation. documentation says these can take between 10 and 19 cycles.
-	//actual results measurements seem to suggest it's actually between 9 and 18
-	//WARNING: this code might break with register assignment changes
-	//save RDX
-	push_r(code, RDX);
-	//save cycle count
-	mov_rr(code, RAX, opts->gen.scratch1, SZ_D);
-	//clear top doubleword of dividend
-	xor_rr(code, RDX, RDX, SZ_D);
-	//set divisor to clock divider
-	mov_ir(code, opts->gen.clock_divider, opts->gen.scratch2, SZ_D);
-	div_r(code, opts->gen.scratch2, SZ_D);
-	//discard remainder
-	xor_rr(code, RDX, RDX, SZ_D);
-	//set divisor to 10, the period of E
-	mov_ir(code, 10, opts->gen.scratch2, SZ_D);
-	div_r(code, opts->gen.scratch2, SZ_D);
-	//delay will be (9 + 4 + the remainder) * clock_divider
-	//the extra 4 is to cover the idle bus period after the ack
-	add_ir(code, 9 + 4, RDX, SZ_D);
-	mov_ir(code, opts->gen.clock_divider, RAX, SZ_D);
-	mul_r(code, RDX, SZ_D);
-	pop_r(code, RDX);
-	//add saved cycle count to result
-	add_rr(code, opts->gen.scratch1, RAX, SZ_D);
+	cycles(&opts->gen, 4); //base interrupt ack cycle count
+	call(code, opts->gen.save_context);
+	call_args_abi(code, (code_ptr)opts->int_ack, 1, opts->gen.context_reg);
+	mov_rr(code, RAX, opts->gen.context_reg, SZ_PTR);
+	call(code, opts->gen.load_context);
+	cycles(&opts->gen, 4); //idle period after int ack
 
 	//update status register
 	and_irdisp(code, 0x78, opts->gen.context_reg, offsetof(m68k_context, status), SZ_B);
@@ -3154,8 +3193,6 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	//grab saved interrupt number
 	xor_rr(code, opts->gen.scratch1, opts->gen.scratch1, SZ_D);
 	mov_rdispr(code, opts->gen.context_reg, offsetof(m68k_context, int_pending), opts->gen.scratch1, SZ_B);
-	//ack the interrupt (happens earlier on hardware, but shouldn't be an observable difference)
-	mov_rrdisp(code, opts->gen.scratch1, opts->gen.context_reg, offsetof(m68k_context, int_ack), SZ_W);
 	//calculate the vector address
 	shl_ir(code, 2, opts->gen.scratch1, SZ_D);
 	add_ir(code, 0x60, opts->gen.scratch1, SZ_D);
