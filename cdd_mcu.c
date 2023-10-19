@@ -90,22 +90,32 @@ static uint8_t checksum(uint8_t *vbuffer)
 // seek test suggests average somewhere around 54-60 tracks for a long seek, with a peak around 80
 // Sonic CD title screen seems to need a much higher value to get reasonable sync
 #define COARSE_SEEK_TRACKS 60
+static float sectors_per_track_at_pba(uint32_t pba)
+{
+	//TODO: better estimate of sectors per track at current head location
+	float circumference = (MAX_CIRCUMFERENCE-MIN_CIRCUMFERENCE) * ((float)pba) / ((74 * 60 + 41) * SECTORS_PER_SECOND + LEADIN_SECTORS + 22) + MIN_CIRCUMFERENCE;
+	return circumference / SECTOR_LENGTH;
+}
+
 static void handle_seek(cdd_mcu *context)
 {
 	uint32_t old_coarse = context->coarse_seek;
-	if (context->seeking) {
+	if (context->seeking == 2) {
+		context->head_pba = context->seek_pba;
+		context->coarse_seek = 6;
+		context->seeking = 0;
+	} else if (context->seeking) {
 		if (context->seek_pba == context->head_pba) {
 			context->seeking = 0;
 			context->coarse_seek = 0;
-			if (context->status == DS_PAUSE) {
+			if (context->status == DS_PAUSE && !context->pause_pba) {
 				context->pause_pba = context->head_pba;
 			}
 		} else {
-			//TODO: better estimate of sectors per track at current head location
+
 			//TODO: drive will periodically lose tracking when seeking which slows
-			//things down from this ideal speed I'm curently estimating
-			float circumference = (MAX_CIRCUMFERENCE-MIN_CIRCUMFERENCE) * ((float)context->head_pba) / ((74 * 60 + 41) * SECTORS_PER_SECOND + LEADIN_SECTORS + 22) + MIN_CIRCUMFERENCE;
-			float sectors_per_track = circumference / SECTOR_LENGTH;
+			//things down periodically, I estimate the average
+			float sectors_per_track = sectors_per_track_at_pba(context->head_pba);
 			uint32_t max_seek = sectors_per_track * COARSE_SEEK_TRACKS;
 			uint32_t min_seek = sectors_per_track;
 
@@ -147,8 +157,8 @@ static void handle_seek(cdd_mcu *context)
 				context->coarse_seek = 0;
 			}
 		}
-	}
-	if (old_coarse && !context->coarse_seek) {
+	} else {
+		context->coarse_seek = 0;
 	}
 }
 
@@ -191,16 +201,13 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		handle_seek(context);
 		if (!context->seeking) {
 			context->head_pba++;
-			//TODO: better estimate of sectors per track at current head location
-			float circumference = (MAX_CIRCUMFERENCE-MIN_CIRCUMFERENCE) * ((float)context->head_pba) / (74 * 60 * SECTORS_PER_SECOND) + MIN_CIRCUMFERENCE;
-			float sectors_per_track = circumference / SECTOR_LENGTH;
-			//TODO: check the exact behavior during pause on hardware
-			uint32_t diff = sectors_per_track * 0.5f + 0.5f;
-			if (context->head_pba > context->pause_pba + diff) {
-				context->head_pba = context->pause_pba - diff;
-				if (context->head_pba < LEADIN_SECTORS) {
-					context->head_pba = LEADIN_SECTORS;
+			if (context->head_pba > context->pause_pba) {
+				uint32_t back = sectors_per_track_at_pba(context->head_pba) + 0.5f;
+				if (back > context->head_pba) {
+					back = context->head_pba;
 				}
+				context->head_pba -= back;
+				context->coarse_seek = 6;
 			}
 		}
 		if (context->head_pba >= LEADIN_SECTORS) {
@@ -401,12 +408,12 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 	}
 	context->status_buffer.checksum = checksum((uint8_t *)&context->status_buffer);
 	if (context->status_buffer.format != SF_NOTREADY) {
-		printf("CDD Status %X%X.%X%X%X%X%X%X.%X%X\n",
+		printf("CDD Status %X%X.%X%X%X%X%X%X.%X%X (lba %u)\n",
 			context->status_buffer.status, context->status_buffer.format,
 			context->status_buffer.b.time.min_high, context->status_buffer.b.time.min_low,
 			context->status_buffer.b.time.sec_high, context->status_buffer.b.time.sec_low,
 			context->status_buffer.b.time.frame_high, context->status_buffer.b.time.frame_low,
-			context->status_buffer.b.time.flags, context->status_buffer.checksum
+			context->status_buffer.b.time.flags, context->status_buffer.checksum, context->head_pba - LEADIN_SECTORS
 		);
 	}
 }
@@ -528,11 +535,25 @@ static void run_command(cdd_mcu *context)
 			context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].fake_pregap + context->media->tracks[0].start_lba;
 			printf("CDD CMD: PAUSE, seeking to %u\n", context->seek_pba);
 		} else {
-			puts("CDD CMD: PAUSE");
+			uint32_t lba = context->head_pba - LEADIN_SECTORS;
+			uint32_t seconds = lba / 75;
+			uint32_t frames = lba % 75;
+			uint32_t minutes = seconds / 60;
+			seconds = seconds % 60;
+			printf("CDD CMD: PAUSE, current lba %u, MM:SS:FF %02u:%02u:%02u\n", lba, minutes, seconds, frames);
 		}
 		context->status = DS_PAUSE;
-		if (!context->seeking) {
+		if (context->seeking) {
+			//handle_seek will populate this
+			context->pause_pba = 0;
+		} else {
 			context->pause_pba = context->head_pba;
+			uint32_t back = 2.1f * sectors_per_track_at_pba(context->head_pba) + 0.5f;
+			if (back > context->head_pba) {
+				back = context->head_pba;
+			}
+			context->seek_pba = context->head_pba - back;
+			context->seeking = 2;
 		}
 		break;
 	case CMD_PLAY:
@@ -702,6 +723,9 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 		if (context->cycle >= context->next_byte_cycle) {
 			if (context->current_sector_byte >= 0 && (!fader->byte_counter || context->current_sector_byte)) {
 				uint8_t byte = context->media->read(context->media, context->current_sector_byte);
+				if (context->status != DS_PLAY) {
+					byte = 0;
+				}
 				lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), context->current_sector_byte++, byte);
 				cdd_fader_data(fader, gate_array[GAO_CDD_CTRL] & BIT_MUTE ? 0 : byte);
 			} else {
