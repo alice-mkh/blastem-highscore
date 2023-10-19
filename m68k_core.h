@@ -99,7 +99,7 @@ struct m68k_context {
 	m68k_options    *options;
 	void            *system;
 	void            *host_sp_entry;
-	void            *stack_storage[10];
+	void            *stack_storage[12];
 	m68k_breakpoint *breakpoints;
 	uint32_t        num_breakpoints;
 	uint32_t        bp_storage;
