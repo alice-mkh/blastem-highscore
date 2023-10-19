@@ -9,10 +9,13 @@
 uint8_t cdrom_scramble(uint16_t *lsfr, uint8_t data)
 {
 	data ^= *lsfr;
-	uint16_t new_bit = *lsfr;
-	*lsfr >>= 1;
-	new_bit = (new_bit ^ *lsfr) & 1;
-	*lsfr |= new_bit << 14;
+	for (int i = 0; i < 8; i++)
+	{
+		uint16_t new_bit = *lsfr;
+		*lsfr >>= 1;
+		new_bit = (new_bit ^ *lsfr) & 1;
+		*lsfr |= new_bit << 14;
+	}
 	return data;
 }
 
