@@ -674,7 +674,7 @@ static m68k_context *int_ack(m68k_context *context)
 	//printf("acknowledging %d @ %d:%d, vcounter: %d, hslot: %d\n", context->int_ack, context->current_cycle, v_context->cycles, v_context->vcounter, v_context->hslot);
 	vdp_run_context(v_context, context->current_cycle);
 	vdp_int_ack(v_context);
-	
+
 	//the Genesis responds to these exclusively with !VPA which means its a slow
 	//6800 operation. documentation says these can take between 10 and 19 cycles.
 	//actual results measurements seem to suggest it's actually between 9 and 18
@@ -683,7 +683,7 @@ static m68k_context *int_ack(m68k_context *context)
 	//additional variable delay from the use of the 6800 cycle
 	uint32_t cycle_count = context->current_cycle / context->options->gen.clock_divider;
 	context->current_cycle += 5 + (cycle_count % 10);
-	
+
 	return context;
 }
 
@@ -781,12 +781,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 
 	//refresh may have happened while we were waiting on the VDP,
 	//so advance refresh_counter but don't add any delays
-	if (vdp_port >= 4 && vdp_port < 8 && v_context->cycles != before_cycle) {
-		gen->refresh_counter = 0;
-		gen->last_sync_cycle = context->current_cycle;
-	} else {
-		gen_update_refresh_no_wait(context);
-	}
+	gen_update_refresh_no_wait(context);
 	return context;
 }
 
