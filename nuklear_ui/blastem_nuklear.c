@@ -9,6 +9,7 @@
 #include "blastem_nuklear.h"
 #include "nuklear_rawfb.h"
 #include "font.h"
+#include "filechooser.h"
 #include "../render.h"
 #include "../render_sdl.h"
 #include "../util.h"
@@ -77,6 +78,35 @@ static const char *browser_label;
 static const char *browser_setting_path;
 static const char **browser_ext_list;
 static uint32_t browser_num_exts;
+static uint8_t use_native_filechooser;
+
+static void handle_chooser_result(uint8_t normal_open, char *full_path)
+{
+	if(normal_open) {
+		if (current_system) {
+			current_system->next_rom = full_path;
+			current_system->request_exit(current_system);
+		} else {
+			init_system_with_media(full_path, SYSTEM_UNKNOWN);
+			free(full_path);
+		}
+
+		clear_view_stack();
+		show_play_view();
+	} else if (browser_setting_path) {
+		config = tern_insert_path(config, browser_setting_path, (tern_val){.ptrval = full_path}, TVAL_PTR);
+		config_dirty = 1;
+		browser_ext_list = NULL;
+		pop_view();
+	} else {
+		lockon_media(full_path);
+		free(full_path);
+
+		clear_view_stack();
+		show_play_view();
+	}
+}
+
 void view_file_browser(struct nk_context *context, uint8_t normal_open)
 {
 	static dir_entry *entries;
@@ -87,6 +117,18 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 	static uint8_t got_ext_list;
 	if (!browser_cur_path) {
 		get_initial_browse_path(&browser_cur_path);
+	}
+	if (use_native_filechooser && native_filechooser_available()) {
+		char *path = native_filechooser_pick(browser_label, browser_cur_path);
+		if (path) {
+			free(browser_cur_path);
+			browser_cur_path = path_dirname(path);
+			handle_chooser_result(normal_open, path);
+		} else {
+			browser_ext_list = NULL;
+			pop_view();
+		}
+		return;
 	}
 	if (!entries) {
 		entries = get_dir_list(browser_cur_path, &num_entries);
@@ -155,29 +197,7 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 				free_dir_list(entries, num_entries);
 				entries = NULL;
 			} else {
-				if(normal_open) {
-					if (current_system) {
-						current_system->next_rom = full_path;
-						current_system->request_exit(current_system);
-					} else {
-						init_system_with_media(full_path, SYSTEM_UNKNOWN);
-						free(full_path);
-					}
-
-					clear_view_stack();
-					show_play_view();
-				} else if (browser_setting_path) {
-					config = tern_insert_path(config, browser_setting_path, (tern_val){.ptrval = full_path}, TVAL_PTR);
-					config_dirty = 1;
-					browser_ext_list = NULL;
-					pop_view();
-				} else {
-					lockon_media(full_path);
-					free(full_path);
-
-					clear_view_stack();
-					show_play_view();
-				}
+				handle_chooser_result(normal_open, full_path);
 			}
 			selected_entry = -1;
 		}
@@ -2277,10 +2297,15 @@ void view_system_settings(struct nk_context *context)
 		}
 		selected_init = settings_dropdown(context, "Initial RAM Value", ram_inits, num_inits, selected_init, "system\0ram_init\0");
 		settings_toggle(context, "Remember ROM Path", "ui\0remember_path\0", 1);
+		settings_toggle(context, "Use Native File Picker", "ui\0use_native_filechooser\0", 0);
 		settings_toggle(context, "Save config with EXE", "ui\0config_in_exe_dir\0", 0);
 		settings_string(context, "Game Save Path", "ui\0save_path\0", "$USERDATA/blastem/$ROMNAME");
 
 		if (nk_button_label(context, "Back")) {
+			if (config_dirty) {
+				char *unf = tern_find_path(config, "ui\0use_native_filechooser\0", TVAL_PTR).ptrval;
+				use_native_filechooser = unf && !strcmp(unf, "on");
+			}
 			pop_view();
 		}
 		nk_end(context);
@@ -2689,6 +2714,8 @@ void blastem_nuklear_init(uint8_t file_loaded)
 	render_set_ui_render_fun(blastem_nuklear_render);
 	render_set_event_handler(handle_event);
 	render_set_gl_context_handlers(context_destroyed, context_created);
+	char *unf = tern_find_path(config, "ui\0use_native_filechooser\0", TVAL_PTR).ptrval;
+	use_native_filechooser = unf && !strcmp(unf, "on");
 
 	atexit(persist_config_exit);
 

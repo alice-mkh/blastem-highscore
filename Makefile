@@ -15,6 +15,7 @@ GLEW_PREFIX:=glew
 MEM:=mem_win.o
 TERMINAL:=terminal_win.o
 FONT:=nuklear_ui/font_win.o
+CHOOSER:=nuklear_ui/filechooser_win.o
 NET:=net_win.o
 EXE:=.exe
 SO:=dll
@@ -32,7 +33,7 @@ GLUDIR:=x64
 endif
 GLEW32S_LIB:=$(GLEW_PREFIX)/lib/Release/$(GLUDIR)/glew32s.lib
 CFLAGS:=-std=gnu99 -Wreturn-type -Werror=return-type -Werror=implicit-function-declaration -Wpointer-arith -Werror=pointer-arith
-LDFLAGS:=-lm -lmingw32 -lws2_32 -mwindows
+LDFLAGS:=-lm -lmingw32 -lws2_32 -lcomdlg32 -mwindows
 ifneq ($(MAKECMDGOALS),libblastem.dll)
 CFLAGS+= -I"$(SDL2_PREFIX)/include/SDL2" -I"$(GLEW_PREFIX)/include" -DGLEW_STATIC
 LDFLAGS+= $(GLEW32S_LIB) -L"$(SDL2_PREFIX)/lib" -lSDL2main -lSDL2 -lopengl32 -lglu32
@@ -52,6 +53,7 @@ CFLAGS:=-std=gnu99 -Wreturn-type -Werror=return-type -Werror=implicit-function-d
 ifeq ($(OS),Darwin)
 LIBS=sdl2 glew
 FONT:=nuklear_ui/font_mac.o
+CHOOSER:=nuklear_ui/filechooser_null.o
 SO:=dylib
 else
 SO:=so
@@ -71,6 +73,19 @@ LIBS=sdl2 glew gl
 endif #USE_GLES
 endif #USE_FBDEV
 FONT:=nuklear_ui/font.o
+CHOOSER:=nuklear_ui/filechooser_gtk.o
+GTKFLAGS:=$(shell pkg-config --cflags gtk+-3.0 2>/dev/null)
+ifeq ($(GTKFLAGS),)
+GTKFLAGS:=$(shell pkg-config --cflags gtk+-2.0 2>/dev/null)
+ifeq ($(GTKFLAGS),)
+CHOOSER:=nuklear_ui/filechooser_null.o
+endif
+endif
+ifeq ($(GTKFLAGS),)
+else
+EXTRA_NUKLEAR_LDFLAGS:=-ldl
+endif
+CFLAGS+= $(GTKFLAGS)
 endif #Darwin
 
 ifdef HOST_ZLIB
@@ -84,23 +99,24 @@ ifeq ($(OS),Darwin)
 #This should really be based on whether or not the C compiler is clang rather than based on the OS
 CFLAGS+= -Wno-logical-op-parentheses
 endif
+
 ifdef PORTABLE
 ifdef USE_GLES
 ifndef GLES_LIB
 GLES_LIB:=$(shell pkg-config --libs glesv2)
 endif
 LDFLAGS:=-lm $(GLES_LIB)
-else
+else #USE_GLES
 CFLAGS+= -DGLEW_STATIC -Iglew/include
 LDFLAGS:=-lm glew/lib/libGLEW.a -lEGL
-endif
+endif #USE_GLES
 
 ifeq ($(OS),Darwin)
 SDL_INCLUDE_PATH:=Frameworks/SDL2.framework/Headers
 CFLAGS+=  -mmacosx-version-min=10.10
 LDFLAGS+= -FFrameworks -framework SDL2 -framework OpenGL -framework AppKit -mmacosx-version-min=10.10
 FIXUP:=install_name_tool -change @rpath/SDL2.framework/Versions/A/SDL2 @executable_path/Frameworks/SDL2.framework/Versions/A/SDL2
-else
+else #Darwin
 SDL_INCLUDE_PATH:=sdl/include
 LDFLAGS+= -Wl,-rpath='$$ORIGIN/lib' -Llib -lSDL2
 ifndef USE_GLES
@@ -109,7 +125,7 @@ endif
 endif #Darwin
 CFLAGS+= -I$(SDL_INCLUDE_PATH)
 
-else
+else #PORTABLE
 ifeq ($(MAKECMDGOALS),libblastem.$(SO))
 LDFLAGS:=-lm
 else
@@ -180,6 +196,10 @@ endif
 TRANSOBJS=gen.o backend.o $(MEM) arena.o tern.o
 M68KOBJS=68kinst.o disasm.o
 
+ifdef NO_FILE_CHOOSER
+CHOOSER:=nuklear_ui/filechooser_nulll.o
+endif
+
 ifdef NEW_CORE
 Z80OBJS=z80.o z80inst.o
 M68KOBJS+= m68k.o
@@ -198,7 +218,7 @@ endif
 endif
 AUDIOOBJS=ym2612.o psg.o wave.o flac.o vgm.o event_log.o render_audio.o rf5c164.o
 CONFIGOBJS=config.o tern.o util.o paths.o
-NUKLEAROBJS=$(FONT) nuklear_ui/blastem_nuklear.o nuklear_ui/sfnt.o
+NUKLEAROBJS=$(FONT) $(CHOOSER) nuklear_ui/blastem_nuklear.o nuklear_ui/sfnt.o
 RENDEROBJS=ppm.o controller_info.o
 ifdef USE_FBDEV
 RENDEROBJS+= render_fbdev.o
@@ -226,6 +246,7 @@ ifdef NONUKLEAR
 CFLAGS+= -DDISABLE_NUKLEAR
 else
 MAINOBJS+= $(NUKLEAROBJS)
+LDFLAGS+=$(EXTRA_NUKLEAR_LDFLAGS)
 endif
 
 ifeq ($(CPU),x86_64)
