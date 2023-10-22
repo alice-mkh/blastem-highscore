@@ -38,15 +38,8 @@ typedef struct {
 static gtk* check_init_gtk(void)
 {
 	static const char *so_paths[] = {
-#ifdef X86_64
-		"/usr/lib/x86_64-linux-gnu/libgtk-3.so.0",
-		"/usr/lib/x86_64-linux-gnu/libgtk-x11-2.0.so.0",
-#elif X86_32
-		"/usr/lib/i386-linux-gnu/libgtk-3.so.0",
-		"/usr/lib/i386-linux-gnu/libgtk-x11-2.0.so.0",
-#else
-	//TODO: what are these paths on ARM?
-#endif
+		"libgtk-3.so.0",
+		"libgtk-x11-2.0.so.0",
 	};
 	static gtk *funcs;
 	static uint8_t already_init;
