@@ -925,8 +925,6 @@ static void read_sprite_x_mode4(vdp_context * context)
 	}
 }
 
-#define CRAM_BITS 0xEEE
-#define VSRAM_BITS 0x7FF
 #define VSRAM_DIRTY_BITS 0xF800
 
 //rough estimate of slot number at which border display starts
@@ -4602,6 +4600,75 @@ uint16_t vdp_hv_counter_read(vdp_context * context)
 	return hv;
 }
 
+void vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
+{
+	uint8_t mode_5 = context->regs[REG_MODE_2] & BIT_MODE_5;
+	if (reg < (mode_5 ? VDP_REGS : 0xB)) {
+		//printf("register %d set to %X\n", reg, value & 0xFF);
+		if (reg == REG_MODE_1 && (value & BIT_HVC_LATCH) && !(context->regs[reg] & BIT_HVC_LATCH)) {
+			vdp_latch_hv(context);
+		} else if (reg == REG_BG_COLOR) {
+			value &= 0x3F;
+		} else if (reg == REG_MODE_2 && context->type != VDP_GENESIS) {
+			// only the Genesis VDP does anything with this bit
+			// so just clear it to prevent Mode 5 selection if we're not emulating that chip
+			value &= ~BIT_MODE_5;
+		}
+		/*if (reg == REG_MODE_4 && ((value ^ context->regs[reg]) & BIT_H40)) {
+			printf("Mode changed from H%d to H%d @ %d, frame: %d\n", context->regs[reg] & BIT_H40 ? 40 : 32, value & BIT_H40 ? 40 : 32, context->cycles, context->frame);
+		}*/
+		uint8_t buffer[2] = {reg, value};
+		event_log(EVENT_VDP_REG, context->cycles, sizeof(buffer), buffer);
+		context->regs[reg] = value;
+		if (reg == REG_MODE_4) {
+			context->double_res = (value & (BIT_INTERLACE | BIT_DOUBLE_RES)) == (BIT_INTERLACE | BIT_DOUBLE_RES);
+			if (!context->double_res) {
+				context->flags2 &= ~FLAG2_EVEN_FIELD;
+			}
+		}
+		if (reg == REG_MODE_1 || reg == REG_MODE_2 || reg == REG_MODE_4) {
+			update_video_params(context);
+		}
+	} else if (reg == REG_KMOD_CTRL) {
+		if (!(value & 0xFF)) {
+			context->system->enter_debugger = 1;
+		}
+	} else if (reg == REG_KMOD_MSG) {
+		char c = value;
+		if (c) {
+			context->kmod_buffer_length++;
+			if ((context->kmod_buffer_length + 1) > context->kmod_buffer_storage) {
+				context->kmod_buffer_storage = context->kmod_buffer_length ? 128 : context->kmod_buffer_length * 2;
+				context->kmod_msg_buffer = realloc(context->kmod_msg_buffer, context->kmod_buffer_storage);
+			}
+			context->kmod_msg_buffer[context->kmod_buffer_length - 1] = c;
+		} else if (context->kmod_buffer_length) {
+			context->kmod_msg_buffer[context->kmod_buffer_length] = 0;
+			if (is_stdout_enabled()) {
+				init_terminal();
+				printf("KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
+			} else {
+				// GDB remote debugging is enabled, use stderr instead
+				fprintf(stderr, "KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
+			}
+			context->kmod_buffer_length = 0;
+		}
+	} else if (reg == REG_KMOD_TIMER) {
+		if (!(value & 0x80)) {
+			if (is_stdout_enabled()) {
+				init_terminal();
+				printf("KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
+			} else {
+				// GDB remote debugging is enabled, use stderr instead
+				fprintf(stderr, "KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
+			}
+		}
+		if (value & 0xC0) {
+			context->timer_start_cycle = context->cycles;
+		}
+	}
+}
+
 int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_cycle)
 {
 	//printf("control port write: %X at %d\n", value, context->cycles);
@@ -4655,71 +4722,8 @@ int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_c
 		context->cd = (context->cd & 0x3C) | (value >> 14);
 		if ((value & 0xC000) == 0x8000) {
 			//Register write
-			uint8_t reg = (value >> 8) & 0x1F;
-			if (reg < (mode_5 ? VDP_REGS : 0xB)) {
-				//printf("register %d set to %X\n", reg, value & 0xFF);
-				if (reg == REG_MODE_1 && (value & BIT_HVC_LATCH) && !(context->regs[reg] & BIT_HVC_LATCH)) {
-					vdp_latch_hv(context);
-				} else if (reg == REG_BG_COLOR) {
-					value &= 0x3F;
-				} else if (reg == REG_MODE_2 && context->type != VDP_GENESIS) {
-					// only the Genesis VDP does anything with this bit
-					// so just clear it to prevent Mode 5 selection if we're not emulating that chip
-					value &= ~BIT_MODE_5;
-				}
-				/*if (reg == REG_MODE_4 && ((value ^ context->regs[reg]) & BIT_H40)) {
-					printf("Mode changed from H%d to H%d @ %d, frame: %d\n", context->regs[reg] & BIT_H40 ? 40 : 32, value & BIT_H40 ? 40 : 32, context->cycles, context->frame);
-				}*/
-				uint8_t buffer[2] = {reg, value};
-				event_log(EVENT_VDP_REG, context->cycles, sizeof(buffer), buffer);
-				context->regs[reg] = value;
-				if (reg == REG_MODE_4) {
-					context->double_res = (value & (BIT_INTERLACE | BIT_DOUBLE_RES)) == (BIT_INTERLACE | BIT_DOUBLE_RES);
-					if (!context->double_res) {
-						context->flags2 &= ~FLAG2_EVEN_FIELD;
-					}
-				}
-				if (reg == REG_MODE_1 || reg == REG_MODE_2 || reg == REG_MODE_4) {
-					update_video_params(context);
-				}
-			} else if (reg == REG_KMOD_CTRL) {
-				if (!(value & 0xFF)) {
-					context->system->enter_debugger = 1;
-				}
-			} else if (reg == REG_KMOD_MSG) {
-				char c = value;
-				if (c) {
-					context->kmod_buffer_length++;
-					if ((context->kmod_buffer_length + 1) > context->kmod_buffer_storage) {
-						context->kmod_buffer_storage = context->kmod_buffer_length ? 128 : context->kmod_buffer_length * 2;
-						context->kmod_msg_buffer = realloc(context->kmod_msg_buffer, context->kmod_buffer_storage);
-					}
-					context->kmod_msg_buffer[context->kmod_buffer_length - 1] = c;
-				} else if (context->kmod_buffer_length) {
-					context->kmod_msg_buffer[context->kmod_buffer_length] = 0;
-					if (is_stdout_enabled()) {
-						init_terminal();
-						printf("KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
-					} else {
-						// GDB remote debugging is enabled, use stderr instead
-						fprintf(stderr, "KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
-					}
-					context->kmod_buffer_length = 0;
-				}
-			} else if (reg == REG_KMOD_TIMER) {
-				if (!(value & 0x80)) {
-					if (is_stdout_enabled()) {
-						init_terminal();
-						printf("KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
-					} else {
-						// GDB remote debugging is enabled, use stderr instead
-						fprintf(stderr, "KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
-					}
-				}
-				if (value & 0xC0) {
-					context->timer_start_cycle = context->cycles;
-				}
-			}
+			uint16_t reg = (value >> 8) & 0x1F;
+			vdp_reg_write(context, reg, value);
 		} else if (mode_5) {
 			context->flags |= FLAG_PENDING;
 			//Should these be taken care of here or after the second write?

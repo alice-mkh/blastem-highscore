@@ -167,11 +167,14 @@ static token parse_token(char *start, char **end)
 		};
 	}
 	*end = start + 1;
+	token_type type = TOKEN_NAME;
 	while (**end && !isspace(**end))
 	{
 		uint8_t done = 0;
 		switch (**end)
 		{
+		case '[':
+			type = TOKEN_ARRAY;
 		case '+':
 		case '-':
 		case '*':
@@ -185,7 +188,6 @@ static token parse_token(char *start, char **end)
 		case '>':
 		case '<':
 		case '.':
-		case '[':
 		case ']':
 		case '(':
 		case ')':
@@ -202,7 +204,7 @@ static token parse_token(char *start, char **end)
 	memcpy(name, start, *end - start);
 	name[*end-start] = 0;
 	return (token) {
-		.type = TOKEN_NAME,
+		.type = type,
 		.v = {
 			.str = name
 		}
@@ -249,9 +251,18 @@ static expr *parse_scalar(char *start, char **end)
 		*end = after_first;
 		return ret;
 	}
-	if (first.type == TOKEN_LBRACKET) {
+	if (first.type == TOKEN_LBRACKET || first.type == TOKEN_ARRAY) {
 		expr *ret = calloc(1, sizeof(expr));
 		ret->type = EXPR_MEM;
+		if (first.type == TOKEN_ARRAY) {
+			//current token is the array name
+			//consume the bracket token
+			parse_token(after_first, &after_first);
+			ret->right = calloc(1, sizeof(expr));
+			ret->right->type = EXPR_SCALAR;
+			ret->right->op = first;
+		}
+
 		ret->left = parse_expression(after_first, end);
 		if (!ret->left) {
 			fprintf(stderr, "Expression expected after `[`\n");
@@ -396,9 +407,18 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 		ret->left = target;
 		return ret;
 	}
-	if (first.type == TOKEN_LBRACKET) {
+	if (first.type == TOKEN_LBRACKET || first.type == TOKEN_ARRAY) {
 		expr *ret = calloc(1, sizeof(expr));
 		ret->type = EXPR_MEM;
+		if (first.type == TOKEN_ARRAY) {
+			//current token is the array name
+			//consume the bracket token
+			parse_token(after_first, &after_first);
+			ret->right = calloc(1, sizeof(expr));
+			ret->right->type = EXPR_SCALAR;
+			ret->right->op = first;
+		}
+
 		ret->left = parse_expression(after_first, end);
 		if (!ret->left) {
 			fprintf(stderr, "Expression expected after `[`\n");
@@ -512,9 +532,18 @@ static expr *parse_expression(char *start, char **end)
 		ret->left = target;
 		return ret;
 	}
-	if (first.type == TOKEN_LBRACKET) {
+	if (first.type == TOKEN_LBRACKET || first.type == TOKEN_ARRAY) {
 		expr *ret = calloc(1, sizeof(expr));
 		ret->type = EXPR_MEM;
+		if (first.type == TOKEN_ARRAY) {
+			//current token is the array name
+			//consume the bracket token
+			parse_token(after_first, &after_first);
+			ret->right = calloc(1, sizeof(expr));
+			ret->right->type = EXPR_SCALAR;
+			ret->right->op = first;
+		}
+
 		ret->left = parse_expression(after_first, end);
 		if (!ret->left) {
 			fprintf(stderr, "Expression expected after `[`\n");
@@ -622,6 +651,15 @@ static expr *parse_expression(char *start, char **end)
 	}
 }
 
+static debug_array* full_array_resolve(debug_root *root, const char *name)
+{
+	debug_array *ret = root->array_resolve(root, name);
+	if (!ret) {
+		ret = tern_find_ptr(root->arrays, name);
+	}
+	return ret;
+}
+
 uint8_t eval_expr(debug_root *root, expr *e, uint32_t *out)
 {
 	uint32_t right;
@@ -725,6 +763,14 @@ uint8_t eval_expr(debug_root *root, expr *e, uint32_t *out)
 	case EXPR_MEM:
 		if (!eval_expr(root, e->left, out)) {
 			return 0;
+		}
+		if (e->right) {
+			debug_array *array = full_array_resolve(root, e->right->op.v.str);
+			if (!array || *out >= array->size) {
+				return 0;
+			}
+			*out = array->get(root, array, *out);
+			return 1;
 		}
 		return root->read_mem(root, out, e->op.v.op[0]);
 	default:
@@ -919,6 +965,127 @@ static uint8_t resolve_genesis(debug_root *root, const char *name, uint32_t *out
 		return 1;
 	}
 	return 0;
+}
+
+static uint32_t debug_vram_get(debug_root *root, debug_array *array, uint32_t index)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	return gen->vdp->vdpmem[index];
+}
+
+static void debug_vram_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	gen->vdp->vdpmem[index] = value;
+}
+
+static uint32_t debug_vsram_get(debug_root *root, debug_array *array, uint32_t index)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	return gen->vdp->vsram[index] & VSRAM_BITS;
+}
+
+static void debug_vsram_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	gen->vdp->vsram[index] = value;
+}
+
+static uint32_t debug_cram_get(debug_root *root, debug_array *array, uint32_t index)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	return gen->vdp->cram[index] & CRAM_BITS;
+}
+
+static void debug_cram_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	gen->vdp->cram[index] = value;
+}
+
+static uint32_t debug_vreg_get(debug_root *root, debug_array *array, uint32_t index)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	return gen->vdp->regs[index];
+}
+
+static void debug_vreg_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	vdp_reg_write(gen->vdp, index, value);
+}
+
+static debug_array* resolve_vdp_array(debug_root *root, const char *name)
+{
+	static debug_array vram = {
+		.get = debug_vram_get, .set = debug_vram_set,
+		.size = VRAM_SIZE, .storage = VRAM_SIZE
+	};
+	static debug_array vsram = {
+		.get = debug_vsram_get, .set = debug_vsram_set,
+	};
+	static debug_array cram = {
+		.get = debug_cram_get, .set = debug_cram_set,
+		.storage = CRAM_SIZE, .size = CRAM_SIZE
+	};
+	static debug_array regs = {
+		.get = debug_vreg_get, .set = debug_vreg_set,
+		.storage = VDP_REGS, .size = VDP_REGS
+	};
+	if (!strcasecmp(name, "vram")) {
+		return &vram;
+	}
+	if (!strcasecmp(name, "vsram")) {
+		m68k_context *m68k = root->cpu_context;
+		genesis_context *gen = m68k->system;
+		vsram.storage = vsram.size = gen->vdp->vsram_size;
+		return &vsram;
+	}
+	if (!strcasecmp(name, "cram")) {
+		return &cram;
+	}
+	if (!strcasecmp(name, "reg")) {
+		return &regs;
+	}
+	return NULL;
+}
+
+static debug_array* resolve_genesis_array(debug_root *root, const char *name)
+{
+	for (const char *cur = name; *cur; ++cur)
+	{
+		if (*cur == ':') {
+			if (cur - name == 3 && !memcmp(name, "vdp", 3)) {
+				return resolve_vdp_array(root, cur + 1);
+			} /*else if (cur - name == 3 && !memcmp(name, "sub", 3)) {
+				m68k_context *m68k = root->cpu_context;
+				genesis_context *gen = m68k->system;
+				if (gen->expansion) {
+					segacd_context *cd = gen->expansion;
+					root = find_m68k_root(cd->m68k);
+					return root->resolve(root, cur + 1, out);
+				} else {
+					return NULL;
+				}
+			}*/ else {
+				return NULL;
+			}
+		}
+	}
+	return NULL;
+}
+
+static debug_array* resolve_null_array(debug_root *root, const char *name)
+{
+	return NULL;
 }
 
 void ambiguous_iter(char *key, tern_val val, uint8_t valtype, void *data)
@@ -1615,6 +1782,7 @@ static uint8_t cmd_set(debug_root *root, parsed_command *cmd)
 	char *name = NULL;
 	char size = 0;
 	uint32_t address;
+	debug_array *array = NULL;
 	switch (cmd->args[0].parsed->type)
 	{
 	case EXPR_SCALAR:
@@ -1639,6 +1807,21 @@ static uint8_t cmd_set(debug_root *root, parsed_command *cmd)
 		if (!eval_expr(root, cmd->args[0].parsed->left, &address)) {
 			fprintf(stderr, "Failed to eval %s\n", cmd->args[0].raw);
 			return 1;
+		}
+		if (cmd->args[0].parsed->right) {
+			array = full_array_resolve(root, cmd->args[0].parsed->right->op.v.str);
+			if (!array) {
+				fprintf(stderr, "Failed to resolve array %s\n", cmd->args[0].parsed->right->op.v.str);
+				return 1;
+			}
+			if (!array->set) {
+				fprintf(stderr, "Array %s is read-only\n", cmd->args[0].parsed->right->op.v.str);
+				return 1;
+			}
+			if (address >= array->size) {
+				fprintf(stderr, "Address %X is out of bounds for array %s\n", address, cmd->args[0].parsed->right->op.v.str);
+				return 1;
+			}
 		}
 		break;
 	default:
@@ -1675,6 +1858,8 @@ static uint8_t cmd_set(debug_root *root, parsed_command *cmd)
 				fprintf(stderr, "Failed to set %s\n", name);
 			}
 		}
+	} else if (array) {
+		array->set(root, array, address, value);
 	} else if (!root->write_mem(root, address, value, size)) {
 		fprintf(stderr, "Failed to write to address %X\n", address);
 	}
@@ -1696,6 +1881,76 @@ static uint8_t cmd_variable(debug_root *root, parsed_command *cmd)
 		value = cmd->args[1].value;
 	}
 	root->variables = tern_insert_int(root->variables, cmd->args[0].parsed->op.v.str, value);
+	return 1;
+}
+
+static uint32_t user_array_get(debug_root *root, debug_array *array, uint32_t index)
+{
+	return array->data[index];
+}
+
+static void user_array_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
+{
+	array->data[index] = value;
+}
+
+static void user_array_append(debug_root *root, debug_array *array, uint32_t value)
+{
+	if (array->size == array->storage) {
+		array->storage *= 2;
+		array->data = realloc(array->data, sizeof(uint32_t) * array->storage);
+	}
+	array->data[array->size++] = value;
+}
+
+static uint8_t cmd_array(debug_root *root, parsed_command *cmd)
+{
+	if (cmd->args[0].parsed->type != EXPR_SCALAR || cmd->args[0].parsed->op.type != TOKEN_NAME) {
+		fprintf(stderr, "First argument to array must be a name, got %s\n", expr_type_names[cmd->args[0].parsed->type]);
+		return 1;
+	}
+	debug_array *array = tern_find_ptr(root->arrays, cmd->args[0].parsed->op.v.str);
+	if (!array) {
+		array = calloc(1, sizeof(debug_array));
+		array->get = user_array_get;
+		array->set = user_array_set;
+		array->append = user_array_append;
+		array->storage = cmd->num_args > 1 ? cmd->num_args - 1 : 4;
+		array->data = calloc(array->storage, sizeof(uint32_t));
+		root->arrays = tern_insert_ptr(root->arrays, cmd->args[0].parsed->op.v.str, array);
+	}
+	array->size = cmd->num_args - 1;
+	for (uint32_t i = 1; i < cmd->num_args; i++)
+	{
+		if (!eval_expr(root, cmd->args[i].parsed, &cmd->args[i].value)) {
+			fprintf(stderr, "Failed to eval %s\n", cmd->args[i].raw);
+			return 1;
+		}
+		array->set(root, array, i - 1, cmd->args[i].value);
+	}
+	return 1;
+}
+
+static uint8_t cmd_append(debug_root *root, parsed_command *cmd)
+{
+	if (cmd->args[0].parsed->type != EXPR_SCALAR || cmd->args[0].parsed->op.type != TOKEN_NAME) {
+		fprintf(stderr, "First argument to append must be a name, got %s\n", expr_type_names[cmd->args[0].parsed->type]);
+		return 1;
+	}
+	debug_array *array = full_array_resolve(root, cmd->args[0].parsed->op.v.str);
+	if (!array) {
+		fprintf(stderr, "Failed to resolve array %s\n", cmd->args[0].parsed->op.v.str);
+		return 1;
+	}
+	if (!array->append) {
+		fprintf(stderr, "Array %s doesn't support appending\n", cmd->args[0].parsed->op.v.str);
+		return 1;
+	}
+	if (!eval_expr(root, cmd->args[1].parsed, &cmd->args[1].value)) {
+		fprintf(stderr, "Failed to eval %s\n", cmd->args[1].raw);
+		return 1;
+	}
+	array->append(root, array, cmd->args[1].value);
 	return 1;
 }
 
@@ -2227,6 +2482,28 @@ command_def common_commands[] = {
 		.desc = "Create a new variable called NAME and set it to VALUE or 0 if no value provided",
 		.impl = cmd_variable,
 		.min_args = 1,
+		.max_args = 2,
+		.skip_eval = 1
+	},
+	{
+		.names = (const char *[]){
+			"array", NULL
+		},
+		.usage = "array NAME [VALUE...]",
+		.desc = "Create a new array called NAME if it doesn't already exist. The array is initialized with the remaining parameters",
+		.impl = cmd_array,
+		.min_args = 1,
+		.max_args = -1,
+		.skip_eval = 1
+	},
+	{
+		.names = (const char *[]){
+			"append", NULL
+		},
+		.usage = "append NAME VALUE",
+		.desc = "Increase the size of array NAME by 1 and set the last element to VALUE",
+		.impl = cmd_append,
+		.min_args = 2,
 		.max_args = 2,
 		.skip_eval = 1
 	},
@@ -2867,6 +3144,7 @@ debug_root *find_m68k_root(m68k_context *context)
 			//check if this is the main CPU
 			if (context->system == current_system) {
 				root->resolve = resolve_genesis;
+				root->array_resolve = resolve_genesis_array;
 				add_commands(root, genesis_commands, NUM_GENESIS);
 				if (current_system->type == SYSTEM_SEGACD) {
 					add_segacd_maincpu_labels(root->disasm);
@@ -2879,6 +3157,7 @@ debug_root *find_m68k_root(m68k_context *context)
 			}
 		default:
 			root->resolve = resolve_m68k;
+			root->array_resolve = resolve_null_array;
 		}
 		tern_foreach(root->disasm->labels, symbol_map, root);
 	}
@@ -3397,6 +3676,7 @@ debug_root *find_z80_root(z80_context *context)
 		default:
 			root->resolve = resolve_z80;
 		}
+		root->array_resolve = resolve_null_array;
 		root->read_mem = read_z80;
 		root->write_mem = write_z80;
 		root->set = set_z80;

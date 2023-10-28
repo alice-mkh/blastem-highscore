@@ -32,6 +32,9 @@
 #define MAX_SPRITES_FRAME_H32 64
 #define SAT_CACHE_SIZE (MAX_SPRITES_FRAME * 4)
 
+#define CRAM_BITS 0xEEE
+#define VSRAM_BITS 0x7FF
+
 #define FBUF_SHADOW 0x0001
 #define FBUF_HILIGHT 0x0010
 #define FBUF_MODE4 0x0100
@@ -318,5 +321,6 @@ uint16_t read_dma_value(uint32_t address);
 void vdp_dma_started(void);
 void vdp_replay_event(vdp_context *context, uint8_t event, event_reader *reader);
 uint16_t vdp_status(vdp_context *context);
+void vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value);
 
 #endif //VDP_H_

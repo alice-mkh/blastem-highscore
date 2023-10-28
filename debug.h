@@ -15,6 +15,7 @@ typedef enum {
 	TOKEN_NONE,
 	TOKEN_NUM,
 	TOKEN_NAME,
+	TOKEN_ARRAY,
 	TOKEN_OPER,
 	TOKEN_SIZE,
 	TOKEN_LBRACKET,
@@ -106,7 +107,22 @@ typedef struct bp_def {
 	uint32_t       index;
 } bp_def;
 
+typedef struct debug_array debug_array;
+typedef uint32_t (*debug_array_get)(debug_root *root, debug_array *array, uint32_t index);
+typedef void (*debug_array_set)(debug_root *root, debug_array *array, uint32_t index, uint32_t value);
+typedef void (*debug_array_append)(debug_root *root, debug_array *array, uint32_t value);
+
+struct debug_array{
+	debug_array_get    get;
+	debug_array_set    set;
+	debug_array_append append;
+	uint32_t           *data;
+	uint32_t           size;
+	uint32_t           storage;
+};
+
 typedef uint8_t (*resolver)(debug_root *root, const char *name, uint32_t *out);
+typedef debug_array* (*array_resolver)(debug_root *root, const char *name);
 typedef uint8_t (*setter)(debug_root *root, const char *name, uint32_t value);
 typedef uint8_t (*reader)(debug_root *root, uint32_t *out, char size);
 typedef uint8_t (*writer)(debug_root *root, uint32_t address, uint32_t value, char size);
@@ -118,8 +134,10 @@ struct debug_root {
 	tern_node      *commands;
 	tern_node      *symbols;
 	tern_node      *variables;
+	tern_node      *arrays;
 	disasm_context *disasm;
 	resolver       resolve;
+	array_resolver array_resolve;
 	reader         read_mem;
 	setter         set;
 	writer         write_mem;
