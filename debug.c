@@ -185,6 +185,10 @@ static token parse_token(char *start, char **end)
 		case '>':
 		case '<':
 		case '.':
+		case '[':
+		case ']':
+		case '(':
+		case ')':
 			done = 1;
 			break;
 		}
