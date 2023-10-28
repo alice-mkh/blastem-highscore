@@ -1058,6 +1058,133 @@ static debug_array* resolve_vdp_array(debug_root *root, const char *name)
 	return NULL;
 }
 
+static uint32_t debug_part1_get(debug_root *root, debug_array *array, uint32_t index)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	return gen->ym->part1_regs[index];
+}
+
+static void debug_part1_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	uint8_t old_part = gen->ym->selected_part;
+	uint8_t old_reg = gen->ym->selected_reg;
+	gen->ym->selected_part = 0;
+	gen->ym->selected_reg = index;
+	ym_data_write(gen->ym, value);
+	gen->ym->selected_part = old_part;
+	gen->ym->selected_reg = old_reg;
+}
+
+static uint32_t debug_part2_get(debug_root *root, debug_array *array, uint32_t index)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	return gen->ym->part2_regs[index];
+}
+
+static void debug_part2_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	uint8_t old_part = gen->ym->selected_part;
+	uint8_t old_reg = gen->ym->selected_reg;
+	gen->ym->selected_part = 1;
+	gen->ym->selected_reg = index;
+	ym_data_write(gen->ym, value);
+	gen->ym->selected_part = old_part;
+	gen->ym->selected_reg = old_reg;
+}
+
+static debug_array* resolve_ym2612_array(debug_root *root, const char *name)
+{
+	static debug_array part1 = {
+		.get = debug_part1_get, .set = debug_part1_set,
+		.storage = YM_REG_END, .size = YM_REG_END
+	};
+	static debug_array part2 = {
+		.get = debug_part2_get, .set = debug_part2_set,
+		.storage = YM_REG_END, .size = YM_REG_END
+	};
+	if (!strcasecmp(name, "part1")) {
+		return &part1;
+	}
+	if (!strcasecmp(name, "part2")) {
+		return &part2;
+	}
+	return NULL;
+}
+
+static uint32_t debug_psgfreq_get(debug_root *root, debug_array *array, uint32_t index)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	return gen->psg->counter_load[index];
+}
+
+static void debug_psgfreq_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	gen->psg->counter_load[index] = value;
+}
+
+static uint32_t debug_psgcount_get(debug_root *root, debug_array *array, uint32_t index)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	return gen->psg->counters[index];
+}
+
+static void debug_psgcount_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	gen->psg->counters[index] = value;
+}
+
+static uint32_t debug_psgvol_get(debug_root *root, debug_array *array, uint32_t index)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	return gen->psg->volume[index];
+}
+
+static void debug_psgvol_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	gen->psg->volume[index] = value;
+}
+
+static debug_array* resolve_psg_array(debug_root *root, const char *name)
+{
+	static debug_array freq = {
+		.get = debug_psgfreq_get, .set = debug_psgfreq_set,
+		.storage = 4, .size = 4
+	};
+	static debug_array counter = {
+		.get = debug_psgcount_get, .set = debug_psgcount_set,
+		.storage = 4, .size = 4
+	};
+	static debug_array volume = {
+		.get = debug_psgvol_get, .set = debug_psgvol_set,
+		.storage = 4, .size = 4
+	};
+	if (!strcasecmp("frequency", name)) {
+		return &freq;
+	}
+	if (!strcasecmp("counter", name)) {
+		return &counter;
+	}
+	if (!strcasecmp("volume", name)) {
+		return &volume;
+	}
+	return NULL;
+}
+
 static debug_array* resolve_genesis_array(debug_root *root, const char *name)
 {
 	for (const char *cur = name; *cur; ++cur)
@@ -1065,6 +1192,10 @@ static debug_array* resolve_genesis_array(debug_root *root, const char *name)
 		if (*cur == ':') {
 			if (cur - name == 3 && !memcmp(name, "vdp", 3)) {
 				return resolve_vdp_array(root, cur + 1);
+			} else if (cur - name == 2 && !memcmp(name, "ym", 2)) {
+				return resolve_ym2612_array(root, cur + 1);
+			} else if (cur - name == 3 && !memcmp(name, "psg", 3)) {
+				return resolve_psg_array(root, cur + 1);
 			} /*else if (cur - name == 3 && !memcmp(name, "sub", 3)) {
 				m68k_context *m68k = root->cpu_context;
 				genesis_context *gen = m68k->system;
