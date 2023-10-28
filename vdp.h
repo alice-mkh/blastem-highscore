@@ -172,7 +172,15 @@ enum {
 	VDP_TMS9918A
 };
 
+typedef struct vdp_context vdp_context;
+typedef void (*vdp_hook_fun)(vdp_context *);
+
 typedef struct {
+	vdp_hook_fun handler;
+	void         *data;
+} vdp_hook;
+
+struct vdp_context {
 	system_header  *system;
 	//pointer to current line in framebuffer
 	uint32_t       *output;
@@ -181,6 +189,9 @@ typedef struct {
 	uint8_t        *done_composite;
 	uint32_t       *debug_fbs[NUM_DEBUG_TYPES];
 	char           *kmod_msg_buffer;
+	vdp_hook       dma_hook;
+	vdp_hook       vdpreg_hook;
+	vdp_hook       data_hook;
 	uint32_t       kmod_buffer_storage;
 	uint32_t       kmod_buffer_length;
 	uint32_t       timer_start_cycle;
@@ -258,7 +269,7 @@ typedef struct {
 	uint8_t        cram_latch;
 	int32_t        color_map[1 << 12];
 	uint8_t        vdpmem[];
-} vdp_context;
+};
 
 
 
@@ -306,5 +317,6 @@ void vdp_inc_debug_mode(vdp_context *context);
 uint16_t read_dma_value(uint32_t address);
 void vdp_dma_started(void);
 void vdp_replay_event(vdp_context *context, uint8_t event, event_reader *reader);
+uint16_t vdp_status(vdp_context *context);
 
 #endif //VDP_H_

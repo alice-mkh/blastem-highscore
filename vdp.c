@@ -716,13 +716,10 @@ void vdp_print_reg_explain(vdp_context * context)
 	       context->address, context->cd, cd_name(context->cd),
 		   (context->flags & FLAG_PENDING) ? "word" : (context->flags2 & FLAG2_BYTE_PENDING) ? "byte" : "none",
 		   context->vcounter, context->hslot*2, (context->flags2 & FLAG2_VINT_PENDING) ? "true" : "false",
-		   (context->flags2 & FLAG2_HINT_PENDING) ? "true" : "false", vdp_control_port_read(context));
+		   (context->flags2 & FLAG2_HINT_PENDING) ? "true" : "false", vdp_status(context));
 	printf("\nDebug Register: %X | Output disabled: %s, Force Layer: %d\n", context->test_port,
 		(context->test_port & TEST_BIT_DISABLE)  ? "true" : "false", context->test_port >> 7 & 3
 	);
-	//restore flags as calling vdp_control_port_read can change them
-	context->flags = old_flags;
-	context->flags2 = old_flags2;
 }
 
 static uint8_t is_active(vdp_context *context)
@@ -4831,10 +4828,8 @@ void vdp_test_port_write(vdp_context * context, uint16_t value)
 	context->test_port = value;
 }
 
-uint16_t vdp_control_port_read(vdp_context * context)
+uint16_t vdp_status(vdp_context *context)
 {
-	context->flags &= ~FLAG_PENDING;
-	context->flags2 &= ~FLAG2_BYTE_PENDING;
 	//Bits 15-10 are not fixed like Charles MacDonald's doc suggests, but instead open bus values that reflect 68K prefetch
 	uint16_t value = context->system->get_open_bus_value(context->system) & 0xFC00;
 	if (context->fifo_read < 0) {
@@ -4848,11 +4843,9 @@ uint16_t vdp_control_port_read(vdp_context * context)
 	}
 	if (context->flags & FLAG_DOT_OFLOW) {
 		value |= 0x40;
-		context->flags &= ~FLAG_DOT_OFLOW;
 	}
 	if (context->flags2 & FLAG2_SPRITE_COLLIDE) {
 		value |= 0x20;
-		context->flags2 &= ~FLAG2_SPRITE_COLLIDE;
 	}
 	if ((context->regs[REG_MODE_4] & BIT_INTERLACE) && !(context->flags2 & FLAG2_EVEN_FIELD)) {
 		value |= 0x10;
@@ -4876,6 +4869,14 @@ uint16_t vdp_control_port_read(vdp_context * context)
 	if (context->flags2 & FLAG2_REGION_PAL) {
 		value |= 0x1;
 	}
+	return value;
+}
+
+uint16_t vdp_control_port_read(vdp_context * context)
+{
+	uint16_t value = vdp_status(context);
+	context->flags &= ~(FLAG_DOT_OFLOW|FLAG_PENDING);
+	context->flags2 &= ~(FLAG2_SPRITE_COLLIDE|FLAG2_BYTE_PENDING);
 	//printf("status read at cycle %d returned %X\n", context->cycles, value);
 	return value;
 }

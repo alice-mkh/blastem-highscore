@@ -633,6 +633,10 @@ uint8_t eval_expr(debug_root *root, expr *e, uint32_t *out)
 				return 1;
 			}
 			tern_val v;
+			if (tern_find(root->variables, e->op.v.str, &v)) {
+				*out = v.intval;
+				return 1;
+			}
 			if (tern_find(root->symbols, e->op.v.str, &v)) {
 				*out = v.intval;
 				return 1;
@@ -825,6 +829,8 @@ static uint8_t resolve_m68k(debug_root *root, const char *name, uint32_t *out)
 		*out = context->current_cycle;
 	} else if (!strcasecmp(name, "pc")) {
 		*out = root->address;
+	} else if (!strcasecmp(name, "sp")) {
+		*out = context->aregs[7];
 	} else if (!strcasecmp(name, "usp")) {
 		*out = context->status & 0x20 ? context->aregs[8] : context->aregs[7];
 	} else if (!strcasecmp(name, "ssp")) {
@@ -847,6 +853,8 @@ static uint8_t set_m68k(debug_root *root, const char *name, uint32_t value)
 		for (int flag = 0; flag < 5; flag++) {
 			context->flags[flag] = (value & (1 << (4 - flag))) != 0;
 		}
+	} else if (!strcasecmp(name, "sp")) {
+		context->aregs[7] = value;
 	} else if (!strcasecmp(name, "usp")) {
 		context->aregs[context->status & 0x20 ? 8 : 7] = value;
 	} else if (!strcasecmp(name, "ssp")) {
@@ -857,8 +865,50 @@ static uint8_t set_m68k(debug_root *root, const char *name, uint32_t value)
 	return 1;
 }
 
+static uint8_t resolve_vdp(debug_root *root, const char *name, uint32_t *out)
+{
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	vdp_context *vdp = gen->vdp;
+	if (!strcasecmp(name, "vcounter")) {
+		*out = vdp->vcounter;
+	} else if (!strcasecmp(name, "hcounter")) {
+		*out = vdp->hslot;
+	} else if (!strcasecmp(name, "address")) {
+		*out = vdp->address;
+	}else if (!strcasecmp(name, "cd")) {
+		*out = vdp->cd;
+	} else if (!strcasecmp(name, "status")) {
+		*out = vdp_status(vdp);
+	} else {
+		return 0;
+	}
+	return 1;
+}
+
 static uint8_t resolve_genesis(debug_root *root, const char *name, uint32_t *out)
 {
+
+	for (const char *cur = name; *cur; ++cur)
+	{
+		if (*cur == ':') {
+			if (cur - name == 3 && !memcmp(name, "vdp", 3)) {
+				return resolve_vdp(root, cur + 1, out);
+			} else if (cur - name == 3 && !memcmp(name, "sub", 3)) {
+				m68k_context *m68k = root->cpu_context;
+				genesis_context *gen = m68k->system;
+				if (gen->expansion) {
+					segacd_context *cd = gen->expansion;
+					root = find_m68k_root(cd->m68k);
+					return root->resolve(root, cur + 1, out);
+				} else {
+					return 0;
+				}
+			} else {
+				return 0;
+			}
+		}
+	}
 	if (resolve_m68k(root, name, out)) {
 		return 1;
 	}
@@ -1618,11 +1668,34 @@ static uint8_t cmd_set(debug_root *root, parsed_command *cmd)
 	}
 	if (name) {
 		if (!root->set(root, name, value)) {
-			fprintf(stderr, "Failed to set %s\n", name);
+			tern_val v;
+			if (tern_find(root->variables, name, &v)) {
+				root->variables = tern_insert_int(root->variables, name, value);
+			} else {
+				fprintf(stderr, "Failed to set %s\n", name);
+			}
 		}
 	} else if (!root->write_mem(root, address, value, size)) {
 		fprintf(stderr, "Failed to write to address %X\n", address);
 	}
+	return 1;
+}
+
+static uint8_t cmd_variable(debug_root *root, parsed_command *cmd)
+{
+	if (cmd->args[0].parsed->type != EXPR_SCALAR || cmd->args[0].parsed->op.type != TOKEN_NAME) {
+		fprintf(stderr, "First argument to variable must be a name, got %s\n", expr_type_names[cmd->args[0].parsed->type]);
+		return 1;
+	}
+	uint32_t value = 0;
+	if (cmd->num_args > 1) {
+		if (!eval_expr(root, cmd->args[1].parsed, &cmd->args[1].value)) {
+			fprintf(stderr, "Failed to eval %s\n", cmd->args[1].raw);
+			return 1;
+		}
+		value = cmd->args[1].value;
+	}
+	root->variables = tern_insert_int(root->variables, cmd->args[0].parsed->op.v.str, value);
 	return 1;
 }
 
@@ -2143,6 +2216,17 @@ command_def common_commands[] = {
 		.desc = "Set a register, symbol or memory location to the result of evaluating VALUE",
 		.impl = cmd_set,
 		.min_args = 2,
+		.max_args = 2,
+		.skip_eval = 1
+	},
+	{
+		.names = (const char *[]){
+			"variable", NULL
+		},
+		.usage = "variable NAME [VALUE]",
+		.desc = "Create a new variable called NAME and set it to VALUE or 0 if no value provided",
+		.impl = cmd_variable,
+		.min_args = 1,
 		.max_args = 2,
 		.skip_eval = 1
 	},

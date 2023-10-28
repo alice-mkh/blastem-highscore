@@ -117,6 +117,7 @@ struct debug_root {
 	disp_def       *displays;
 	tern_node      *commands;
 	tern_node      *symbols;
+	tern_node      *variables;
 	disasm_context *disasm;
 	resolver       resolve;
 	reader         read_mem;
