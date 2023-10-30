@@ -176,12 +176,9 @@ enum {
 };
 
 typedef struct vdp_context vdp_context;
-typedef void (*vdp_hook_fun)(vdp_context *);
-
-typedef struct {
-	vdp_hook_fun handler;
-	void         *data;
-} vdp_hook;
+typedef void (*vdp_hook)(vdp_context *);
+typedef void (*vdp_reg_hook)(vdp_context *, uint16_t reg, uint16_t value);
+typedef void (*vdp_data_hook)(vdp_context *, uint16_t value);
 
 struct vdp_context {
 	system_header  *system;
@@ -193,8 +190,8 @@ struct vdp_context {
 	uint32_t       *debug_fbs[NUM_DEBUG_TYPES];
 	char           *kmod_msg_buffer;
 	vdp_hook       dma_hook;
-	vdp_hook       vdpreg_hook;
-	vdp_hook       data_hook;
+	vdp_reg_hook   reg_hook;
+	vdp_data_hook  data_hook;
 	uint32_t       kmod_buffer_storage;
 	uint32_t       kmod_buffer_length;
 	uint32_t       timer_start_cycle;

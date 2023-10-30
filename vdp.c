@@ -1126,6 +1126,9 @@ static void external_slot(vdp_context * context)
 		if (context->fifo_read == context->fifo_write) {
 			if ((context->cd & 0x20) && (context->regs[REG_DMASRC_H] & DMA_TYPE_MASK) == DMA_FILL) {
 				context->flags |= FLAG_DMA_RUN;
+				if (context->dma_hook) {
+					context->dma_hook(context);
+				}
 			}
 			context->fifo_read = -1;
 		}
@@ -4705,11 +4708,17 @@ int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_c
 					//only captures are from a direct color DMA demo which will generally start DMA at a very specific point in display so other values are plausible
 					//sticking with 3 slots for now until I can do some more captures
 					vdp_run_context_full(context, context->cycles + 12 * ((context->regs[REG_MODE_2] & BIT_MODE_5) && (context->regs[REG_MODE_4] & BIT_H40) ? 4 : 5));
-					context->flags |= FLAG_DMA_RUN;
 					vdp_dma_started();
+					context->flags |= FLAG_DMA_RUN;
+					if (context->dma_hook) {
+						context->dma_hook(context);
+					}
 					return 1;
 				} else {
 					context->flags |= FLAG_DMA_RUN;
+					if (context->dma_hook) {
+						context->dma_hook(context);
+					}
 					//printf("DMA Copy Address: %X, New CD: %X, Source: %X\n", context->address, context->cd, (context->regs[REG_DMASRC_M] << 8) | context->regs[REG_DMASRC_L]);
 				}
 			} else {
@@ -4723,6 +4732,9 @@ int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_c
 		if ((value & 0xC000) == 0x8000) {
 			//Register write
 			uint16_t reg = (value >> 8) & 0x1F;
+			if (context->reg_hook) {
+				context->reg_hook(context, reg, value);
+			}
 			vdp_reg_write(context, reg, value);
 		} else if (mode_5) {
 			context->flags |= FLAG_PENDING;
@@ -4773,6 +4785,9 @@ int vdp_data_port_write(vdp_context * context, uint16_t value)
 	}
 	while (context->fifo_write == context->fifo_read) {
 		vdp_run_context_full(context, context->cycles + ((context->regs[REG_MODE_4] & BIT_H40) ? 16 : 20));
+	}
+	if (context->data_hook) {
+		context->data_hook(context, value);
 	}
 	fifo_entry * cur = context->fifo + context->fifo_write;
 	cur->cycle = context->cycles + ((context->regs[REG_MODE_4] & BIT_H40) ? 16 : 20)*FIFO_LATENCY;

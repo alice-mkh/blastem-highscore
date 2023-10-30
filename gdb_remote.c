@@ -227,6 +227,8 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 			bp_def *new_bp = malloc(sizeof(bp_def));
 			new_bp->next = root->breakpoints;
 			new_bp->address = address;
+			new_bp->mask = 0xFFFFFF;
+			new_bp->type = BP_TYPE_CPU;
 			new_bp->index = root->bp_index++;
 			root->breakpoints = new_bp;
 			gdb_send_command("OK");
@@ -241,7 +243,7 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 		if (type < '2') {
 			uint32_t address = strtoul(command+3, NULL, 16);
 			remove_breakpoint(context, address);
-			bp_def **found = find_breakpoint(&root->breakpoints, address);
+			bp_def **found = find_breakpoint(&root->breakpoints, address, BP_TYPE_CPU);
 			if (*found)
 			{
 				bp_def * to_remove = *found;
@@ -465,20 +467,20 @@ void  gdb_debug_enter(m68k_context * context, uint32_t pc)
 		fatal_error("Could not find debug root for CPU %p\n", context);
 	}
 	if ((pc & 0xFFFFFF) == root->branch_t) {
-		bp_def ** f_bp = find_breakpoint(&root->breakpoints, root->branch_f);
+		bp_def ** f_bp = find_breakpoint(&root->breakpoints, root->branch_f, BP_TYPE_CPU);
 		if (!*f_bp) {
 			remove_breakpoint(context, root->branch_f);
 		}
 		root->branch_t = root->branch_f = 0;
 	} else if((pc & 0xFFFFFF) == root->branch_f) {
-		bp_def ** t_bp = find_breakpoint(&root->breakpoints, root->branch_t);
+		bp_def ** t_bp = find_breakpoint(&root->breakpoints, root->branch_t, BP_TYPE_CPU);
 		if (!*t_bp) {
 			remove_breakpoint(context, root->branch_t);
 		}
 		root->branch_t = root->branch_f = 0;
 	}
 	//Check if this is a user set breakpoint, or just a temporary one
-	bp_def ** this_bp = find_breakpoint(&root->breakpoints, pc & 0xFFFFFF);
+	bp_def ** this_bp = find_breakpoint(&root->breakpoints, pc & 0xFFFFFF, BP_TYPE_CPU);
 	if (!*this_bp) {
 		remove_breakpoint(context, pc & 0xFFFFFF);
 	}

@@ -98,6 +98,13 @@ struct parsed_command {
 	command_block else_block;
 };
 
+enum {
+	BP_TYPE_CPU,
+	BP_TYPE_VDPREG,
+	BP_TYPE_VDPDMA,
+	BP_TYPE_VDPDATA
+};
+
 typedef struct bp_def {
 	struct bp_def  *next;
 	parsed_command *commands;
@@ -105,6 +112,8 @@ typedef struct bp_def {
 	uint32_t       num_commands;
 	uint32_t       address;
 	uint32_t       index;
+	uint32_t       mask;
+	uint8_t        type;
 } bp_def;
 
 typedef struct debug_array debug_array;
@@ -154,7 +163,7 @@ struct debug_root {
 debug_root *find_root(void *cpu);
 debug_root *find_m68k_root(m68k_context *context);
 debug_root *find_z80_root(z80_context *context);
-bp_def ** find_breakpoint(bp_def ** cur, uint32_t address);
+bp_def ** find_breakpoint(bp_def ** cur, uint32_t address, uint8_t type);
 bp_def ** find_breakpoint_idx(bp_def ** cur, uint32_t index);
 void add_display(disp_def ** head, uint32_t *index, char format_char, char * param);
 void remove_display(disp_def ** head, uint32_t index);

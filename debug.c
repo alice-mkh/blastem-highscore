@@ -45,10 +45,10 @@ debug_root *find_root(void *cpu)
 	return NULL;
 }
 
-bp_def ** find_breakpoint(bp_def ** cur, uint32_t address)
+bp_def ** find_breakpoint(bp_def ** cur, uint32_t address, uint8_t type)
 {
 	while (*cur) {
-		if ((*cur)->address == address) {
+		if ((*cur)->type == type && (*cur)->address == (((*cur)->mask) & address)) {
 			break;
 		}
 		cur = &((*cur)->next);
@@ -2192,7 +2192,9 @@ static uint8_t cmd_delete_m68k(debug_root *root, parsed_command *cmd)
 		return 1;
 	}
 	bp_def *tmp = *this_bp;
-	remove_breakpoint(root->cpu_context, tmp->address);
+	if (tmp->type == BP_TYPE_CPU) {
+		remove_breakpoint(root->cpu_context, tmp->address);
+	}
 	*this_bp = (*this_bp)->next;
 	if (tmp->commands) {
 		for (uint32_t i = 0; i < tmp->num_commands; i++)
@@ -2211,9 +2213,69 @@ static uint8_t cmd_breakpoint_m68k(debug_root *root, parsed_command *cmd)
 	bp_def *new_bp = calloc(1, sizeof(bp_def));
 	new_bp->next = root->breakpoints;
 	new_bp->address = cmd->args[0].value;
+	new_bp->mask = 0xFFFFFF;
 	new_bp->index = root->bp_index++;
+	new_bp->type = BP_TYPE_CPU;
 	root->breakpoints = new_bp;
 	printf("68K Breakpoint %d set at %X\n", new_bp->index, cmd->args[0].value);
+	return 1;
+}
+
+static void on_vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
+{
+	value &= 0xFF;
+	if (context->regs[reg] == value) {
+		return;
+	}
+	genesis_context *gen = (genesis_context *)context->system;
+	debug_root *root = find_m68k_root(gen->m68k);
+	bp_def **this_bp = find_breakpoint(&root->breakpoints, reg, BP_TYPE_VDPREG);
+	int debugging = 1;
+	if (*this_bp) {
+		if ((*this_bp)->condition) {
+			uint32_t condres;
+			if (eval_expr(root, (*this_bp)->condition, &condres)) {
+				if (!condres) {
+					return;
+				}
+			} else {
+				fprintf(stderr, "Failed to eval condition for VDP Register Breakpoint %u\n", (*this_bp)->index);
+				free_expr((*this_bp)->condition);
+				(*this_bp)->condition = NULL;
+			}
+		}
+		for (uint32_t i = 0; debugging && i < (*this_bp)->num_commands; i++)
+		{
+			debugging = run_command(root, (*this_bp)->commands + i);
+		}
+		if (debugging) {
+			printf("VDP Register Breakpoint %d hit on register write %X - Old: %X, New: %X\n", (*this_bp)->index, reg, context->regs[reg], value);
+			gen->header.enter_debugger = 1;
+			if (gen->m68k->sync_cycle > gen->m68k->current_cycle + 1) {
+				gen->m68k->sync_cycle = gen->m68k->current_cycle + 1;
+			}
+			if (gen->m68k->target_cycle > gen->m68k->sync_cycle) {
+				gen->m68k->target_cycle = gen->m68k->sync_cycle;
+			}
+		}
+	}
+}
+
+static uint8_t cmd_vdp_reg_break(debug_root *root, parsed_command *cmd)
+{
+	bp_def *new_bp = calloc(1, sizeof(bp_def));
+	new_bp->next = root->breakpoints;
+	if (cmd->num_args) {
+		new_bp->address = cmd->args[0].value;
+		new_bp->mask = cmd->num_args > 1 ? cmd->args[1].value : 0xFF;
+	}
+	new_bp->index = root->bp_index++;
+	new_bp->type = BP_TYPE_VDPREG;
+	root->breakpoints = new_bp;
+	m68k_context *m68k = root->cpu_context;
+	genesis_context *gen = m68k->system;
+	gen->vdp->reg_hook = on_vdp_reg_write;
+	printf("VDP Register Breakpoint %d set\n", new_bp->index);
 	return 1;
 }
 
@@ -2817,13 +2879,23 @@ command_def genesis_commands[] = {
 	},
 	{
 		.names = (const char *[]){
-			"vdpsregs", "vr", NULL
+			"vdpregs", "vr", NULL
 		},
 		.usage = "vdpregs",
 		.desc = "Print VDP register values with a short description",
 		.impl = cmd_vdp_regs,
 		.min_args = 0,
 		.max_args = 0
+	},
+	{
+		.names = (const char *[]){
+			"vdpregbreak", "vregbreak", "vrb", NULL
+		},
+		.usage = "vdpregbreak [REGISTER [MASK]]",
+		.desc = "Enter debugger on VDP register write. If REGISTER is provided, breakpoint will only fire for writes to that register. If MASK is also provided, it will be applied to the register number before comparison with REGISTER",
+		.impl = cmd_vdp_reg_break,
+		.min_args = 0,
+		.max_args = 2
 	},
 #ifndef NO_Z80
 	{
@@ -2923,6 +2995,8 @@ static uint8_t cmd_breakpoint_z80(debug_root *root, parsed_command *cmd)
 	bp_def *new_bp = calloc(1, sizeof(bp_def));
 	new_bp->next = root->breakpoints;
 	new_bp->address = cmd->args[0].value;
+	new_bp->mask = 0xFFFF;
+	new_bp->type = BP_TYPE_CPU;
 	new_bp->index = root->bp_index++;
 	root->breakpoints = new_bp;
 	printf("Z80 Breakpoint %d set at %X\n", new_bp->index, cmd->args[0].value);
@@ -3829,7 +3903,7 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 	}
 	root->address = address;
 	//Check if this is a user set breakpoint, or just a temporary one
-	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address);
+	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address, BP_TYPE_CPU);
 	if (*this_bp) {
 		if ((*this_bp)->condition) {
 			uint32_t condres;
@@ -3902,13 +3976,13 @@ void debugger(m68k_context * context, uint32_t address)
 	//probably not necessary, but let's play it safe
 	address &= 0xFFFFFF;
 	if (address == root->branch_t) {
-		bp_def ** f_bp = find_breakpoint(&root->breakpoints, root->branch_f);
+		bp_def ** f_bp = find_breakpoint(&root->breakpoints, root->branch_f, BP_TYPE_CPU);
 		if (!*f_bp) {
 			remove_breakpoint(context, root->branch_f);
 		}
 		root->branch_t = root->branch_f = 0;
 	} else if(address == root->branch_f) {
-		bp_def ** t_bp = find_breakpoint(&root->breakpoints, root->branch_t);
+		bp_def ** t_bp = find_breakpoint(&root->breakpoints, root->branch_t, BP_TYPE_CPU);
 		if (!*t_bp) {
 			remove_breakpoint(context, root->branch_t);
 		}
@@ -3918,7 +3992,7 @@ void debugger(m68k_context * context, uint32_t address)
 	root->address = address;
 	int debugging = 1;
 	//Check if this is a user set breakpoint, or just a temporary one
-	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address);
+	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address, BP_TYPE_CPU);
 	if (*this_bp) {
 		if ((*this_bp)->condition) {
 			uint32_t condres;
