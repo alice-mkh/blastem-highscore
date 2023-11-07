@@ -39,7 +39,8 @@ typedef enum {
 	EXPR_UNARY,
 	EXPR_BINARY,
 	EXPR_SIZE,
-	EXPR_MEM
+	EXPR_MEM,
+	EXPR_NAMESPACE
 } expr_type;
 
 typedef struct expr expr;
@@ -51,10 +52,26 @@ struct expr {
 	token     op;
 };
 
+enum {
+	DBG_VAL_U32,
+	DBG_VAL_F32,
+	DBG_VAL_ARRAY,
+	DBG_VAL_STRING,
+	DBG_VAL_FUNC
+};
+
 typedef struct {
-	char     *raw;
-	expr     *parsed;
-	uint32_t value;
+	union {
+		uint32_t u32;
+		float    f32;
+	} v;
+	uint32_t type;
+} debug_val;
+
+typedef struct {
+	char      *raw;
+	expr      *parsed;
+	debug_val value;
 } command_arg;
 
 typedef struct debug_root debug_root;
@@ -117,22 +134,31 @@ typedef struct bp_def {
 } bp_def;
 
 typedef struct debug_array debug_array;
-typedef uint32_t (*debug_array_get)(debug_root *root, debug_array *array, uint32_t index);
-typedef void (*debug_array_set)(debug_root *root, debug_array *array, uint32_t index, uint32_t value);
-typedef void (*debug_array_append)(debug_root *root, debug_array *array, uint32_t value);
+typedef debug_val (*debug_array_get)(debug_array *array, uint32_t index);
+typedef void (*debug_array_set)(debug_array *array, uint32_t index, debug_val value);
+typedef void (*debug_array_append)(debug_array *array, debug_val value);
 
 struct debug_array{
 	debug_array_get    get;
 	debug_array_set    set;
 	debug_array_append append;
-	uint32_t           *data;
+	void               *base;
 	uint32_t           size;
 	uint32_t           storage;
 };
 
-typedef uint8_t (*resolver)(debug_root *root, const char *name, uint32_t *out);
-typedef debug_array* (*array_resolver)(debug_root *root, const char *name);
-typedef uint8_t (*setter)(debug_root *root, const char *name, uint32_t value);
+typedef struct debug_var debug_var;
+typedef debug_val (*debug_var_get)(debug_var *var);
+typedef void (*debug_var_set)(debug_var *var, debug_val val);
+
+struct debug_var {
+	debug_var_get get;
+	debug_var_set set;
+	void          *ptr;
+	debug_val     val;
+};
+
+typedef debug_var *(*resolver)(debug_root *root, const char *name);
 typedef uint8_t (*reader)(debug_root *root, uint32_t *out, char size);
 typedef uint8_t (*writer)(debug_root *root, uint32_t address, uint32_t value, char size);
 
@@ -141,14 +167,11 @@ struct debug_root {
 	bp_def         *breakpoints;
 	disp_def       *displays;
 	tern_node      *commands;
-	tern_node      *symbols;
 	tern_node      *variables;
-	tern_node      *arrays;
+	tern_node      *symbols;
+	tern_node      *other_roots;
 	disasm_context *disasm;
-	resolver       resolve;
-	array_resolver array_resolve;
 	reader         read_mem;
-	setter         set;
 	writer         write_mem;
 	parsed_command last_cmd;
 	uint32_t       bp_index;

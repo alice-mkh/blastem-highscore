@@ -1,6 +1,6 @@
 /*
  Copyright 2013 Michael Pavone
- This file is part of BlastEm. 
+ This file is part of BlastEm.
  BlastEm is free software distributed under the terms of the GNU General Public License version 3 or greater. See COPYING for full license text.
 */
 #ifndef Z80INST_H_
@@ -136,6 +136,8 @@ typedef struct {
 	uint16_t immed;
 	uint16_t  opcode_bytes;
 } z80inst;
+
+extern const char *z80_regs[Z80_USE_IMMED];
 
 uint8_t * z80_decode(uint8_t * istream, z80inst * decoded);
 int z80_disasm(z80inst * decoded, char * dst, uint16_t address);

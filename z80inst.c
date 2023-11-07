@@ -1279,7 +1279,7 @@ uint8_t * z80_decode(uint8_t * istream, z80inst * decoded)
 			decoded->ea_reg = *(++istream);
 		}
 	}
-	
+
 	if ((decoded->addr_mode & 0x1F) == Z80_IMMED && decoded->op != Z80_RST && decoded->op != Z80_IM) {
 		decoded->immed = *(++istream);
 		if ((decoded->reg >= Z80_BC && decoded->reg < Z80_UNUSED) || decoded->op == Z80_CALL || decoded->op == Z80_CALLCC || decoded->op == Z80_JP || decoded->op == Z80_JPCC) {
@@ -1370,7 +1370,7 @@ char *z80_mnemonics[Z80_OTDR+1] = {
 	"otdr"
 };
 
-char * z80_regs[Z80_USE_IMMED] = {
+const char *z80_regs[Z80_USE_IMMED] = {
 	"c",
 	"b",
 	"e",

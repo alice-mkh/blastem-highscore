@@ -24,9 +24,8 @@
 #define Z80_OPTS options
 #endif
 
-static debug_root roots[5];
-static uint32_t num_roots;
-#define MAX_DEBUG_ROOTS (sizeof(roots)/sizeof(*roots))
+static debug_root *roots;
+static uint32_t num_roots, root_storage;
 
 debug_root *find_root(void *cpu)
 {
@@ -36,13 +35,14 @@ debug_root *find_root(void *cpu)
 			return roots + i;
 		}
 	}
-	if (num_roots < MAX_DEBUG_ROOTS) {
-		num_roots++;
-		memset(roots + num_roots - 1, 0, sizeof(debug_root));
-		roots[num_roots-1].cpu_context = cpu;
-		return roots + num_roots - 1;
+	if (num_roots == root_storage) {
+		root_storage = root_storage ? root_storage * 2 : 5;
+		roots = realloc(roots, root_storage * sizeof(debug_root));
 	}
-	return NULL;
+	num_roots++;
+	memset(roots + num_roots - 1, 0, sizeof(debug_root));
+	roots[num_roots-1].cpu_context = cpu;
+	return roots + num_roots - 1;
 }
 
 bp_def ** find_breakpoint(bp_def ** cur, uint32_t address, uint8_t type)
@@ -65,6 +65,111 @@ bp_def ** find_breakpoint_idx(bp_def ** cur, uint32_t index)
 		cur = &((*cur)->next);
 	}
 	return cur;
+}
+
+static debug_array *arrays;
+static uint32_t num_arrays, array_storage;
+static debug_array *alloc_array(void)
+{
+	if (num_arrays == array_storage) {
+		array_storage = array_storage ? array_storage * 2 : 4;
+		arrays = realloc(arrays, sizeof(debug_array) * array_storage);
+	}
+	return arrays + num_arrays++;
+}
+
+static debug_val new_fixed_array(void *base, debug_array_get get, debug_array_set set, uint32_t size)
+{
+	debug_array *array = alloc_array();
+	array->get = get;
+	array->set = set;
+	array->append = NULL;
+	array->base = base;
+	array->size = array->storage = size;
+	debug_val ret;
+	ret.type = DBG_VAL_ARRAY;
+	ret.v.u32 = array - arrays;
+	return ret;
+}
+
+static debug_val user_array_get(debug_array *array, uint32_t index)
+{
+	debug_val *data = array->base;
+	return data[index];
+}
+
+static void user_array_set(debug_array *array, uint32_t index, debug_val value)
+{
+	debug_val *data = array->base;
+	data[index] = value;
+}
+
+static void user_array_append(debug_array *array, debug_val value)
+{
+	if (array->size == array->storage) {
+		array->storage *= 2;
+		array->base = realloc(array->base, sizeof(debug_val) * array->storage);
+	}
+	debug_val *data = array->base;
+	data[array->size++] = value;
+}
+
+static debug_val new_user_array(uint32_t size)
+{
+	debug_array *array = alloc_array();
+	array->get = user_array_get;
+	array->set = user_array_set;
+	array->append = user_array_append;
+	array->size = size;
+	array->storage = size ? size : 4;
+	debug_val ret;
+	ret.type = DBG_VAL_ARRAY;
+	ret.v.u32 = array - arrays;
+	return ret;
+}
+
+debug_array *get_array(debug_val val)
+{
+	if (val.type != DBG_VAL_ARRAY) {
+		return NULL;
+	}
+	return arrays + val.v.u32;
+}
+
+debug_val user_var_get(debug_var *var)
+{
+	return var->val;
+}
+
+void user_var_set(debug_var *var, debug_val val)
+{
+	var->val = val;
+}
+
+static void new_user_variable(debug_root *root, const char *name, debug_val val)
+{
+	debug_var *var = calloc(1, sizeof(debug_var));
+	var->get = user_var_get;
+	var->set = user_var_set;
+	var->val = val;
+	root->variables = tern_insert_ptr(root->variables, name, var);
+}
+
+static void new_readonly_variable(debug_root *root, const char *name, debug_val val)
+{
+	debug_var *var = calloc(1, sizeof(debug_var));
+	var->get = user_var_get;
+	var->set = NULL;
+	var->val = val;
+	root->variables = tern_insert_ptr(root->variables, name, var);
+}
+
+static debug_val debug_int(uint32_t i)
+{
+	debug_val ret;
+	ret.type = DBG_VAL_U32;
+	ret.v.u32 = i;
+	return ret;
 }
 
 static const char *token_type_names[] = {
@@ -227,6 +332,39 @@ static void free_expr(expr *e)
 static expr *parse_scalar_or_muldiv(char *start, char **end);
 static expr *parse_expression(char *start, char **end);
 
+static void handle_namespace(expr *e)
+{
+	if (e->op.type != TOKEN_NAME && e->op.type != TOKEN_ARRAY) {
+		return;
+	}
+	char *start = e->op.v.str;
+	char *orig_start = start;
+	for (char *cur = start; *cur; ++cur)
+	{
+		if (*cur == ':') {
+			char *ns = malloc(cur - start + 1);
+			memcpy(ns, start, cur - start);
+			ns[cur - start] = 0;
+			expr *inner = calloc(1, sizeof(expr));
+			inner->type = EXPR_SCALAR;
+			inner->op.type = TOKEN_NAME;
+			start = cur + 1;
+			inner->op.v.str = start;
+			e->left = inner;
+			e->type = EXPR_NAMESPACE;
+			e->op.v.str = ns;
+			e = inner;
+		}
+	}
+	if (start != orig_start) {
+		//We've split the original string up into
+		//a bunch of individually allocated fragments
+		//this is just a little stup of the original
+		e->op.v.str = strdup(e->op.v.str);
+		free(orig_start);
+	}
+}
+
 static expr *parse_scalar(char *start, char **end)
 {
 	char *after_first;
@@ -261,6 +399,7 @@ static expr *parse_scalar(char *start, char **end)
 			ret->right = calloc(1, sizeof(expr));
 			ret->right->type = EXPR_SCALAR;
 			ret->right->op = first;
+			handle_namespace(ret->right);
 		}
 
 		ret->left = parse_expression(after_first, end);
@@ -306,6 +445,7 @@ static expr *parse_scalar(char *start, char **end)
 		expr *ret = calloc(1, sizeof(expr));
 		ret->type = EXPR_SCALAR;
 		ret->op = first;
+		handle_namespace(ret);
 		*end = after_first;
 		return ret;
 	}
@@ -314,6 +454,7 @@ static expr *parse_scalar(char *start, char **end)
 	ret->left = calloc(1, sizeof(expr));
 	ret->left->type = EXPR_SCALAR;
 	ret->left->op = second;
+	handle_namespace(ret->left);
 	ret->op = first;
 	return ret;
 }
@@ -417,6 +558,7 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 			ret->right = calloc(1, sizeof(expr));
 			ret->right->type = EXPR_SCALAR;
 			ret->right->op = first;
+			handle_namespace(ret->right);
 		}
 
 		ret->left = parse_expression(after_first, end);
@@ -466,6 +608,7 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 		bin->left = calloc(1, sizeof(expr));
 		bin->left->type = EXPR_SCALAR;
 		bin->left->op = first;
+		handle_namespace(bin->left);
 		bin->op = second;
 		switch (second.v.op[0])
 		{
@@ -499,11 +642,13 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 		value->left = calloc(1, sizeof(expr));
 		value->left->type = EXPR_SCALAR;
 		value->left->op = first;
+		handle_namespace(value->left);
 		return maybe_muldiv(value, after_second, end);
 	} else {
 		expr *ret = calloc(1, sizeof(expr));
 		ret->type = EXPR_SCALAR;
 		ret->op = first;
+		handle_namespace(ret);
 		*end = after_first;
 		return ret;
 	}
@@ -542,6 +687,7 @@ static expr *parse_expression(char *start, char **end)
 			ret->right = calloc(1, sizeof(expr));
 			ret->right->type = EXPR_SCALAR;
 			ret->right->op = first;
+			handle_namespace(ret->right);
 		}
 
 		ret->left = parse_expression(after_first, end);
@@ -590,6 +736,7 @@ static expr *parse_expression(char *start, char **end)
 		bin->left = calloc(1, sizeof(expr));
 		bin->left->type = EXPR_SCALAR;
 		bin->left->op = first;
+		handle_namespace(bin->left);
 		bin->op = second;
 		switch (second.v.op[0])
 		{
@@ -638,6 +785,7 @@ static expr *parse_expression(char *start, char **end)
 		value->left = calloc(1, sizeof(expr));
 		value->left->type = EXPR_SCALAR;
 		value->left->op = first;
+		handle_namespace(value->left);
 		return maybe_binary(value, after_second, end);
 	} else {
 		if (second.type == TOKEN_NAME) {
@@ -646,42 +794,27 @@ static expr *parse_expression(char *start, char **end)
 		expr *ret = calloc(1, sizeof(expr));
 		ret->type = EXPR_SCALAR;
 		ret->op = first;
+		handle_namespace(ret);
 		*end = after_first;
 		return ret;
 	}
 }
 
-static debug_array* full_array_resolve(debug_root *root, const char *name)
+uint8_t eval_expr(debug_root *root, expr *e, debug_val *out)
 {
-	debug_array *ret = root->array_resolve(root, name);
-	if (!ret) {
-		ret = tern_find_ptr(root->arrays, name);
-	}
-	return ret;
-}
-
-uint8_t eval_expr(debug_root *root, expr *e, uint32_t *out)
-{
-	uint32_t right;
+	debug_val right;
 	switch(e->type)
 	{
 	case EXPR_SCALAR:
-		if (e->op.type == TOKEN_NAME) {
-			if (root->resolve(root, e->op.v.str, out)) {
-				return 1;
+		if (e->op.type == TOKEN_NAME || e->op.type == TOKEN_ARRAY) {
+			debug_var *var = tern_find_ptr(root->variables, e->op.v.str);
+			if (!var) {
+				return 0;
 			}
-			tern_val v;
-			if (tern_find(root->variables, e->op.v.str, &v)) {
-				*out = v.intval;
-				return 1;
-			}
-			if (tern_find(root->symbols, e->op.v.str, &v)) {
-				*out = v.intval;
-				return 1;
-			}
-			return 0;
+			*out = var->get(var);
+			return 1;
 		} else {
-			*out = e->op.v.num;
+			*out = debug_int(e->op.v.num);
 			return 1;
 		}
 	case EXPR_UNARY:
@@ -691,13 +824,22 @@ uint8_t eval_expr(debug_root *root, expr *e, uint32_t *out)
 		switch (e->op.v.op[0])
 		{
 		case '!':
-			*out = !*out;
+			if (out->type != DBG_VAL_U32) { fprintf(stderr, "operator ! is only defined for integers"); return 0; }
+			out->v.u32 = !out->v.u32;
 			break;
 		case '~':
-			*out = ~*out;
+			if (out->type != DBG_VAL_U32) { fprintf(stderr, "operator ~ is only defined for integers"); return 0; }
+			out->v.u32 = ~out->v.u32;
 			break;
 		case '-':
-			*out = -*out;
+			if (out->type == DBG_VAL_U32) {
+				out->v.u32 = -out->v.u32;
+			} else if (out->type == DBG_VAL_F32) {
+				out->v.f32 = -out->v.f32;
+			} else {
+				fprintf(stderr, "operator ~ is only defined for integers and floats");
+				return 0;
+			}
 			break;
 		default:
 			return 0;
@@ -707,56 +849,114 @@ uint8_t eval_expr(debug_root *root, expr *e, uint32_t *out)
 		if (!eval_expr(root, e->left, out) || !eval_expr(root, e->right, &right)) {
 			return 0;
 		}
-		switch (e->op.v.op[0])
-		{
-		case '+':
-			*out += right;
-			break;
-		case '-':
-			*out -= right;
-			break;
-		case '*':
-			*out *= right;
-			break;
-		case '/':
-			*out /= right;
-			break;
-		case '&':
-			*out &= right;
-			break;
-		case '|':
-			*out |= right;
-			break;
-		case '^':
-			*out ^= right;
-			break;
-		case '=':
-			*out = *out == right;
-			break;
-		case '!':
-			*out = *out != right;
-			break;
-		case '>':
-			*out = e->op.v.op[1] ? *out >= right : *out > right;
-			break;
-		case '<':
-			*out = e->op.v.op[1] ? *out <= right : *out < right;
-			break;
-		default:
-			return 0;
+		if (out->type != right.type) {
+			if (out->type == DBG_VAL_F32) {
+				if (right.type == DBG_VAL_U32) {
+					right.type = DBG_VAL_F32;
+					float v = right.v.u32;
+					right.v.f32 = v;
+				} else {
+					fprintf(stderr, "Invalid type on right side of binary operator\n");
+					return 0;
+				}
+			} else if (out->type == DBG_VAL_U32) {
+				if (right.type == DBG_VAL_F32) {
+					out->type = DBG_VAL_F32;
+					float v = out->v.u32;
+					out->v.f32 = v;
+				} else {
+					fprintf(stderr, "Invalid type on right side of binary operator\n");
+					return 0;
+				}
+			}
+		}
+		if (out->type == DBG_VAL_U32) {
+			switch (e->op.v.op[0])
+			{
+			case '+':
+				out->v.u32 += right.v.u32;
+				break;
+			case '-':
+				out->v.u32 -= right.v.u32;
+				break;
+			case '*':
+				out->v.u32 *= right.v.u32;
+				break;
+			case '/':
+				out->v.u32 /= right.v.u32;
+				break;
+			case '&':
+				out->v.u32 &= right.v.u32;
+				break;
+			case '|':
+				out->v.u32 |= right.v.u32;
+				break;
+			case '^':
+				out->v.u32 ^= right.v.u32;
+				break;
+			case '=':
+				out->v.u32 = out->v.u32 == right.v.u32;
+				break;
+			case '!':
+				out->v.u32 = out->v.u32 != right.v.u32;
+				break;
+			case '>':
+				out->v.u32 = e->op.v.op[1] ? out->v.u32 >= right.v.u32 : out->v.u32 > right.v.u32;
+				break;
+			case '<':
+				out->v.u32 = e->op.v.op[1] ? out->v.u32 <= right.v.u32 : out->v.u32 < right.v.u32;
+				break;
+			default:
+				return 0;
+			}
+		} else if (out->type == DBG_VAL_F32) {
+			switch (e->op.v.op[0])
+			{
+			case '+':
+				out->v.f32 += right.v.f32;
+				break;
+			case '-':
+				out->v.f32 -= right.v.f32;
+				break;
+			case '*':
+				out->v.f32 *= right.v.f32;
+				break;
+			case '/':
+				out->v.f32 /= right.v.f32;
+				break;
+			case '=':
+				out->v.u32 = out->v.f32 == right.v.f32;
+				out->type = DBG_VAL_U32;
+				break;
+			case '!':
+				out->v.u32 = out->v.f32 != right.v.f32;
+				out->type = DBG_VAL_U32;
+				break;
+			case '>':
+				out->v.u32 = e->op.v.op[1] ? out->v.f32 >= right.v.f32 : out->v.f32 > right.v.f32;
+				out->type = DBG_VAL_U32;
+				break;
+			case '<':
+				out->v.u32 = e->op.v.op[1] ? out->v.f32 <= right.v.f32 : out->v.f32 < right.v.f32;
+				out->type = DBG_VAL_U32;
+				break;
+			default:
+				return 0;
+			}
 		}
 		return 1;
 	case EXPR_SIZE:
 		if (!eval_expr(root, e->left, out)) {
 			return 0;
 		}
+		if (out->type != DBG_VAL_U32) { fprintf(stderr, "Size expressions are only defined for integers"); return 0; }
 		switch (e->op.v.op[0])
 		{
 		case 'b':
-			*out &= 0xFF;
+			out->v.u32 &= 0xFF;
 			break;
 		case 'w':
-			*out &= 0xFFFF;
+			out->v.u32 &= 0xFFFF;
 			break;
 		}
 		return 1;
@@ -764,15 +964,30 @@ uint8_t eval_expr(debug_root *root, expr *e, uint32_t *out)
 		if (!eval_expr(root, e->left, out)) {
 			return 0;
 		}
+		if (out->type != DBG_VAL_U32) { fprintf(stderr, "Array index must be integer"); return 0; }
 		if (e->right) {
-			debug_array *array = full_array_resolve(root, e->right->op.v.str);
-			if (!array || *out >= array->size) {
+			if (!eval_expr(root, e->right, &right)) {
 				return 0;
 			}
-			*out = array->get(root, array, *out);
+			debug_array *array = get_array(right);
+			if (!array) {
+				fprintf(stderr, "Attempt to index into value that is not an array");
+				return 0;
+			}
+			if (out->v.u32 >= array->size) {
+				return 0;
+			}
+			*out = array->get(array, out->v.u32);
 			return 1;
 		}
-		return root->read_mem(root, out, e->op.v.op[0]);
+		return root->read_mem(root, &out->v.u32, e->op.v.op[0]);
+	case EXPR_NAMESPACE:
+		root = tern_find_ptr(root->other_roots, e->op.v.str);
+		if (!root) {
+			fprintf(stderr, "%s is not a valid namespace\n", e->op.v.str);
+			return 0;
+		}
+		return eval_expr(root, e->left, out);
 	default:
 		return 0;
 	}
@@ -859,364 +1074,470 @@ static uint8_t write_m68k(debug_root *root, uint32_t address, uint32_t value, ch
 	return 1;
 }
 
-static uint8_t resolve_m68k(debug_root *root, const char *name, uint32_t *out)
+static uint8_t debug_cast_int(debug_val val, uint32_t *out)
 {
-	m68k_context *context = root->cpu_context;
-	if ((name[0] == 'd' || name[0] == 'D') && name[1] >= '0' && name[1] <= '7' && !name[2]) {
-		*out = context->dregs[name[1]-'0'];
-	} else if ((name[0] == 'a' || name[0] == 'A') && name[1] >= '0' && name[1] <= '7' && !name[2]) {
-		*out = context->aregs[name[1]-'0'];
-	} else if (!strcasecmp(name, "sr")) {
-		*out = context->status << 8;
-		for (int flag = 0; flag < 5; flag++) {
-			*out |= context->flags[flag] << (4-flag);
-		}
-	} else if(!strcasecmp(name, "cycle")) {
-		*out = context->current_cycle;
-	} else if (!strcasecmp(name, "pc")) {
-		*out = root->address;
-	} else if (!strcasecmp(name, "sp")) {
-		*out = context->aregs[7];
-	} else if (!strcasecmp(name, "usp")) {
-		*out = context->status & 0x20 ? context->aregs[8] : context->aregs[7];
-	} else if (!strcasecmp(name, "ssp")) {
-		*out = context->status & 0x20 ? context->aregs[7] : context->aregs[8];
-	} else {
-		return 0;
-	}
-	return 1;
-}
-
-static uint8_t set_m68k(debug_root *root, const char *name, uint32_t value)
-{
-	m68k_context *context = root->cpu_context;
-	if ((name[0] == 'd' || name[0] == 'D') && name[1] >= '0' && name[1] <= '7' && !name[2]) {
-		context->dregs[name[1]-'0'] = value;
-	} else if ((name[0] == 'a' || name[0] == 'A') && name[1] >= '0' && name[1] <= '7' && !name[2]) {
-		context->aregs[name[1]-'0'] = value;
-	} else if (!strcasecmp(name, "sr")) {
-		context->status = value >> 8;
-		for (int flag = 0; flag < 5; flag++) {
-			context->flags[flag] = (value & (1 << (4 - flag))) != 0;
-		}
-	} else if (!strcasecmp(name, "sp")) {
-		context->aregs[7] = value;
-	} else if (!strcasecmp(name, "usp")) {
-		context->aregs[context->status & 0x20 ? 8 : 7] = value;
-	} else if (!strcasecmp(name, "ssp")) {
-		context->aregs[context->status & 0x20 ? 7 : 8] = value;
-	} else {
-		return 0;
-	}
-	return 1;
-}
-
-static uint8_t resolve_vdp(debug_root *root, const char *name, uint32_t *out)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	vdp_context *vdp = gen->vdp;
-	if (!strcasecmp(name, "vcounter")) {
-		*out = vdp->vcounter;
-	} else if (!strcasecmp(name, "hcounter")) {
-		*out = vdp->hslot;
-	} else if (!strcasecmp(name, "address")) {
-		*out = vdp->address;
-	}else if (!strcasecmp(name, "cd")) {
-		*out = vdp->cd;
-	} else if (!strcasecmp(name, "status")) {
-		*out = vdp_status(vdp);
-	} else {
-		return 0;
-	}
-	return 1;
-}
-
-static uint8_t resolve_genesis(debug_root *root, const char *name, uint32_t *out)
-{
-
-	for (const char *cur = name; *cur; ++cur)
-	{
-		if (*cur == ':') {
-			if (cur - name == 3 && !memcmp(name, "vdp", 3)) {
-				return resolve_vdp(root, cur + 1, out);
-			} else if (cur - name == 3 && !memcmp(name, "sub", 3)) {
-				m68k_context *m68k = root->cpu_context;
-				genesis_context *gen = m68k->system;
-				if (gen->expansion) {
-					segacd_context *cd = gen->expansion;
-					root = find_m68k_root(cd->m68k);
-					return root->resolve(root, cur + 1, out);
-				} else {
-					return 0;
-				}
-			} else {
-				return 0;
-			}
-		}
-	}
-	if (resolve_m68k(root, name, out)) {
+	if (val.type == DBG_VAL_U32) {
+		*out = val.v.u32;
 		return 1;
 	}
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	if (!strcmp(name, "f") || !strcmp(name, "frame")) {
-		*out = gen->vdp->frame;
+	if (val.type == DBG_VAL_F32) {
+		*out = val.v.f32;
 		return 1;
 	}
 	return 0;
 }
 
-static uint32_t debug_vram_get(debug_root *root, debug_array *array, uint32_t index)
+static uint8_t debug_cast_bool(debug_val val)
 {
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	return gen->vdp->vdpmem[index];
-}
-
-static void debug_vram_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	gen->vdp->vdpmem[index] = value;
-}
-
-static uint32_t debug_vsram_get(debug_root *root, debug_array *array, uint32_t index)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	return gen->vdp->vsram[index] & VSRAM_BITS;
-}
-
-static void debug_vsram_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	gen->vdp->vsram[index] = value;
-}
-
-static uint32_t debug_cram_get(debug_root *root, debug_array *array, uint32_t index)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	return gen->vdp->cram[index] & CRAM_BITS;
-}
-
-static void debug_cram_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	gen->vdp->cram[index] = value;
-}
-
-static uint32_t debug_vreg_get(debug_root *root, debug_array *array, uint32_t index)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	return gen->vdp->regs[index];
-}
-
-static void debug_vreg_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	vdp_reg_write(gen->vdp, index, value);
-}
-
-static debug_array* resolve_vdp_array(debug_root *root, const char *name)
-{
-	static debug_array vram = {
-		.get = debug_vram_get, .set = debug_vram_set,
-		.size = VRAM_SIZE, .storage = VRAM_SIZE
-	};
-	static debug_array vsram = {
-		.get = debug_vsram_get, .set = debug_vsram_set,
-	};
-	static debug_array cram = {
-		.get = debug_cram_get, .set = debug_cram_set,
-		.storage = CRAM_SIZE, .size = CRAM_SIZE
-	};
-	static debug_array regs = {
-		.get = debug_vreg_get, .set = debug_vreg_set,
-		.storage = VDP_REGS, .size = VDP_REGS
-	};
-	if (!strcasecmp(name, "vram")) {
-		return &vram;
-	}
-	if (!strcasecmp(name, "vsram")) {
-		m68k_context *m68k = root->cpu_context;
-		genesis_context *gen = m68k->system;
-		vsram.storage = vsram.size = gen->vdp->vsram_size;
-		return &vsram;
-	}
-	if (!strcasecmp(name, "cram")) {
-		return &cram;
-	}
-	if (!strcasecmp(name, "reg")) {
-		return &regs;
-	}
-	return NULL;
-}
-
-static uint32_t debug_part1_get(debug_root *root, debug_array *array, uint32_t index)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	return gen->ym->part1_regs[index];
-}
-
-static void debug_part1_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	uint8_t old_part = gen->ym->selected_part;
-	uint8_t old_reg = gen->ym->selected_reg;
-	gen->ym->selected_part = 0;
-	gen->ym->selected_reg = index;
-	ym_data_write(gen->ym, value);
-	gen->ym->selected_part = old_part;
-	gen->ym->selected_reg = old_reg;
-}
-
-static uint32_t debug_part2_get(debug_root *root, debug_array *array, uint32_t index)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	return gen->ym->part2_regs[index];
-}
-
-static void debug_part2_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	uint8_t old_part = gen->ym->selected_part;
-	uint8_t old_reg = gen->ym->selected_reg;
-	gen->ym->selected_part = 1;
-	gen->ym->selected_reg = index;
-	ym_data_write(gen->ym, value);
-	gen->ym->selected_part = old_part;
-	gen->ym->selected_reg = old_reg;
-}
-
-static debug_array* resolve_ym2612_array(debug_root *root, const char *name)
-{
-	static debug_array part1 = {
-		.get = debug_part1_get, .set = debug_part1_set,
-		.storage = YM_REG_END, .size = YM_REG_END
-	};
-	static debug_array part2 = {
-		.get = debug_part2_get, .set = debug_part2_set,
-		.storage = YM_REG_END, .size = YM_REG_END
-	};
-	if (!strcasecmp(name, "part1")) {
-		return &part1;
-	}
-	if (!strcasecmp(name, "part2")) {
-		return &part2;
-	}
-	return NULL;
-}
-
-static uint32_t debug_psgfreq_get(debug_root *root, debug_array *array, uint32_t index)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	return gen->psg->counter_load[index];
-}
-
-static void debug_psgfreq_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	gen->psg->counter_load[index] = value;
-}
-
-static uint32_t debug_psgcount_get(debug_root *root, debug_array *array, uint32_t index)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	return gen->psg->counters[index];
-}
-
-static void debug_psgcount_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	gen->psg->counters[index] = value;
-}
-
-static uint32_t debug_psgvol_get(debug_root *root, debug_array *array, uint32_t index)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	return gen->psg->volume[index];
-}
-
-static void debug_psgvol_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
-{
-	m68k_context *m68k = root->cpu_context;
-	genesis_context *gen = m68k->system;
-	gen->psg->volume[index] = value;
-}
-
-static debug_array* resolve_psg_array(debug_root *root, const char *name)
-{
-	static debug_array freq = {
-		.get = debug_psgfreq_get, .set = debug_psgfreq_set,
-		.storage = 4, .size = 4
-	};
-	static debug_array counter = {
-		.get = debug_psgcount_get, .set = debug_psgcount_set,
-		.storage = 4, .size = 4
-	};
-	static debug_array volume = {
-		.get = debug_psgvol_get, .set = debug_psgvol_set,
-		.storage = 4, .size = 4
-	};
-	if (!strcasecmp("frequency", name)) {
-		return &freq;
-	}
-	if (!strcasecmp("counter", name)) {
-		return &counter;
-	}
-	if (!strcasecmp("volume", name)) {
-		return &volume;
-	}
-	return NULL;
-}
-
-static debug_array* resolve_genesis_array(debug_root *root, const char *name)
-{
-	for (const char *cur = name; *cur; ++cur)
+	switch(val.type)
 	{
-		if (*cur == ':') {
-			if (cur - name == 3 && !memcmp(name, "vdp", 3)) {
-				return resolve_vdp_array(root, cur + 1);
-			} else if (cur - name == 2 && !memcmp(name, "ym", 2)) {
-				return resolve_ym2612_array(root, cur + 1);
-			} else if (cur - name == 3 && !memcmp(name, "psg", 3)) {
-				return resolve_psg_array(root, cur + 1);
-			} /*else if (cur - name == 3 && !memcmp(name, "sub", 3)) {
-				m68k_context *m68k = root->cpu_context;
-				genesis_context *gen = m68k->system;
-				if (gen->expansion) {
-					segacd_context *cd = gen->expansion;
-					root = find_m68k_root(cd->m68k);
-					return root->resolve(root, cur + 1, out);
-				} else {
-					return NULL;
-				}
-			}*/ else {
-				return NULL;
-			}
+	case DBG_VAL_U32: return val.v.u32 != 0;
+	case DBG_VAL_F32: return val.v.f32 != 0.0f;
+	case DBG_VAL_ARRAY: return get_array(val)->size != 0;
+	default: return 1;
+	}
+}
+
+static debug_val m68k_dreg_get(debug_var *var)
+{
+	m68k_context *context = var->ptr;
+	return debug_int(context->dregs[var->val.v.u32]);
+}
+
+static void m68k_dreg_set(debug_var *var, debug_val val)
+{
+	m68k_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "M68K register d%d can only be set to an integer\n", var->val.v.u32);
+		return;
+	}
+	context->dregs[var->val.v.u32] = ival;
+}
+
+static debug_val m68k_areg_get(debug_var *var)
+{
+	m68k_context *context = var->ptr;
+	return debug_int(context->aregs[var->val.v.u32]);
+}
+
+static void m68k_areg_set(debug_var *var, debug_val val)
+{
+	m68k_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "M68K register a%d can only be set to an integer\n", var->val.v.u32);
+		return;
+	}
+	context->aregs[var->val.v.u32] = ival;
+}
+
+static debug_val m68k_sr_get(debug_var *var)
+{
+	m68k_context *context = var->ptr;
+	debug_val ret;
+	ret.v.u32 = context->status << 8;
+	for (int flag = 0; flag < 5; flag++)
+	{
+		ret.v.u32 |= context->flags[flag] << (4-flag);
+	}
+	ret.type = DBG_VAL_U32;
+	return ret;
+}
+
+static void m68k_sr_set(debug_var *var, debug_val val)
+{
+	m68k_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "M68K register sr can only be set to an integer\n");
+		return;
+	}
+	context->status = ival >> 8;
+	for (int flag = 0; flag < 5; flag++) {
+		context->flags[flag] = (ival & (1 << (4 - flag))) != 0;
+	}
+}
+
+static debug_val m68k_cycle_get(debug_var *var)
+{
+	m68k_context *context = var->ptr;
+	return debug_int(context->current_cycle);
+}
+
+static debug_val m68k_usp_get(debug_var *var)
+{
+	m68k_context *context = var->ptr;
+	return debug_int(context->status & 0x20 ? context->aregs[8] : context->aregs[7]);
+}
+
+static void m68k_usp_set(debug_var *var, debug_val val)
+{
+	m68k_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "M68K register usp can only be set to an integer\n");
+		return;
+	}
+	context->aregs[context->status & 0x20 ? 8 : 7] = ival;
+}
+
+static debug_val m68k_ssp_get(debug_var *var)
+{
+	m68k_context *context = var->ptr;
+	return debug_int(context->status & 0x20 ? context->aregs[7] : context->aregs[8]);
+}
+
+static void m68k_ssp_set(debug_var *var, debug_val val)
+{
+	m68k_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "M68K register ssp can only be set to an integer\n");
+		return;
+	}
+	context->aregs[context->status & 0x20 ? 7 : 8] = ival;
+}
+
+static debug_val root_address_get(debug_var *var)
+{
+	debug_root *root = var->ptr;
+	return debug_int(root->address);
+}
+
+static void m68k_names(debug_root *root)
+{
+	debug_var *var;
+	for (char i = 0; i < 8; i++)
+	{
+		char rname[3] = {'d', '0' + i, 0};
+		var = calloc(1, sizeof(debug_var));
+		var->get = m68k_dreg_get;
+		var->set = m68k_dreg_set;
+		var->ptr = root->cpu_context;
+		var->val.v.u32 = i;
+		root->variables = tern_insert_ptr(root->variables, rname, var);
+		rname[0] = 'D';
+		root->variables = tern_insert_ptr(root->variables, rname, var);
+
+		var = calloc(1, sizeof(debug_var));
+		var->get = m68k_areg_get;
+		var->set = m68k_areg_set;
+		var->ptr = root->cpu_context;
+		var->val.v.u32 = i;
+		rname[0] = 'a';
+		root->variables = tern_insert_ptr(root->variables, rname, var);
+		rname[0] = 'A';
+		root->variables = tern_insert_ptr(root->variables, rname, var);
+		if (i == 7) {
+			root->variables = tern_insert_ptr(root->variables, "sp", var);
+			root->variables = tern_insert_ptr(root->variables, "SP", var);
 		}
 	}
-	return NULL;
+
+	var = calloc(1, sizeof(debug_var));
+	var->get = m68k_sr_get;
+	var->set = m68k_sr_set;
+	var->ptr = root->cpu_context;
+	root->variables = tern_insert_ptr(root->variables, "sr", var);
+	root->variables = tern_insert_ptr(root->variables, "SR", var);
+
+	var = calloc(1, sizeof(debug_var));
+	var->get = root_address_get;
+	var->ptr = root;
+	root->variables = tern_insert_ptr(root->variables, "pc", var);
+	root->variables = tern_insert_ptr(root->variables, "PC", var);
+
+	var = calloc(1, sizeof(debug_var));
+	var->get = m68k_usp_get;
+	var->set = m68k_usp_set;
+	var->ptr = root->cpu_context;
+	root->variables = tern_insert_ptr(root->variables, "usp", var);
+	root->variables = tern_insert_ptr(root->variables, "USP", var);
+
+	var = calloc(1, sizeof(debug_var));
+	var->get = m68k_ssp_get;
+	var->set = m68k_ssp_set;
+	var->ptr = root->cpu_context;
+	root->variables = tern_insert_ptr(root->variables, "ssp", var);
+	root->variables = tern_insert_ptr(root->variables, "SSP", var);
+
+	var = calloc(1, sizeof(debug_var));
+	var->get = m68k_cycle_get;
+	var->ptr = root->cpu_context;
+	root->variables = tern_insert_ptr(root->variables, "cycle", var);
 }
 
-static debug_array* resolve_null_array(debug_root *root, const char *name)
+static debug_val vcounter_get(debug_var *var)
 {
-	return NULL;
+	vdp_context *vdp = var->ptr;
+	return debug_int(vdp->vcounter);
+}
+
+static debug_val hcounter_get(debug_var *var)
+{
+	vdp_context *vdp = var->ptr;
+	return debug_int(vdp->hslot);
+}
+
+static debug_val vdp_address_get(debug_var *var)
+{
+	vdp_context *vdp = var->ptr;
+	return debug_int(vdp->address);
+}
+
+static void vdp_address_set(debug_var *var, debug_val val)
+{
+	vdp_context *vdp = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "vdp address can only be set to an integer\n");
+		return;
+	}
+	vdp->address = ival & 0x1FFFF;
+}
+
+static debug_val vdp_cd_get(debug_var *var)
+{
+	vdp_context *vdp = var->ptr;
+	return debug_int(vdp->cd);
+}
+
+static void vdp_cd_set(debug_var *var, debug_val val)
+{
+	vdp_context *vdp = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "vdp cd can only be set to an integer\n");
+		return;
+	}
+	vdp->cd = ival & 0x3F;
+}
+
+static debug_val vdp_status_get(debug_var *var)
+{
+	vdp_context *vdp = var->ptr;
+	return debug_int(vdp_status(vdp));
+}
+
+static debug_val debug_vram_get(debug_array *array, uint32_t index)
+{
+	vdp_context *vdp = array->base;
+	return debug_int(vdp->vdpmem[index]);
+}
+
+static void debug_vram_set(debug_array *array, uint32_t index, debug_val val)
+{
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "vram can only be set to integers\n");
+		return;
+	}
+	vdp_context *vdp = array->base;
+	vdp->vdpmem[index] = ival;
+}
+
+static debug_val debug_vsram_get(debug_array *array, uint32_t index)
+{
+	vdp_context *vdp = array->base;
+	return debug_int(vdp->vsram[index] & VSRAM_BITS);
+}
+
+static void debug_vsram_set(debug_array *array, uint32_t index, debug_val val)
+{
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "vsram can only be set to integers\n");
+		return;
+	}
+	vdp_context *vdp = array->base;
+	vdp->vsram[index] = ival;
+}
+
+static debug_val debug_cram_get(debug_array *array, uint32_t index)
+{
+	vdp_context *vdp = array->base;
+	return debug_int(vdp->cram[index] & CRAM_BITS);
+}
+
+static void debug_cram_set(debug_array *array, uint32_t index, debug_val val)
+{
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "cram can only be set to integers\n");
+		return;
+	}
+	vdp_context *vdp = array->base;
+	vdp->cram[index] = ival;
+}
+
+static debug_val debug_vreg_get(debug_array *array, uint32_t index)
+{
+	vdp_context *vdp = array->base;
+	return debug_int(vdp->regs[index]);
+}
+
+static void debug_vreg_set(debug_array *array, uint32_t index, debug_val val)
+{
+	vdp_context *vdp = array->base;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "vdp registers can only be set to integers\n");
+		return;
+	}
+	vdp_reg_write(vdp, index, ival);
+}
+
+static debug_root* find_vdp_root(vdp_context *context)
+{
+	debug_root *root = find_root(context);
+	debug_var *var = calloc(1, sizeof(debug_var));
+	var->get = vcounter_get;
+	var->ptr = context;
+	root->variables = tern_insert_ptr(root->variables, "vcounter", var);
+
+	var = calloc(1, sizeof(debug_var));
+	var->get = hcounter_get;
+	var->ptr = context;
+	root->variables = tern_insert_ptr(root->variables, "hcounter", var);
+
+	var = calloc(1, sizeof(debug_var));
+	var->get = vdp_address_get;
+	var->set = vdp_address_set;
+	var->ptr = context;
+	root->variables = tern_insert_ptr(root->variables, "address", var);
+
+	var = calloc(1, sizeof(debug_var));
+	var->get = vdp_cd_get;
+	var->set = vdp_cd_set;
+	var->ptr = context;
+	root->variables = tern_insert_ptr(root->variables, "cd", var);
+
+	new_readonly_variable(root, "vram", new_fixed_array(context, debug_vram_get, debug_vram_set, VRAM_SIZE));
+	new_readonly_variable(root, "vsram", new_fixed_array(context, debug_vsram_get, debug_vsram_set, context->vsram_size));
+	new_readonly_variable(root, "cram", new_fixed_array(context, debug_cram_get, debug_cram_set, CRAM_SIZE));
+	new_readonly_variable(root, "reg", new_fixed_array(context, debug_vreg_get, debug_vreg_set, VDP_REGS));
+
+	return root;
+}
+
+static debug_val debug_part1_get(debug_array *array, uint32_t index)
+{
+	ym2612_context *ym = array->base;
+	return debug_int(ym->part1_regs[index]);
+}
+
+static void debug_part1_set(debug_array *array, uint32_t index, debug_val val)
+{
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "ym2612 registers can only be set to integers\n");
+		return;
+	}
+	ym2612_context *ym = array->base;
+	uint8_t old_part = ym->selected_part;
+	uint8_t old_reg = ym->selected_reg;
+	ym->selected_part = 0;
+	ym->selected_reg = index;
+	ym_data_write(ym, ival);
+	ym->selected_part = old_part;
+	ym->selected_reg = old_reg;
+}
+
+static debug_val debug_part2_get(debug_array *array, uint32_t index)
+{
+	ym2612_context *ym = array->base;
+	return debug_int(ym->part2_regs[index]);
+}
+
+static void debug_part2_set(debug_array *array, uint32_t index, debug_val val)
+{
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "ym2612 registers can only be set to integers\n");
+		return;
+	}
+	ym2612_context *ym = array->base;
+	uint8_t old_part = ym->selected_part;
+	uint8_t old_reg = ym->selected_reg;
+	ym->selected_part = 1;
+	ym->selected_reg = index;
+	ym_data_write(ym, ival);
+	ym->selected_part = old_part;
+	ym->selected_reg = old_reg;
+}
+
+static debug_root* find_ym2612_root(ym2612_context *context)
+{
+	debug_root *root = find_root(context);
+
+	new_readonly_variable(root, "part1", new_fixed_array(context, debug_part1_get, debug_part1_set, YM_REG_END));
+	new_readonly_variable(root, "part2", new_fixed_array(context, debug_part2_get, debug_part2_set, YM_REG_END));
+
+	return root;
+}
+
+
+static debug_val debug_psgfreq_get(debug_array *array, uint32_t index)
+{
+	psg_context *psg = array->base;
+	return debug_int(psg->counter_load[index]);
+}
+
+static void debug_psgfreq_set(debug_array *array, uint32_t index, debug_val val)
+{
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "psg registers can only be set to integers\n");
+		return;
+	}
+	psg_context *psg = array->base;
+	psg->counter_load[index] = ival;
+}
+
+static debug_val debug_psgcount_get(debug_array *array, uint32_t index)
+{
+	psg_context *psg = array->base;
+	return debug_int(psg->counters[index]);
+}
+
+static void debug_psgcount_set(debug_array *array, uint32_t index, debug_val val)
+{
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "psg registers can only be set to integers\n");
+		return;
+	}
+	psg_context *psg = array->base;
+	psg->counters[index] = ival;
+}
+
+static debug_val debug_psgvol_get(debug_array *array, uint32_t index)
+{
+	psg_context *psg = array->base;
+	return debug_int(psg->volume[index]);
+}
+
+static void debug_psgvol_set(debug_array *array, uint32_t index, debug_val val)
+{
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "psg registers can only be set to integers\n");
+		return;
+	}
+	psg_context *psg = array->base;
+	psg->volume[index] = ival;
+}
+
+debug_root *find_psg_root(psg_context *psg)
+{
+	debug_root *root = find_root(psg);
+
+	new_readonly_variable(root, "frequency", new_fixed_array(psg, debug_psgfreq_get, debug_psgfreq_set, 4));
+	new_readonly_variable(root, "counter", new_fixed_array(psg, debug_psgcount_get, debug_psgcount_set, 4));
+	new_readonly_variable(root, "volume", new_fixed_array(psg, debug_psgvol_get, debug_psgvol_set, 4));
+
+	return root;
 }
 
 void ambiguous_iter(char *key, tern_val val, uint8_t valtype, void *data)
@@ -1660,26 +1981,38 @@ static void make_format_str(char *format_str, char *format)
 	}
 }
 
-static void do_print(debug_root *root, char *format_str, char *raw, uint32_t value)
+static void do_print(debug_root *root, char *format_str, char *raw, debug_val value)
 {
-	if (format_str[5] == 's') {
-		char tmp[128];
-		int j;
-		uint32_t addr = value;
-		for (j = 0; j < sizeof(tmp)-1; j++, addr++)
-		{
-			uint32_t tmp_addr = addr;
-			root->read_mem(root, &tmp_addr, 'b');
-			char c = tmp_addr;
-			if (c < 0x20 || c > 0x7F) {
-				break;
+	switch(value.type)
+	{
+	case DBG_VAL_U32:
+		if (format_str[5] == 's') {
+			char tmp[128];
+			int j;
+			uint32_t addr = value.v.u32;
+			for (j = 0; j < sizeof(tmp)-1; j++, addr++)
+			{
+				uint32_t tmp_addr = addr;
+				root->read_mem(root, &tmp_addr, 'b');
+				char c = tmp_addr;
+				if (c < 0x20 || c > 0x7F) {
+					break;
+				}
+				tmp[j] = c;
 			}
-			tmp[j] = c;
+			tmp[j] = 0;
+			printf(format_str, raw, tmp);
+		} else {
+			printf(format_str, raw, value.v.u32);
 		}
-		tmp[j] = 0;
-		printf(format_str, raw, tmp);
-	} else {
-		printf(format_str, raw, value);
+		break;
+	case DBG_VAL_F32: {
+		char tmp = format_str[5];
+		format_str[5] = 'f';
+		printf(format_str, raw, value.v.f32);
+		format_str[5] = tmp;
+		break;
+	}
 	}
 }
 
@@ -1766,28 +2099,44 @@ static uint8_t cmd_printf(debug_root *root, parsed_command *cmd)
 				free(fmt);
 				return 1;
 			}
-			uint32_t val;
+			debug_val val;
 			if (!eval_expr(root, arg, &val)) {
 				free(fmt);
 				return 1;
 			}
 			if (cur[1] == 's') {
-				char tmp[128];
-				int j;
-				for (j = 0; j < sizeof(tmp)-1; j++, val++)
-				{
-					uint32_t addr = val;
-					root->read_mem(root, &addr, 'b');
-					char c = addr;
-					if (c < 0x20 || c > 0x7F) {
-						break;
+				if (val.type == DBG_VAL_STRING) {
+					//TODO: implement me
+				} else {
+					char tmp[128];
+					uint32_t address;
+					if (!debug_cast_int(val, &address)) {
+						fprintf(stderr, "Format char 's' accepts only integers and strings\n");
+						free(fmt);
+						return 1;
 					}
-					tmp[j] = c;
+					int j;
+					for (j = 0; j < sizeof(tmp)-1; j++, address++)
+					{
+						uint32_t addr = address;
+						root->read_mem(root, &addr, 'b');
+						char c = addr;
+						if (c < 0x20 || c > 0x7F) {
+							break;
+						}
+						tmp[j] = c;
+					}
+					tmp[j] = 0;
+					printf(format_str, tmp);
 				}
-				tmp[j] = 0;
-				printf(format_str, tmp);
 			} else {
-				printf(format_str, val);
+				uint32_t ival;
+				if (!debug_cast_int(val, &ival)) {
+					fprintf(stderr, "Format char '%c' only accepts integers\n", cur[1]);
+					free(fmt);
+					return 1;
+				}
+				printf(format_str, ival);
 			}
 			cur += 2;
 		} else {
@@ -1817,9 +2166,14 @@ static uint8_t cmd_display(debug_root *root, parsed_command *cmd)
 static uint8_t cmd_delete_display(debug_root *root, parsed_command *cmd)
 {
 	disp_def **cur = &root->displays;
+	uint32_t index;
+	if (!debug_cast_int(cmd->args[0].value, &index)) {
+		fprintf(stderr, "Argument to deletedisplay must be an integer\n");
+		return 1;
+	}
 	while (*cur)
 	{
-		if ((*cur)->index == cmd->args[0].value) {
+		if ((*cur)->index == index) {
 			disp_def *del_disp = *cur;
 			*cur = del_disp->next;
 			free(del_disp->format);
@@ -1851,9 +2205,14 @@ static uint8_t cmd_softreset(debug_root *root, parsed_command *cmd)
 
 static uint8_t cmd_command(debug_root *root, parsed_command *cmd)
 {
-	bp_def **target = find_breakpoint_idx(&root->breakpoints, cmd->args[0].value);
+	uint32_t index;
+	if (!debug_cast_int(cmd->args[0].value, &index)) {
+		fprintf(stderr, "Argument to commands must be an integer\n");
+		return 1;
+	}
+	bp_def **target = find_breakpoint_idx(&root->breakpoints, index);
 	if (!target) {
-		fprintf(stderr, "Breakpoint %d does not exist!\n", cmd->args[0].value);
+		fprintf(stderr, "Breakpoint %d does not exist!\n", index);
 		return 1;
 	}
 	for (uint32_t i = 0; i < (*target)->num_commands; i++)
@@ -1880,12 +2239,12 @@ static uint8_t execute_block(debug_root *root, command_block * block)
 
 static uint8_t cmd_if(debug_root *root, parsed_command *cmd)
 {
-	return execute_block(root, cmd->args[0].value ? &cmd->block : &cmd->else_block);
+	return execute_block(root, debug_cast_bool(cmd->args[0].value) ? &cmd->block : &cmd->else_block);
 }
 
 static uint8_t cmd_while(debug_root *root, parsed_command *cmd)
 {
-	if (!cmd->args[0].value) {
+	if (!debug_cast_bool(cmd->args[0].value)) {
 		return execute_block(root, &cmd->else_block);
 	}
 	int debugging = 1;
@@ -1895,7 +2254,7 @@ static uint8_t cmd_while(debug_root *root, parsed_command *cmd)
 			fprintf(stderr, "Failed to eval %s\n", cmd->args[0].raw);
 			return 1;
 		}
-	} while (cmd->args[0].value);
+	} while (debug_cast_bool(cmd->args[0].value));
 	return debugging;
 }
 
@@ -1912,98 +2271,133 @@ static uint8_t cmd_set(debug_root *root, parsed_command *cmd)
 {
 	char *name = NULL;
 	char size = 0;
-	uint32_t address;
+	debug_root *set_root = root;
+	expr *set_expr = cmd->args[0].parsed;
+	while (set_expr->type == EXPR_NAMESPACE)
+	{
+		set_root = tern_find_ptr(set_root->other_roots, set_expr->op.v.str);
+		if (!set_root) {
+			fprintf(stderr, "%s is not a valid namespace\n", set_expr->op.v.str);
+			return 1;
+		}
+		set_expr = set_expr->left;
+	}
+	debug_val address;
 	debug_array *array = NULL;
-	switch (cmd->args[0].parsed->type)
+	switch (set_expr->type)
 	{
 	case EXPR_SCALAR:
-		if (cmd->args[0].parsed->op.type == TOKEN_NAME) {
-			name = cmd->args[0].parsed->op.v.str;
+		if (set_expr->op.type == TOKEN_NAME) {
+			name = set_expr->op.v.str;
 		} else {
 			fputs("First argument to set must be a name or memory expression, not a number", stderr);
 			return 1;
 		}
 		break;
 	case EXPR_SIZE:
-		size = cmd->args[0].parsed->op.v.op[0];
-		if (cmd->args[0].parsed->left->op.type == TOKEN_NAME) {
-			name = cmd->args[0].parsed->left->op.v.str;
+		size = set_expr->op.v.op[0];
+		if (set_expr->left->op.type == TOKEN_NAME) {
+			name = set_expr->left->op.v.str;
 		} else {
 			fputs("First argument to set must be a name or memory expression, not a number", stderr);
 			return 1;
 		}
 		break;
 	case EXPR_MEM:
-		size = cmd->args[0].parsed->op.v.op[0];
-		if (!eval_expr(root, cmd->args[0].parsed->left, &address)) {
+		size = set_expr->op.v.op[0];
+		if (!eval_expr(root, set_expr->left, &address)) {
 			fprintf(stderr, "Failed to eval %s\n", cmd->args[0].raw);
 			return 1;
 		}
-		if (cmd->args[0].parsed->right) {
-			array = full_array_resolve(root, cmd->args[0].parsed->right->op.v.str);
+		if (address.type != DBG_VAL_U32) {
+			fprintf(stderr, "Index in array expression must be integer\n");
+			return 1;
+		}
+		if (set_expr->right) {
+			debug_val right;
+			if (!eval_expr(root, set_expr->right, &right)) {
+				return 1;
+			}
+			array = get_array(right);
 			if (!array) {
-				fprintf(stderr, "Failed to resolve array %s\n", cmd->args[0].parsed->right->op.v.str);
+				fprintf(stderr, "%s does not refer to an array\n", cmd->args[0].raw);
 				return 1;
 			}
 			if (!array->set) {
-				fprintf(stderr, "Array %s is read-only\n", cmd->args[0].parsed->right->op.v.str);
+				fprintf(stderr, "Array %s is read-only\n", set_expr->right->op.v.str);
 				return 1;
 			}
-			if (address >= array->size) {
-				fprintf(stderr, "Address %X is out of bounds for array %s\n", address, cmd->args[0].parsed->right->op.v.str);
+			if (address.v.u32 >= array->size) {
+				fprintf(stderr, "Address %X is out of bounds for array %s\n", address.v.u32, set_expr->right->op.v.str);
 				return 1;
 			}
 		}
 		break;
 	default:
-		fprintf(stderr, "First argument to set must be a name or memory expression, got %s\n", expr_type_names[cmd->args[0].parsed->type]);
+		fprintf(stderr, "First argument to set must be a name or memory expression, got %s\n", expr_type_names[set_expr->type]);
 		return 1;
 	}
 	if (!eval_expr(root, cmd->args[1].parsed, &cmd->args[1].value)) {
 		fprintf(stderr, "Failed to eval %s\n", cmd->args[1].raw);
 		return 1;
 	}
-	uint32_t value = cmd->args[1].value;
-	if (name && size && size != 'l') {
-		uint32_t old;
-		if (!root->resolve(root, name, &old)) {
-			fprintf(stderr, "Failed to eval %s\n", name);
+	debug_val value = cmd->args[1].value;
+	if (name) {
+		debug_var *var = tern_find_ptr(set_root->variables, name);
+		if (!var) {
+			fprintf(stderr, "%s is not defined\n", name);
 			return 1;
 		}
-		if (size == 'b') {
-			old &= 0xFFFFFF00;
-			value &= 0xFF;
-			value |= old;
-		} else {
-			old &= 0xFFFF0000;
-			value &= 0xFFFF;
-			value |= old;
+		if (!var->set) {
+			fprintf(stderr, "%s is read-only\n", name);
+			return 1;
 		}
-	}
-	if (name) {
-		if (!root->set(root, name, value)) {
-			tern_val v;
-			if (tern_find(root->variables, name, &v)) {
-				root->variables = tern_insert_int(root->variables, name, value);
+		if (size && size != 'l') {
+			debug_val old = var->get(var);
+			if (size == 'b') {
+				old.v.u32 &= 0xFFFFFF00;
+				value.v.u32 &= 0xFF;
+				value.v.u32 |= old.v.u32;
 			} else {
-				fprintf(stderr, "Failed to set %s\n", name);
+				old.v.u32 &= 0xFFFF0000;
+				value.v.u32 &= 0xFFFF;
+				value.v.u32 |= old.v.u32;
 			}
 		}
+		var->set(var, value);
 	} else if (array) {
-		array->set(root, array, address, value);
-	} else if (!root->write_mem(root, address, value, size)) {
-		fprintf(stderr, "Failed to write to address %X\n", address);
+		array->set(array, address.v.u32, value);
+	} else if (!root->write_mem(root, address.v.u32, value.v.u32, size)) {
+		fprintf(stderr, "Failed to write to address %X\n", address.v.u32);
 	}
 	return 1;
 }
 
 static uint8_t cmd_variable(debug_root *root, parsed_command *cmd)
 {
-	if (cmd->args[0].parsed->type != EXPR_SCALAR || cmd->args[0].parsed->op.type != TOKEN_NAME) {
-		fprintf(stderr, "First argument to variable must be a name, got %s\n", expr_type_names[cmd->args[0].parsed->type]);
+	debug_root *set_root = root;
+	expr *set_expr = cmd->args[0].parsed;
+	while (set_expr->type == EXPR_NAMESPACE)
+	{
+		set_root = tern_find_ptr(set_root->other_roots, set_expr->op.v.str);
+		if (!set_root) {
+			fprintf(stderr, "%s is not a valid namespace\n", set_expr->op.v.str);
+			return 1;
+		}
+		set_expr = set_expr->left;
+	}
+	if (set_expr->type != EXPR_SCALAR || set_expr->op.type != TOKEN_NAME) {
+		fprintf(stderr, "First argument to variable must be a name, got %s\n", expr_type_names[set_expr->type]);
 		return 1;
 	}
-	uint32_t value = 0;
+	debug_var *var = tern_find_ptr(set_root->variables, set_expr->op.v.str);
+	if (var) {
+		fprintf(stderr, "%s is already defined\n", set_expr->op.v.str);
+		return 1;
+	}
+	debug_val value;
+	value.type = DBG_VAL_U32;
+	value.v.u32 = 0;
 	if (cmd->num_args > 1) {
 		if (!eval_expr(root, cmd->args[1].parsed, &cmd->args[1].value)) {
 			fprintf(stderr, "Failed to eval %s\n", cmd->args[1].raw);
@@ -2011,83 +2405,85 @@ static uint8_t cmd_variable(debug_root *root, parsed_command *cmd)
 		}
 		value = cmd->args[1].value;
 	}
-	root->variables = tern_insert_int(root->variables, cmd->args[0].parsed->op.v.str, value);
+	new_user_variable(set_root, set_expr->op.v.str, value);
 	return 1;
-}
-
-static uint32_t user_array_get(debug_root *root, debug_array *array, uint32_t index)
-{
-	return array->data[index];
-}
-
-static void user_array_set(debug_root *root, debug_array *array, uint32_t index, uint32_t value)
-{
-	array->data[index] = value;
-}
-
-static void user_array_append(debug_root *root, debug_array *array, uint32_t value)
-{
-	if (array->size == array->storage) {
-		array->storage *= 2;
-		array->data = realloc(array->data, sizeof(uint32_t) * array->storage);
-	}
-	array->data[array->size++] = value;
 }
 
 static uint8_t cmd_array(debug_root *root, parsed_command *cmd)
 {
-	if (cmd->args[0].parsed->type != EXPR_SCALAR || cmd->args[0].parsed->op.type != TOKEN_NAME) {
-		fprintf(stderr, "First argument to array must be a name, got %s\n", expr_type_names[cmd->args[0].parsed->type]);
+	debug_root *set_root = root;
+	expr *set_expr = cmd->args[0].parsed;
+	while (set_expr->type == EXPR_NAMESPACE)
+	{
+		set_root = tern_find_ptr(set_root->other_roots, set_expr->op.v.str);
+		if (!set_root) {
+			fprintf(stderr, "%s is not a valid namespace\n", set_expr->op.v.str);
+			return 1;
+		}
+		set_expr = set_expr->left;
+	}
+	if (set_expr->type != EXPR_SCALAR || set_expr->op.type != TOKEN_NAME) {
+		fprintf(stderr, "First argument to array must be a name, got %s\n", expr_type_names[set_expr->type]);
 		return 1;
 	}
-	debug_array *array = tern_find_ptr(root->arrays, cmd->args[0].parsed->op.v.str);
-	if (!array) {
-		array = calloc(1, sizeof(debug_array));
-		array->get = user_array_get;
-		array->set = user_array_set;
-		array->append = user_array_append;
-		array->storage = cmd->num_args > 1 ? cmd->num_args - 1 : 4;
-		array->data = calloc(array->storage, sizeof(uint32_t));
-		root->arrays = tern_insert_ptr(root->arrays, cmd->args[0].parsed->op.v.str, array);
+	debug_var *var = tern_find_ptr(set_root->variables, set_expr->op.v.str);
+	debug_array *array;
+	if (var) {
+		debug_val val = var->get(var);
+		array = get_array(val);
+		if (!array) {
+			fprintf(stderr, "%s is already defined as a non-array value\n", set_expr->op.v.str);
+			return 1;
+		}
+	} else {
+		var = calloc(1, sizeof(debug_var));
+		var->get = user_var_get;
+		var->set = user_var_set;
+		var->val = new_user_array(cmd->num_args - 1);
+		set_root->variables = tern_insert_ptr(set_root->variables, set_expr->op.v.str, var);
+		array = get_array(var->val);
 	}
-	array->size = cmd->num_args - 1;
-	for (uint32_t i = 1; i < cmd->num_args; i++)
+	if (array->set == user_array_set) {
+		array->size = cmd->num_args - 1;
+		if (array->storage < array->size) {
+			array->storage = array->size;
+			array->base = realloc(array->base, sizeof(debug_val) * array->storage);
+		}
+	}
+	for (uint32_t i = 1; i < cmd->num_args && i < array->size; i++)
 	{
 		if (!eval_expr(root, cmd->args[i].parsed, &cmd->args[i].value)) {
 			fprintf(stderr, "Failed to eval %s\n", cmd->args[i].raw);
 			return 1;
 		}
-		array->set(root, array, i - 1, cmd->args[i].value);
+		array->set(array, i - 1, cmd->args[i].value);
 	}
 	return 1;
 }
 
 static uint8_t cmd_append(debug_root *root, parsed_command *cmd)
 {
-	if (cmd->args[0].parsed->type != EXPR_SCALAR || cmd->args[0].parsed->op.type != TOKEN_NAME) {
-		fprintf(stderr, "First argument to append must be a name, got %s\n", expr_type_names[cmd->args[0].parsed->type]);
-		return 1;
-	}
-	debug_array *array = full_array_resolve(root, cmd->args[0].parsed->op.v.str);
+	debug_array *array = get_array(cmd->args[0].value);
 	if (!array) {
-		fprintf(stderr, "Failed to resolve array %s\n", cmd->args[0].parsed->op.v.str);
+		fprintf(stderr, "%s is not an array\n", cmd->args[0].raw);
 		return 1;
 	}
 	if (!array->append) {
-		fprintf(stderr, "Array %s doesn't support appending\n", cmd->args[0].parsed->op.v.str);
+		fprintf(stderr, "Array %s doesn't support appending\n", cmd->args[0].raw);
 		return 1;
 	}
-	if (!eval_expr(root, cmd->args[1].parsed, &cmd->args[1].value)) {
-		fprintf(stderr, "Failed to eval %s\n", cmd->args[1].raw);
-		return 1;
-	}
-	array->append(root, array, cmd->args[1].value);
+	array->append(array, cmd->args[1].value);
 	return 1;
 }
 
 static uint8_t cmd_frames(debug_root *root, parsed_command *cmd)
 {
-	current_system->enter_debugger_frames = cmd->args[0].value;
+	uint32_t frames;
+	if (!debug_cast_int(cmd->args[0].value, &frames)) {
+		fprintf(stderr, "Argument to frames must be an integer\n");
+		return 1;
+	}
+	current_system->enter_debugger_frames = frames;
 	return 0;
 }
 
@@ -2113,9 +2509,14 @@ static uint8_t cmd_condition(debug_root *root, parsed_command *cmd)
 		fprintf(stderr, "Failed to evaluate breakpoint number: %s\n", cmd->args[0].raw);
 		return 1;
 	}
-	bp_def **target = find_breakpoint_idx(&root->breakpoints, cmd->args[0].value);
+	uint32_t index;
+	if (!debug_cast_int(cmd->args[0].value, &index)) {
+		fprintf(stderr, "First argument to condition must be an integer\n");
+		return 1;
+	}
+	bp_def **target = find_breakpoint_idx(&root->breakpoints, index);
 	if (!*target) {
-		fprintf(stderr, "Failed to find breakpoint %u\n", cmd->args[0].value);
+		fprintf(stderr, "Failed to find breakpoint %u\n", index);
 		return 1;
 	}
 	free_expr((*target)->condition);
@@ -2186,9 +2587,14 @@ static uint8_t cmd_symbols(debug_root *root, parsed_command *cmd)
 
 static uint8_t cmd_delete_m68k(debug_root *root, parsed_command *cmd)
 {
-	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, cmd->args[0].value);
+	uint32_t index;
+	if (!debug_cast_int(cmd->args[0].value, &index)) {
+		fprintf(stderr, "Argument to delete must be an integer\n");
+		return 1;
+	}
+	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, index);
 	if (!*this_bp) {
-		fprintf(stderr, "Breakpoint %d does not exist\n", cmd->args[0].value);
+		fprintf(stderr, "Breakpoint %d does not exist\n", index);
 		return 1;
 	}
 	bp_def *tmp = *this_bp;
@@ -2209,15 +2615,20 @@ static uint8_t cmd_delete_m68k(debug_root *root, parsed_command *cmd)
 
 static uint8_t cmd_breakpoint_m68k(debug_root *root, parsed_command *cmd)
 {
-	insert_breakpoint(root->cpu_context, cmd->args[0].value, debugger);
+	uint32_t address;
+	if (!debug_cast_int(cmd->args[0].value, &address)) {
+		fprintf(stderr, "Argument to breakpoint must be an integer\n");
+		return 1;
+	}
+	insert_breakpoint(root->cpu_context, address, debugger);
 	bp_def *new_bp = calloc(1, sizeof(bp_def));
 	new_bp->next = root->breakpoints;
-	new_bp->address = cmd->args[0].value;
+	new_bp->address = address;
 	new_bp->mask = 0xFFFFFF;
 	new_bp->index = root->bp_index++;
 	new_bp->type = BP_TYPE_CPU;
 	root->breakpoints = new_bp;
-	printf("68K Breakpoint %d set at %X\n", new_bp->index, cmd->args[0].value);
+	printf("68K Breakpoint %d set at %X\n", new_bp->index, address);
 	return 1;
 }
 
@@ -2233,9 +2644,9 @@ static void on_vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
 	int debugging = 1;
 	if (*this_bp) {
 		if ((*this_bp)->condition) {
-			uint32_t condres;
+			debug_val condres;
 			if (eval_expr(root, (*this_bp)->condition, &condres)) {
-				if (!condres) {
+				if (!condres.v.u32) {
 					return;
 				}
 			} else {
@@ -2266,8 +2677,18 @@ static uint8_t cmd_vdp_reg_break(debug_root *root, parsed_command *cmd)
 	bp_def *new_bp = calloc(1, sizeof(bp_def));
 	new_bp->next = root->breakpoints;
 	if (cmd->num_args) {
-		new_bp->address = cmd->args[0].value;
-		new_bp->mask = cmd->num_args > 1 ? cmd->args[1].value : 0xFF;
+		if (!debug_cast_int(cmd->args[0].value, &new_bp->address)) {
+			fprintf(stderr, "Arguments to vdpregbreak must be integers if provided\n");
+			return 1;
+		}
+		if (cmd->num_args > 1) {
+			if (!debug_cast_int(cmd->args[1].value, &new_bp->mask)) {
+				fprintf(stderr, "Arguments to vdpregbreak must be integers if provided\n");
+				return 1;
+			}
+		} else {
+			new_bp->mask = 0xFF;
+		}
 	}
 	new_bp->index = root->bp_index++;
 	new_bp->type = BP_TYPE_VDPREG;
@@ -2281,7 +2702,12 @@ static uint8_t cmd_vdp_reg_break(debug_root *root, parsed_command *cmd)
 
 static uint8_t cmd_advance_m68k(debug_root *root, parsed_command *cmd)
 {
-	insert_breakpoint(root->cpu_context, cmd->args[0].value, debugger);
+	uint32_t address;
+	if (!debug_cast_int(cmd->args[0].value, &address)) {
+		fprintf(stderr, "Argument to advance must be an integer\n");
+		return 1;
+	}
+	insert_breakpoint(root->cpu_context, address, debugger);
 	return 0;
 }
 
@@ -2417,7 +2843,10 @@ static uint8_t cmd_disassemble_m68k(debug_root *root, parsed_command *cmd)
 	m68k_context *context = root->cpu_context;
 	uint32_t address = root->address;
 	if (cmd->num_args) {
-		address = cmd->args[0].value;
+		if (!debug_cast_int(cmd->args[0].value, &address)) {
+			fprintf(stderr, "Argument to disassemble must be an integer if provided\n");
+			return 1;
+		}
 	}
 	char disasm_buf[1024];
 	m68kinst inst;
@@ -2458,7 +2887,7 @@ static uint8_t cmd_ym_channel(debug_root *root, parsed_command *cmd)
 	m68k_context *context = root->cpu_context;
 	genesis_context * gen = context->system;
 	if (cmd->num_args) {
-		ym_print_channel_info(gen->ym, cmd->args[0].value - 1);
+		ym_print_channel_info(gen->ym, cmd->args[0].value.v.u32 - 1);
 	} else {
 		for (int i = 0; i < 6; i++) {
 			ym_print_channel_info(gen->ym, i);
@@ -2697,8 +3126,7 @@ command_def common_commands[] = {
 		.desc = "Increase the size of array NAME by 1 and set the last element to VALUE",
 		.impl = cmd_append,
 		.min_args = 2,
-		.max_args = 2,
-		.skip_eval = 1
+		.max_args = 2
 	},
 	{
 		.names = (const char *[]){
@@ -2970,9 +3398,14 @@ command_def scd_sub_commands[] = {
 
 static uint8_t cmd_delete_z80(debug_root *root, parsed_command *cmd)
 {
-	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, cmd->args[0].value);
+	uint32_t index;
+	if (!debug_cast_int(cmd->args[0].value, &index)) {
+		fprintf(stderr, "Argument to delete must be an integer\n");
+		return 1;
+	}
+	bp_def **this_bp = find_breakpoint_idx(&root->breakpoints, index);
 	if (!*this_bp) {
-		fprintf(stderr, "Breakpoint %d does not exist\n", cmd->args[0].value);
+		fprintf(stderr, "Breakpoint %d does not exist\n", index);
 		return 1;
 	}
 	bp_def *tmp = *this_bp;
@@ -2991,21 +3424,31 @@ static uint8_t cmd_delete_z80(debug_root *root, parsed_command *cmd)
 
 static uint8_t cmd_breakpoint_z80(debug_root *root, parsed_command *cmd)
 {
-	zinsert_breakpoint(root->cpu_context, cmd->args[0].value, (uint8_t *)zdebugger);
+	uint32_t address;
+	if (!debug_cast_int(cmd->args[0].value, &address)) {
+		fprintf(stderr, "Argument to breakpoint must be an integer\n");
+		return 1;
+	}
+	zinsert_breakpoint(root->cpu_context, address, (uint8_t *)zdebugger);
 	bp_def *new_bp = calloc(1, sizeof(bp_def));
 	new_bp->next = root->breakpoints;
-	new_bp->address = cmd->args[0].value;
+	new_bp->address = address;
 	new_bp->mask = 0xFFFF;
 	new_bp->type = BP_TYPE_CPU;
 	new_bp->index = root->bp_index++;
 	root->breakpoints = new_bp;
-	printf("Z80 Breakpoint %d set at %X\n", new_bp->index, cmd->args[0].value);
+	printf("Z80 Breakpoint %d set at %X\n", new_bp->index, address);
 	return 1;
 }
 
 static uint8_t cmd_advance_z80(debug_root *root, parsed_command *cmd)
 {
-	zinsert_breakpoint(root->cpu_context, cmd->args[0].value, (uint8_t *)zdebugger);
+	uint32_t address;
+	if (!debug_cast_int(cmd->args[0].value, &address)) {
+		fprintf(stderr, "Argument to advance must be an integer\n");
+		return 1;
+	}
+	zinsert_breakpoint(root->cpu_context, address, (uint8_t *)zdebugger);
 	return 0;
 }
 
@@ -3118,7 +3561,10 @@ static uint8_t cmd_disassemble_z80(debug_root *root, parsed_command *cmd)
 	z80_context *context = root->cpu_context;
 	uint32_t address = root->address;
 	if (cmd->num_args) {
-		address = cmd->args[0].value;
+		if (!debug_cast_int(cmd->args[0].value, &address)) {
+			fprintf(stderr, "Argument to disassemble must be an integer if provided\n");
+			return 1;
+		}
 	}
 	char disasm_buf[1024];
 	z80inst inst;
@@ -3332,6 +3778,12 @@ static void symbol_map(char *key, tern_val val, uint8_t valtype, void *data)
 	}
 }
 
+static debug_val debug_frame_get(debug_var *var)
+{
+	vdp_context *vdp = var->ptr;
+	return debug_int(vdp->frame);
+}
+
 debug_root *find_m68k_root(m68k_context *context)
 {
 	debug_root *root = find_root(context);
@@ -3340,29 +3792,40 @@ debug_root *find_m68k_root(m68k_context *context)
 		add_commands(root, m68k_commands, NUM_68K);
 		root->read_mem = read_m68k;
 		root->write_mem = write_m68k;
-		root->set = set_m68k;
 		root->disasm = create_68000_disasm();
+		m68k_names(root);
+		debug_var *var;
 		switch (current_system->type)
 		{
 		case SYSTEM_GENESIS:
 		case SYSTEM_SEGACD:
 			//check if this is the main CPU
 			if (context->system == current_system) {
-				root->resolve = resolve_genesis;
-				root->array_resolve = resolve_genesis_array;
+				genesis_context *gen = context->system;
+				root->other_roots = tern_insert_ptr(root->other_roots, "z80", find_z80_root(gen->z80));
+				root->other_roots = tern_insert_ptr(root->other_roots, "vdp", find_vdp_root(gen->vdp));
+				root->other_roots = tern_insert_ptr(root->other_roots, "ym", find_ym2612_root(gen->ym));
+				root->other_roots = tern_insert_ptr(root->other_roots, "psg", find_psg_root(gen->psg));
 				add_commands(root, genesis_commands, NUM_GENESIS);
+				var = calloc(1, sizeof(debug_var));
+				var->get = debug_frame_get;
+				var->ptr = gen->vdp;
+				root->variables = tern_insert_ptr(root->variables, "frame", var);
 				if (current_system->type == SYSTEM_SEGACD) {
 					add_segacd_maincpu_labels(root->disasm);
 					add_commands(root, scd_main_commands, NUM_SCD_MAIN);
+					segacd_context *scd = gen->expansion;
+					root->other_roots = tern_insert_ptr(root->other_roots, "sub", find_m68k_root(scd->m68k));
 				}
 				break;
 			} else {
 				add_segacd_subcpu_labels(root->disasm);
 				add_commands(root, scd_sub_commands, NUM_SCD_SUB);
+				segacd_context *scd = context->system;
+				root->other_roots = tern_insert_ptr(root->other_roots, "main", find_m68k_root(scd->genesis->m68k));
 			}
 		default:
-			root->resolve = resolve_m68k;
-			root->array_resolve = resolve_null_array;
+			break;
 		}
 		tern_foreach(root->disasm->labels, symbol_map, root);
 	}
@@ -3392,473 +3855,321 @@ static uint8_t write_z80(debug_root *root, uint32_t address, uint32_t value, cha
 	return 1;
 }
 
-static uint8_t resolve_z80(debug_root *root, const char *name, uint32_t *out)
+static debug_val z80_reg8_get(debug_var *var)
 {
-	z80_context *context = root->cpu_context;
-	switch (tolower(name[0]))
-	{
-	case 'a':
-		if (!name[1]) {
-			*out = context->regs[Z80_A];
-		} else if (name[1] == '\'' && !name[2]) {
-			*out = context->alt_regs[Z80_A];
-		} else if (tolower(name[1]) == 'f') {
-			if (!name[2]) {
-				*out = context->regs[Z80_A] << 8;
-				*out |= context->flags[ZF_S] << 7;
-				*out |= context->flags[ZF_Z] << 6;
-				*out |= context->flags[ZF_H] << 4;
-				*out |= context->flags[ZF_PV] << 2;
-				*out |= context->flags[ZF_N] << 1;
-				*out |= context->flags[ZF_C];
-			} else if (name[2] == '\'' && !name[3]) {
-				*out = context->alt_regs[Z80_A] << 8;
-				*out |= context->alt_flags[ZF_S] << 7;
-				*out |= context->alt_flags[ZF_Z] << 6;
-				*out |= context->alt_flags[ZF_H] << 4;
-				*out |= context->alt_flags[ZF_PV] << 2;
-				*out |= context->alt_flags[ZF_N] << 1;
-				*out |= context->alt_flags[ZF_C];
-			} else {
-				return 0;
-			}
-		} else {
-			return 0;
-		}
-		break;
-	case 'b':
-		if (!name[1]) {
-			*out = context->regs[Z80_B];
-		} else if (name[1] == '\'' && !name[2]) {
-			*out = context->alt_regs[Z80_B];
-		} else if (tolower(name[1]) == 'c') {
-			if (!name[2]) {
-				*out = context->regs[Z80_B] << 8 | context->regs[Z80_C];
-			} else if (name[2] == '\'' && !name[3]) {
-				*out = context->alt_regs[Z80_B] << 8 | context->alt_regs[Z80_C];
-			} else {
-				return 0;
-			}
-		}
-		break;
-	case 'c':
-		if (!name[1]) {
-			*out = context->regs[Z80_C];
-		} else if (name[1] == '\'' && !name[2]) {
-			*out = context->alt_regs[Z80_C];
-		} else if (!strcmp(name + 1, "ycle")) {
-			*out = context->current_cycle;
-		} else {
-			return 0;
-		}
-		break;
-	case 'd':
-		if (!name[1]) {
-			*out = context->regs[Z80_D];
-		} else if (name[1] == '\'' && !name[2]) {
-			*out = context->alt_regs[Z80_D];
-		} else if (tolower(name[1]) == 'e') {
-			if (!name[2]) {
-				*out = context->regs[Z80_D] << 8 | context->regs[Z80_E];
-			} else if (name[2] == '\'' && !name[3]) {
-				*out = context->alt_regs[Z80_D] << 8 | context->alt_regs[Z80_E];
-			} else {
-				return 0;
-			}
-		}
-		break;
-	case 'e':
-		if (!name[1]) {
-			*out = context->regs[Z80_E];
-		} else if (name[1] == '\'' && !name[2]) {
-			*out = context->alt_regs[Z80_E];
-		} else {
-			return 0;
-		}
-		break;
-	case 'f':
-		if (!name[1]) {
-			*out = context->flags[ZF_S] << 7;
-			*out |= context->flags[ZF_Z] << 6;
-			*out |= context->flags[ZF_H] << 4;
-			*out |= context->flags[ZF_PV] << 2;
-			*out |= context->flags[ZF_N] << 1;
-			*out |= context->flags[ZF_C];
-		} else if (name[1] == '\'' && !name[2]) {
-			*out = context->alt_flags[ZF_S] << 7;
-			*out |= context->alt_flags[ZF_Z] << 6;
-			*out |= context->alt_flags[ZF_H] << 4;
-			*out |= context->alt_flags[ZF_PV] << 2;
-			*out |= context->alt_flags[ZF_N] << 1;
-			*out |= context->alt_flags[ZF_C];
-		} else {
-			return 0;
-		}
-		break;
-	case 'h':
-		if (!name[1]) {
-			*out = context->regs[Z80_H];
-		} else if (name[1] == '\'' && !name[2]) {
-			*out = context->alt_regs[Z80_H];
-		} else if (tolower(name[1]) == 'l') {
-			if (!name[2]) {
-				*out = context->regs[Z80_H] << 8 | context->regs[Z80_L];
-			} else if (name[2] == '\'' && !name[3]) {
-				*out = context->alt_regs[Z80_H] << 8 | context->alt_regs[Z80_L];
-			} else {
-				return 0;
-			}
-		}
-		break;
-	case 'i':
-		switch (tolower(name[1]))
-		{
-		case 0:
-			*out = context->regs[Z80_I];
-			break;
-		case 'f':
-			if (name[2] != 'f' || name[3] < '1' || name[4]) {
-				return 0;
-			}
-			if (name[3] == '1') {
-				*out = context->iff1;
-			} else if (name[3] == '2') {
-				*out = context->iff2;
-			} else {
-				return 0;
-			}
-			break;
-		case 'm':
-			if (name[2]) {
-				return 0;
-			}
-			*out = context->im;
-			break;
-		case 'n':
-			if (strcasecmp(name +2, "t_cycle")) {
-				return 0;
-			}
-			*out = context->int_cycle;
-			break;
-		case 'r':
-			if (name[2]) {
-				return 0;
-			}
-			*out = context->regs[Z80_I] << 8 | context->regs[Z80_R];
-			break;
-		case 'x':
-			switch (tolower(name[2]))
-			{
-			case 0:
-				*out = context->regs[Z80_IXH] << 8 | context->regs[Z80_IXL];
-				break;
-			case 'h':
-				if (name[3]) {
-					return 0;
-				}
-				*out = context->regs[Z80_IXH];
-			case 'l':
-				if (name[3]) {
-					return 0;
-				}
-				*out = context->regs[Z80_IXL];
-			default:
-				return 0;
-			}
-			break;
-		case 'y':
-			switch (tolower(name[2]))
-			{
-			case 0:
-				*out = context->regs[Z80_IYH] << 8 | context->regs[Z80_IYL];
-				break;
-			case 'h':
-				if (name[3]) {
-					return 0;
-				}
-				*out = context->regs[Z80_IYH];
-			case 'l':
-				if (name[3]) {
-					return 0;
-				}
-				*out = context->regs[Z80_IYL];
-			default:
-				return 0;
-			}
-			break;
-		default:
-			return 0;
-		}
-		break;
-	case 'l':
-		if (!name[1]) {
-			*out = context->regs[Z80_L];
-		} else if (name[1] == '\'' && !name[2]) {
-			*out = context->alt_regs[Z80_L];
-		} else {
-			return 0;
-		}
-		break;
-	case 'p':
-		if (tolower(name[1]) != 'c' || name[2]) {
-			return 0;
-		}
-		*out = root->address;
-		break;
-	case 'r':
-		if (name[1]) {
-			return 0;
-		}
-		*out = context->regs[Z80_R];
-	case 's':
-		if (tolower(name[1]) != 'p' || name[2]) {
-			return 0;
-		}
-		*out = context->sp;
-		break;
-	default:
-		return 0;
-	}
-	return 1;
+	z80_context *context = var->ptr;
+	return debug_int(context->regs[var->val.v.u32]);
 }
 
-static uint8_t resolve_sms(debug_root *root, const char *name, uint32_t *out)
+static void z80_reg8_set(debug_var *var, debug_val val)
 {
-	if (resolve_z80(root, name, out)) {
-		return 1;
+	z80_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "Z80 register %s can only be set to an integer\n", z80_regs[var->val.v.u32]);
+		return;
 	}
-	z80_context *z80 = root->cpu_context;
-	sms_context *sms = z80->system;
-	if (!strcmp(name, "f") || !strcmp(name, "frame")) {
-		*out = sms->vdp->frame;
-		return 1;
-	}
-	return 0;
+	context->regs[var->val.v.u32] = ival;
 }
 
-static uint8_t set_z80(debug_root *root, const char *name, uint32_t value)
+
+static debug_val z80_alt_reg8_get(debug_var *var)
 {
-	z80_context *context = root->cpu_context;
-	switch (tolower(name[0]))
-	{
-	case 'a':
-		if (!name[1]) {
-			context->regs[Z80_A] = value;
-		} else if (name[1] == '\'' && !name[2]) {
-			context->alt_regs[Z80_A] = value;
-		} else if (tolower(name[1]) == 'f') {
-			if (!name[2]) {
-				context->regs[Z80_A] = value >> 8;
-				context->flags[ZF_S] = value >> 7 & 1;
-				context->flags[ZF_Z] = value >> 6 & 1;
-				context->flags[ZF_H] = value >> 4 & 1;
-				context->flags[ZF_PV] = value >> 2 & 1;
-				context->flags[ZF_N] = value >> 1 & 1;
-				context->flags[ZF_C] = value & 1;
-			} else if (name[2] == '\'' && !name[3]) {
-				context->alt_regs[Z80_A] = value >> 8;
-				context->alt_flags[ZF_S] = value >> 7 & 1;
-				context->alt_flags[ZF_Z] = value >> 6 & 1;
-				context->alt_flags[ZF_H] = value >> 4 & 1;
-				context->alt_flags[ZF_PV] = value >> 2 & 1;
-				context->alt_flags[ZF_N] = value >> 1 & 1;
-				context->alt_flags[ZF_C] = value & 1;
-			} else {
-				return 0;
-			}
-		} else {
-			return 0;
-		}
-		break;
-	case 'b':
-		if (!name[1]) {
-			context->regs[Z80_B] = value;
-		} else if (name[1] == '\'' && !name[2]) {
-			context->alt_regs[Z80_B] = value;
-		} else if (tolower(name[1]) == 'c') {
-			if (!name[2]) {
-				context->regs[Z80_B] = value >> 8;
-				context->regs[Z80_C] = value;
-			} else if (name[2] == '\'' && !name[3]) {
-				context->alt_regs[Z80_B] = value >> 8;
-				context->alt_regs[Z80_C] = value;
-			} else {
-				return 0;
-			}
-		}
-		break;
-	case 'c':
-		if (!name[1]) {
-			context->regs[Z80_C] = value;
-		} else if (name[1] == '\'' && !name[2]) {
-			context->alt_regs[Z80_C] = value;
-		} else {
-			return 0;
-		}
-		break;
-	case 'd':
-		if (!name[1]) {
-			context->regs[Z80_D] = value;
-		} else if (name[1] == '\'' && !name[2]) {
-			context->alt_regs[Z80_D] = value;
-		} else if (tolower(name[1]) == 'e') {
-			if (!name[2]) {
-				context->regs[Z80_D] = value >> 8;
-				context->regs[Z80_E] = value;
-			} else if (name[2] == '\'' && !name[3]) {
-				context->alt_regs[Z80_D] = value >> 8;
-				context->alt_regs[Z80_E] = value;
-			} else {
-				return 0;
-			}
-		}
-		break;
-	case 'e':
-		if (!name[1]) {
-			context->regs[Z80_E] = value;
-		} else if (name[1] == '\'' && !name[2]) {
-			context->alt_regs[Z80_E] = value;
-		} else {
-			return 0;
-		}
-		break;
-	case 'f':
-		if (!name[1]) {
-			context->flags[ZF_S] = value >> 7 & 1;
-			context->flags[ZF_Z] = value >> 6 & 1;
-			context->flags[ZF_H] = value >> 4 & 1;
-			context->flags[ZF_PV] = value >> 2 & 1;
-			context->flags[ZF_N] = value >> 1 & 1;
-			context->flags[ZF_C] = value & 1;
-		} else if (name[1] == '\'' && !name[2]) {
-			context->alt_flags[ZF_S] = value >> 7 & 1;
-			context->alt_flags[ZF_Z] = value >> 6 & 1;
-			context->alt_flags[ZF_H] = value >> 4 & 1;
-			context->alt_flags[ZF_PV] = value >> 2 & 1;
-			context->alt_flags[ZF_N] = value >> 1 & 1;
-			context->alt_flags[ZF_C] = value & 1;
-		} else {
-			return 0;
-		}
-		break;
-	case 'h':
-		if (!name[1]) {
-			context->regs[Z80_H] = value;
-		} else if (name[1] == '\'' && !name[2]) {
-			context->alt_regs[Z80_H] = value;
-		} else if (tolower(name[1]) == 'e') {
-			if (!name[2]) {
-				context->regs[Z80_H] = value >> 8;
-				context->regs[Z80_L] = value;
-			} else if (name[2] == '\'' && !name[3]) {
-				context->alt_regs[Z80_H] = value >> 8;
-				context->alt_regs[Z80_L] = value;
-			} else {
-				return 0;
-			}
-		}
-		break;
-	case 'i':
-		switch (tolower(name[1]))
-		{
-		case 0:
-			context->regs[Z80_I] = value;
-			break;
-		case 'f':
-			if (name[2] != 'f' || name[3] < '1' || name[4]) {
-				return 0;
-			}
-			if (name[3] == '1') {
-				context->iff1 = value != 0;
-			} else if (name[3] == '2') {
-				context->iff2 = value != 0;
-			} else {
-				return 0;
-			}
-			break;
-		case 'm':
-			if (name[2]) {
-				return 0;
-			}
-			context->im = value & 3;
-			break;
-		case 'r':
-			if (name[2]) {
-				return 0;
-			}
-			context->regs[Z80_I] = value >> 8;
-			context->regs[Z80_R] = value;
-			break;
-		case 'x':
-			switch (tolower(name[2]))
-			{
-			case 0:
-				context->regs[Z80_IXH] = value >> 8;
-				context->regs[Z80_IXL] = value;
-				break;
-			case 'h':
-				if (name[3]) {
-					return 0;
-				}
-				context->regs[Z80_IXH] = value;
-			case 'l':
-				if (name[3]) {
-					return 0;
-				}
-				context->regs[Z80_IXL] = value;
-			default:
-				return 0;
-			}
-			break;
-		case 'y':
-			switch (tolower(name[2]))
-			{
-			case 0:
-				context->regs[Z80_IYH] = value >> 8;
-				context->regs[Z80_IYL] = value;
-				break;
-			case 'h':
-				if (name[3]) {
-					return 0;
-				}
-				context->regs[Z80_IYH] = value;
-			case 'l':
-				if (name[3]) {
-					return 0;
-				}
-				context->regs[Z80_IYL] = value;
-			default:
-				return 0;
-			}
-			break;
-		default:
-			return 0;
-		}
-		break;
-	case 'l':
-		if (!name[1]) {
-			context->regs[Z80_L] = value;
-		} else if (name[1] == '\'' && !name[2]) {
-			context->alt_regs[Z80_L] = value;
-		} else {
-			return 0;
-		}
-		break;
-	case 'r':
-		if (name[1]) {
-			return 0;
-		}
-		context->regs[Z80_R] = value;
-	case 's':
-		if (tolower(name[1]) != 'p' || name[2]) {
-			return 0;
-		}
-		context->sp = value;
-		break;
-	default:
-		return 0;
+	z80_context *context = var->ptr;
+	return debug_int(context->alt_regs[var->val.v.u32]);
+}
+
+static void z80_alt_reg8_set(debug_var *var, debug_val val)
+{
+	z80_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "Z80 register %s' can only be set to an integer\n", z80_regs[var->val.v.u32]);
+		return;
 	}
-	return 1;
+	context->alt_regs[var->val.v.u32] = ival;
+}
+
+static debug_val z80_flags_get(debug_var *var)
+{
+	z80_context *context = var->ptr;
+	debug_val ret;
+	ret.type = DBG_VAL_U32;
+	ret.v.u32 = context->flags[ZF_S] << 7;
+	ret.v.u32 |= context->flags[ZF_Z] << 6;
+	ret.v.u32 |= context->flags[ZF_H] << 4;
+	ret.v.u32 |= context->flags[ZF_PV] << 2;
+	ret.v.u32 |= context->flags[ZF_N] << 1;
+	ret.v.u32 |= context->flags[ZF_C];
+	return ret;
+}
+
+static debug_val z80_alt_flags_get(debug_var *var)
+{
+	z80_context *context = var->ptr;
+	debug_val ret;
+	ret.type = DBG_VAL_U32;
+	ret.v.u32 = context->alt_flags[ZF_S] << 7;
+	ret.v.u32 |= context->alt_flags[ZF_Z] << 6;
+	ret.v.u32 |= context->alt_flags[ZF_H] << 4;
+	ret.v.u32 |= context->alt_flags[ZF_PV] << 2;
+	ret.v.u32 |= context->alt_flags[ZF_N] << 1;
+	ret.v.u32 |= context->alt_flags[ZF_C];
+	return ret;
+}
+
+static void z80_flags_set(debug_var *var, debug_val val)
+{
+	z80_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "Z80 register F can only be set to an integer\n");
+		return;
+	}
+	context->flags[ZF_S] = ival >> 7 & 1;
+	context->flags[ZF_Z] = ival >> 6 & 1;
+	context->flags[ZF_H] = ival >> 4 & 1;
+	context->flags[ZF_PV] = ival >> 2 & 1;
+	context->flags[ZF_N] = ival >> 1 & 1;
+	context->flags[ZF_C] = ival & 1;
+}
+
+static void z80_alt_flags_set(debug_var *var, debug_val val)
+{
+	z80_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "Z80 register F' can only be set to an integer\n");
+		return;
+	}
+	context->alt_flags[ZF_S] = ival >> 7 & 1;
+	context->alt_flags[ZF_Z] = ival >> 6 & 1;
+	context->alt_flags[ZF_H] = ival >> 4 & 1;
+	context->alt_flags[ZF_PV] = ival >> 2 & 1;
+	context->alt_flags[ZF_N] = ival >> 1 & 1;
+	context->alt_flags[ZF_C] = ival & 1;
+}
+
+static debug_val z80_regpair_get(debug_var *var)
+{
+	z80_context *context = var->ptr;
+	debug_val ret;
+	if (var->val.v.u32 == Z80_AF) {
+		ret = z80_flags_get(var);
+		ret.v.u32 |= context->regs[Z80_A] << 8;
+	} else {
+		ret = debug_int(context->regs[z80_high_reg(var->val.v.u32)] << 8 | context->regs[z80_low_reg(var->val.v.u32)]);
+	}
+	return ret;
+}
+
+static void z80_regpair_set(debug_var *var, debug_val val)
+{
+	z80_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "Z80 register %s can only be set to an integer\n", z80_regs[var->val.v.u32]);
+		return;
+	}
+	if (var->val.v.u32 == Z80_AF) {
+		context->regs[Z80_A] = ival >> 8;
+		z80_flags_set(var, val);
+	} else {
+		context->regs[z80_high_reg(var->val.v.u32)] = ival >> 8;
+		context->regs[z80_low_reg(var->val.v.u32)] = ival;
+	}
+}
+
+static debug_val z80_alt_regpair_get(debug_var *var)
+{
+	z80_context *context = var->ptr;
+	debug_val ret;
+	if (var->val.v.u32 == Z80_AF) {
+		ret = z80_alt_flags_get(var);
+		ret.v.u32 |= context->alt_regs[Z80_A] << 8;
+	} else {
+		ret = debug_int(context->alt_regs[z80_high_reg(var->val.v.u32)] << 8 | context->alt_regs[z80_low_reg(var->val.v.u32)]);
+	}
+	return ret;
+}
+
+static void z80_alt_regpair_set(debug_var *var, debug_val val)
+{
+	z80_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "Z80 register %s' can only be set to an integer\n", z80_regs[var->val.v.u32]);
+		return;
+	}
+	if (var->val.v.u32 == Z80_AF) {
+		context->regs[Z80_A] = ival >> 8;
+		z80_alt_flags_set(var, val);
+	} else {
+		context->alt_regs[z80_high_reg(var->val.v.u32)] = ival >> 8;
+		context->alt_regs[z80_low_reg(var->val.v.u32)] = ival;
+	}
+}
+
+static debug_val z80_sp_get(debug_var *var)
+{
+	z80_context *context = var->ptr;
+	return debug_int(context->sp);
+}
+
+static void z80_sp_set(debug_var *var, debug_val val)
+{
+	z80_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "Z80 register sp can only be set to an integer\n");
+		return;
+	}
+	context->sp = ival;
+}
+
+static debug_val z80_im_get(debug_var *var)
+{
+	z80_context *context = var->ptr;
+	return debug_int(context->im);
+}
+
+static void z80_im_set(debug_var *var, debug_val val)
+{
+	z80_context *context = var->ptr;
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "Z80 register im can only be set to an integer\n");
+		return;
+	}
+	context->im = ival & 3;
+}
+
+static debug_val z80_iff1_get(debug_var *var)
+{
+	z80_context *context = var->ptr;
+	return debug_int(context->iff1);
+}
+
+static void z80_iff1_set(debug_var *var, debug_val val)
+{
+	z80_context *context = var->ptr;
+	context->iff1 = debug_cast_bool(val);
+}
+
+static debug_val z80_iff2_get(debug_var *var)
+{
+	z80_context *context = var->ptr;
+	return debug_int(context->iff2);
+}
+
+static void z80_iff2_set(debug_var *var, debug_val val)
+{
+	z80_context *context = var->ptr;
+	context->iff2 = debug_cast_bool(val);
+}
+
+static debug_val z80_cycle_get(debug_var *var)
+{
+	z80_context *context = var->ptr;
+	return debug_int(context->current_cycle);
+}
+
+static debug_val z80_pc_get(debug_var *var)
+{
+	z80_context *context = var->ptr;
+	return debug_int(context->pc);
+}
+
+static void z80_names(debug_root *root)
+{
+	debug_var *var;
+	for (int i = 0; i < Z80_UNUSED; i++)
+	{
+		var = calloc(1, sizeof(debug_var));
+		var->ptr = root->cpu_context;
+		if (i < Z80_BC) {
+			var->get = z80_reg8_get;
+			var->set = z80_reg8_set;
+		} else if (i == Z80_SP) {
+			var->get = z80_sp_get;
+			var->set = z80_sp_set;
+		} else {
+			var->get = z80_regpair_get;
+			var->set = z80_regpair_set;
+		}
+		var->val.v.u32 = i;
+		root->variables = tern_insert_ptr(root->variables, z80_regs[i], var);
+		size_t name_size = strlen(z80_regs[i]);
+		char *name = malloc(name_size + 2);
+		char *d = name;
+		for (const char *c = z80_regs[i]; *c; c++, d++)
+		{
+			*d = toupper(*c);
+		}
+		name[name_size] = 0;
+		root->variables = tern_insert_ptr(root->variables, name, var);
+
+		if (i < Z80_IXL || (i > Z80_R && i < Z80_IX && i != Z80_SP)) {
+			memcpy(name, z80_regs[i], name_size);
+			name[name_size] = '\'';
+			name[name_size + 1] = 0;
+			var = calloc(1, sizeof(debug_var));
+			var->ptr = root->cpu_context;
+			if (i < Z80_BC) {
+				var->get = z80_alt_reg8_get;
+				var->set = z80_alt_reg8_set;
+			} else {
+				var->get = z80_alt_regpair_get;
+				var->set = z80_alt_regpair_set;
+			}
+			var->val.v.u32 = i;
+			root->variables = tern_insert_ptr(root->variables, name, var);
+			d = name;
+			for (const char *c = z80_regs[i]; *c; c++, d++)
+			{
+				*d = toupper(*c);
+			}
+			root->variables = tern_insert_ptr(root->variables, name, var);
+		}
+		free(name);
+	}
+	var = calloc(1, sizeof(debug_var));
+	var->ptr = root->cpu_context;
+	var->get = z80_flags_get;
+	var->set = z80_flags_set;
+	root->variables = tern_insert_ptr(root->variables, "f", var);
+	root->variables = tern_insert_ptr(root->variables, "F", var);
+	var = calloc(1, sizeof(debug_var));
+	var->ptr = root->cpu_context;
+	var->get = z80_alt_flags_get;
+	var->set = z80_alt_flags_set;
+	root->variables = tern_insert_ptr(root->variables, "f'", var);
+	root->variables = tern_insert_ptr(root->variables, "F'", var);
+	var = calloc(1, sizeof(debug_var));
+	var->ptr = root->cpu_context;
+	var->get = z80_im_get;
+	var->set = z80_im_set;
+	root->variables = tern_insert_ptr(root->variables, "im", var);
+	root->variables = tern_insert_ptr(root->variables, "IM", var);
+	var = calloc(1, sizeof(debug_var));
+	var->ptr = root->cpu_context;
+	var->get = z80_iff1_get;
+	var->set = z80_iff1_set;
+	root->variables = tern_insert_ptr(root->variables, "iff1", var);
+	var = calloc(1, sizeof(debug_var));
+	var->ptr = root->cpu_context;
+	var->get = z80_iff2_get;
+	var->set = z80_iff2_set;
+	root->variables = tern_insert_ptr(root->variables, "iff2", var);
+	var = calloc(1, sizeof(debug_var));
+	var->ptr = root->cpu_context;
+	var->get = z80_cycle_get;
+	root->variables = tern_insert_ptr(root->variables, "cycle", var);
+	var = calloc(1, sizeof(debug_var));
+	var->ptr = root->cpu_context;
+	var->get = z80_pc_get;
+	root->variables = tern_insert_ptr(root->variables, "pc", var);
+	root->variables = tern_insert_ptr(root->variables, "PC", var);
 }
 
 debug_root *find_z80_root(z80_context *context)
@@ -3867,24 +4178,35 @@ debug_root *find_z80_root(z80_context *context)
 	if (root && !root->commands) {
 		add_commands(root, common_commands, NUM_COMMON);
 		add_commands(root, z80_commands, NUM_Z80);
+		z80_names(root);
+		genesis_context *gen;
+		sms_context *sms;
+		debug_var *var;
+		//TODO: populate names
 		switch (current_system->type)
 		{
 		case SYSTEM_GENESIS:
 		case SYSTEM_SEGACD:
+			gen = context->system;
 			add_commands(root, gen_z80_commands, NUM_GEN_Z80);
-			root->resolve = resolve_z80;
+			root->other_roots = tern_insert_ptr(root->other_roots, "m68k", find_m68k_root(gen->m68k));
+			//root->resolve = resolve_z80;
 			break;
 		case SYSTEM_SMS:
-			root->resolve = resolve_sms;
+			sms = context->system;
 			add_commands(root, sms_commands, NUM_SMS);
+			root->other_roots = tern_insert_ptr(root->other_roots, "vdp", find_vdp_root(sms->vdp));
+			root->other_roots = tern_insert_ptr(root->other_roots, "psg", find_psg_root(sms->psg));
+			var = calloc(1, sizeof(debug_var));
+			var->get = debug_frame_get;
+			var->ptr = sms->vdp;
+			root->variables = tern_insert_ptr(root->variables, "frame", var);
 			break;
-		default:
-			root->resolve = resolve_z80;
+		//default:
+			//root->resolve = resolve_z80;
 		}
-		root->array_resolve = resolve_null_array;
 		root->read_mem = read_z80;
 		root->write_mem = write_z80;
-		root->set = set_z80;
 		root->disasm = create_z80_disasm();
 	}
 	return root;
@@ -3906,9 +4228,9 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address, BP_TYPE_CPU);
 	if (*this_bp) {
 		if ((*this_bp)->condition) {
-			uint32_t condres;
+			debug_val condres;
 			if (eval_expr(root, (*this_bp)->condition, &condres)) {
-				if (!condres) {
+				if (!condres.v.u32) {
 					return context;
 				}
 			} else {
@@ -3995,9 +4317,9 @@ void debugger(m68k_context * context, uint32_t address)
 	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address, BP_TYPE_CPU);
 	if (*this_bp) {
 		if ((*this_bp)->condition) {
-			uint32_t condres;
+			debug_val condres;
 			if (eval_expr(root, (*this_bp)->condition, &condres)) {
-				if (!condres) {
+				if (!condres.v.u32) {
 					return;
 				}
 			} else {
