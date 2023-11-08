@@ -187,6 +187,8 @@ static const char *token_type_names[] = {
 	"TOKEN_INT",
 	"TOKEN_DECIMAL",
 	"TOKEN_NAME",
+	"TOKEN_ARRAY",
+	"TOKEN_FUNCALL",
 	"TOKEN_OPER",
 	"TOKEN_SIZE",
 	"TOKEN_LBRACKET",
@@ -310,6 +312,10 @@ static token parse_token(char *start, char **end)
 		{
 		case '[':
 			type = TOKEN_ARRAY;
+			done = 1;
+			break;
+		case '(':
+			type = TOKEN_FUNCALL;
 		case '+':
 		case '-':
 		case '*':
@@ -324,7 +330,6 @@ static token parse_token(char *start, char **end)
 		case '<':
 		case '.':
 		case ']':
-		case '(':
 		case ')':
 			done = 1;
 			break;
@@ -346,16 +351,30 @@ static token parse_token(char *start, char **end)
 	};
 }
 
+static void free_expr(expr *e);
+static void free_expr_int(expr *e)
+{
+	free_expr(e->left);
+	if (e->type == EXPR_FUNCALL) {
+		for (uint32_t i = 0; i < e->op.v.num; i++)
+		{
+			free_expr_int(e->right + i);
+		}
+		free(e->right);
+	} else {
+		free_expr(e->right);
+	}
+	if (e->op.type == TOKEN_NAME) {
+		free(e->op.v.str);
+	}
+}
+
 static void free_expr(expr *e)
 {
 	if (!e) {
 		return;
 	}
-	free_expr(e->left);
-	free_expr(e->right);
-	if (e->op.type == TOKEN_NAME) {
-		free(e->op.v.str);
-	}
+	free_expr_int(e);
 	free(e);
 }
 
@@ -461,6 +480,39 @@ static expr *parse_scalar(char *start, char **end)
 		token rparen = parse_token(*end, end);
 		if (rparen.type != TOKEN_RPAREN) {
 			fprintf(stderr, "Missing closing `)`");
+			free_expr(ret);
+			return NULL;
+		}
+		return ret;
+	}
+	if (first.type == TOKEN_FUNCALL) {
+		expr *ret = calloc(1, sizeof(expr));
+		ret->left = calloc(1, sizeof(expr));
+		ret->left->type = EXPR_SCALAR;
+		ret->left->op = first;
+		ret->left->op.type = TOKEN_NAME;
+		uint32_t storage = 0;
+		ret->op.v.num = 0;
+		token next = parse_token(after_first, end);
+		while (next.type != TOKEN_RPAREN && next.type != TOKEN_NONE)
+		{
+			expr *e = parse_expression(after_first, end);
+			if (!e) {
+				fprintf(stderr, "Expression expected after '('\n");
+				free_expr(ret);
+				return NULL;
+			}
+			if (storage == ret->op.v.num) {
+				storage = storage ? storage * 2 : 1;
+				ret->right = realloc(ret->right, storage * sizeof(expr));
+			}
+			ret->right[ret->op.v.num++] = *e;
+			free(e);
+			after_first = *end;
+			next = parse_token(after_first, end);
+		}
+		if (next.type != TOKEN_RPAREN) {
+			fprintf(stderr, "Missing ')' after '('\n");
 			free_expr(ret);
 			return NULL;
 		}
@@ -625,6 +677,39 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 		}
 		return maybe_muldiv(ret, *end, end);
 	}
+	if (first.type == TOKEN_FUNCALL) {
+		expr *ret = calloc(1, sizeof(expr));
+		ret->left = calloc(1, sizeof(expr));
+		ret->left->type = EXPR_SCALAR;
+		ret->left->op = first;
+		ret->left->op.type = TOKEN_NAME;
+		uint32_t storage = 0;
+		ret->op.v.num = 0;
+		token next = parse_token(after_first, end);
+		while (next.type != TOKEN_RPAREN && next.type != TOKEN_NONE)
+		{
+			expr *e = parse_expression(after_first, end);
+			if (!e) {
+				fprintf(stderr, "Expression expected after '('\n");
+				free_expr(ret);
+				return NULL;
+			}
+			if (storage == ret->op.v.num) {
+				storage = storage ? storage * 2 : 1;
+				ret->right = realloc(ret->right, storage * sizeof(expr));
+			}
+			ret->right[ret->op.v.num++] = *e;
+			free(e);
+			after_first = *end;
+			next = parse_token(after_first, end);
+		}
+		if (next.type != TOKEN_RPAREN) {
+			fprintf(stderr, "Missing ')' after '('\n");
+			free_expr(ret);
+			return NULL;
+		}
+		return maybe_muldiv(ret, *end, end);
+	}
 	if (first.type != TOKEN_INT && first.type != TOKEN_DECIMAL && first.type != TOKEN_NAME) {
 		fprintf(stderr, "Unexpected token %s\n", token_type_names[first.type]);
 		return NULL;
@@ -749,6 +834,43 @@ static expr *parse_expression(char *start, char **end)
 		token rparen = parse_token(*end, end);
 		if (rparen.type != TOKEN_RPAREN) {
 			fprintf(stderr, "Missing closing `)`");
+			free_expr(ret);
+			return NULL;
+		}
+		return maybe_binary(ret, *end, end);
+	}
+	if (first.type == TOKEN_FUNCALL) {
+		expr *ret = calloc(1, sizeof(expr));
+		ret->type = EXPR_FUNCALL;
+		ret->left = calloc(1, sizeof(expr));
+		ret->left->type = EXPR_SCALAR;
+		ret->left->op = first;
+		ret->left->op.type = TOKEN_NAME;
+		uint32_t storage = 0;
+		ret->op.v.num = 0;
+		//consume LPAREN
+		parse_token(after_first, end);
+		after_first = *end;
+		token next = parse_token(after_first, end);
+		while (next.type != TOKEN_RPAREN && next.type != TOKEN_NONE)
+		{
+			expr *e = parse_expression(after_first, end);
+			if (!e) {
+				fprintf(stderr, "Expression expected after '('\n");
+				free_expr(ret);
+				return NULL;
+			}
+			if (storage == ret->op.v.num) {
+				storage = storage ? storage * 2 : 1;
+				ret->right = realloc(ret->right, storage * sizeof(expr));
+			}
+			ret->right[ret->op.v.num++] = *e;
+			free(e);
+			after_first = *end;
+			next = parse_token(after_first, end);
+		}
+		if (next.type != TOKEN_RPAREN) {
+			fprintf(stderr, "Missing ')' after '('\n");
 			free_expr(ret);
 			return NULL;
 		}

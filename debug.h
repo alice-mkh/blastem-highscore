@@ -17,6 +17,7 @@ typedef enum {
 	TOKEN_DECIMAL,
 	TOKEN_NAME,
 	TOKEN_ARRAY,
+	TOKEN_FUNCALL,
 	TOKEN_OPER,
 	TOKEN_SIZE,
 	TOKEN_LBRACKET,
@@ -42,7 +43,8 @@ typedef enum {
 	EXPR_BINARY,
 	EXPR_SIZE,
 	EXPR_MEM,
-	EXPR_NAMESPACE
+	EXPR_NAMESPACE,
+	EXPR_FUNCALL
 } expr_type;
 
 typedef struct expr expr;
