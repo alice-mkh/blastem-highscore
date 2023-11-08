@@ -13,7 +13,8 @@
 
 typedef enum {
 	TOKEN_NONE,
-	TOKEN_NUM,
+	TOKEN_INT,
+	TOKEN_DECIMAL,
 	TOKEN_NAME,
 	TOKEN_ARRAY,
 	TOKEN_OPER,
@@ -30,6 +31,7 @@ typedef struct {
 		char     *str;
 		char     op[3];
 		uint32_t num;
+		float    f;
 	} v;
 } token;
 

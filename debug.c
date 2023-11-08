@@ -172,9 +172,20 @@ static debug_val debug_int(uint32_t i)
 	return ret;
 }
 
+static debug_val debug_float(float f)
+{
+	return (debug_val) {
+		.type = DBG_VAL_F32,
+		.v = {
+			.f32 = f
+		}
+	};
+}
+
 static const char *token_type_names[] = {
 	"TOKEN_NONE",
-	"TOKEN_NUM",
+	"TOKEN_INT",
+	"TOKEN_DECIMAL",
 	"TOKEN_NAME",
 	"TOKEN_OPER",
 	"TOKEN_SIZE",
@@ -198,19 +209,38 @@ static token parse_token(char *start, char **end)
 	}
 	if (*start == '$' || (*start == '0' && start[1] == 'x')) {
 		return (token) {
-			.type = TOKEN_NUM,
+			.type = TOKEN_INT,
 			.v = {
 				.num = strtol(start + (*start == '$' ? 1 : 2), end, 16)
 			}
 		};
 	}
 	if (isdigit(*start)) {
-		return (token) {
-			.type = TOKEN_NUM,
-			.v = {
-				.num = strtol(start, end, 10)
+		uint32_t ipart = strtol(start, end, 10);
+		if (**end == '.') {
+			start = *end + 1;
+			uint32_t fpart = strtol(start, end, 10);
+			float fval;
+			if (fpart) {
+				float divisor = powf(10.0f, *end - start);
+				fval = ipart + fpart / divisor;
+			} else {
+				fval = ipart;
 			}
-		};
+			return (token) {
+				.type = TOKEN_DECIMAL,
+				.v = {
+					.f = fval
+				}
+			};
+		} else {
+			return (token) {
+				.type = TOKEN_INT,
+				.v = {
+					.num = ipart
+				}
+			};
+		}
 	}
 	switch (*start)
 	{
@@ -436,7 +466,7 @@ static expr *parse_scalar(char *start, char **end)
 		}
 		return ret;
 	}
-	if (first.type != TOKEN_NUM && first.type != TOKEN_NAME) {
+	if (first.type != TOKEN_INT && first.type != TOKEN_DECIMAL && first.type != TOKEN_NAME) {
 		fprintf(stderr, "Unexpected token %s\n", token_type_names[first.type]);
 		return NULL;
 	}
@@ -595,7 +625,7 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 		}
 		return maybe_muldiv(ret, *end, end);
 	}
-	if (first.type != TOKEN_NUM && first.type != TOKEN_NAME) {
+	if (first.type != TOKEN_INT && first.type != TOKEN_DECIMAL && first.type != TOKEN_NAME) {
 		fprintf(stderr, "Unexpected token %s\n", token_type_names[first.type]);
 		return NULL;
 	}
@@ -724,7 +754,7 @@ static expr *parse_expression(char *start, char **end)
 		}
 		return maybe_binary(ret, *end, end);
 	}
-	if (first.type != TOKEN_NUM && first.type != TOKEN_NAME) {
+	if (first.type != TOKEN_INT && first.type != TOKEN_DECIMAL && first.type != TOKEN_NAME) {
 		fprintf(stderr, "Unexpected token %s\n", token_type_names[first.type]);
 		return NULL;
 	}
@@ -813,8 +843,11 @@ uint8_t eval_expr(debug_root *root, expr *e, debug_val *out)
 			}
 			*out = var->get(var);
 			return 1;
-		} else {
+		} else if (e->op.type == TOKEN_INT) {
 			*out = debug_int(e->op.v.num);
+			return 1;
+		} else {
+			*out = debug_float(e->op.v.f);
 			return 1;
 		}
 	case EXPR_UNARY:
@@ -1075,6 +1108,19 @@ static uint8_t write_m68k(debug_root *root, uint32_t address, uint32_t value, ch
 }
 
 static uint8_t debug_cast_int(debug_val val, uint32_t *out)
+{
+	if (val.type == DBG_VAL_U32) {
+		*out = val.v.u32;
+		return 1;
+	}
+	if (val.type == DBG_VAL_F32) {
+		*out = val.v.f32;
+		return 1;
+	}
+	return 0;
+}
+
+static uint8_t debug_cast_float(debug_val val, float *out)
 {
 	if (val.type == DBG_VAL_U32) {
 		*out = val.v.u32;
@@ -2087,6 +2133,7 @@ static uint8_t cmd_printf(debug_root *root, parsed_command *cmd)
 			case 'c':
 			case 'd':
 			case 's':
+			case 'f':
 				break;
 			default:
 				fprintf(stderr, "Unsupported format character %c\n", cur[1]);
@@ -2129,6 +2176,14 @@ static uint8_t cmd_printf(debug_root *root, parsed_command *cmd)
 					tmp[j] = 0;
 					printf(format_str, tmp);
 				}
+			} else if (cur[1] == 'f') {
+				float fval;
+				if (!debug_cast_float(val, &fval)) {
+					fprintf(stderr, "Format char '%c' only accepts floats\n", cur[1]);
+					free(fmt);
+					return 1;
+				}
+				printf(format_str, fval);
 			} else {
 				uint32_t ival;
 				if (!debug_cast_int(val, &ival)) {
