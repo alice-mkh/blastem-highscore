@@ -5,6 +5,7 @@
 #include "blastem.h"
 #include "bindings.h"
 #include <ctype.h>
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
