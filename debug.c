@@ -24,47 +24,59 @@
 #define Z80_OPTS options
 #endif
 
-static debug_root *roots;
-static uint32_t num_roots, root_storage;
+static debug_func *funcs;
+static uint32_t num_funcs, func_storage;
 
-debug_root *find_root(void *cpu)
+static debug_func* alloc_func(void)
 {
-	for (uint32_t i = 0; i < num_roots; i++)
-	{
-		if (roots[i].cpu_context == cpu) {
-			return roots + i;
-		}
+	if (num_funcs == func_storage) {
+		func_storage = func_storage ? func_storage * 2 : 4;
+		funcs = realloc(funcs, sizeof(debug_func) * func_storage);
 	}
-	if (num_roots == root_storage) {
-		root_storage = root_storage ? root_storage * 2 : 5;
-		roots = realloc(roots, root_storage * sizeof(debug_root));
-	}
-	num_roots++;
-	memset(roots + num_roots - 1, 0, sizeof(debug_root));
-	roots[num_roots-1].cpu_context = cpu;
-	return roots + num_roots - 1;
+	return funcs + num_funcs++;
 }
 
-bp_def ** find_breakpoint(bp_def ** cur, uint32_t address, uint8_t type)
+static debug_val new_native_func(debug_native_func impl, int max_args, int min_args)
 {
-	while (*cur) {
-		if ((*cur)->type == type && (*cur)->address == (((*cur)->mask) & address)) {
-			break;
-		}
-		cur = &((*cur)->next);
-	}
-	return cur;
+	debug_func *f = alloc_func();
+	f->impl.native = impl;
+	f->max_args = max_args;
+	f->min_args = min_args;
+	f->is_native = 1;
+	return (debug_val) {
+		.v = {
+			.u32 = f - funcs
+		},
+		.type = DBG_VAL_FUNC
+	};
 }
 
-bp_def ** find_breakpoint_idx(bp_def ** cur, uint32_t index)
+debug_val user_var_get(debug_var *var)
 {
-	while (*cur) {
-		if ((*cur)->index == index) {
-			break;
-		}
-		cur = &((*cur)->next);
-	}
-	return cur;
+	return var->val;
+}
+
+void user_var_set(debug_var *var, debug_val val)
+{
+	var->val = val;
+}
+
+static void new_user_variable(debug_root *root, const char *name, debug_val val)
+{
+	debug_var *var = calloc(1, sizeof(debug_var));
+	var->get = user_var_get;
+	var->set = user_var_set;
+	var->val = val;
+	root->variables = tern_insert_ptr(root->variables, name, var);
+}
+
+static void new_readonly_variable(debug_root *root, const char *name, debug_val val)
+{
+	debug_var *var = calloc(1, sizeof(debug_var));
+	var->get = user_var_get;
+	var->set = NULL;
+	var->val = val;
+	root->variables = tern_insert_ptr(root->variables, name, var);
 }
 
 static debug_array *arrays;
@@ -136,32 +148,41 @@ debug_array *get_array(debug_val val)
 	return arrays + val.v.u32;
 }
 
-debug_val user_var_get(debug_var *var)
+static uint8_t debug_cast_int(debug_val val, uint32_t *out)
 {
-	return var->val;
+	if (val.type == DBG_VAL_U32) {
+		*out = val.v.u32;
+		return 1;
+	}
+	if (val.type == DBG_VAL_F32) {
+		*out = val.v.f32;
+		return 1;
+	}
+	return 0;
 }
 
-void user_var_set(debug_var *var, debug_val val)
+static uint8_t debug_cast_float(debug_val val, float *out)
 {
-	var->val = val;
+	if (val.type == DBG_VAL_U32) {
+		*out = val.v.u32;
+		return 1;
+	}
+	if (val.type == DBG_VAL_F32) {
+		*out = val.v.f32;
+		return 1;
+	}
+	return 0;
 }
 
-static void new_user_variable(debug_root *root, const char *name, debug_val val)
+static uint8_t debug_cast_bool(debug_val val)
 {
-	debug_var *var = calloc(1, sizeof(debug_var));
-	var->get = user_var_get;
-	var->set = user_var_set;
-	var->val = val;
-	root->variables = tern_insert_ptr(root->variables, name, var);
-}
-
-static void new_readonly_variable(debug_root *root, const char *name, debug_val val)
-{
-	debug_var *var = calloc(1, sizeof(debug_var));
-	var->get = user_var_get;
-	var->set = NULL;
-	var->val = val;
-	root->variables = tern_insert_ptr(root->variables, name, var);
+	switch(val.type)
+	{
+	case DBG_VAL_U32: return val.v.u32 != 0;
+	case DBG_VAL_F32: return val.v.f32 != 0.0f;
+	case DBG_VAL_ARRAY: return get_array(val)->size != 0;
+	default: return 1;
+	}
 }
 
 static debug_val debug_int(uint32_t i)
@@ -180,6 +201,59 @@ static debug_val debug_float(float f)
 			.f32 = f
 		}
 	};
+}
+
+debug_val debug_sin(debug_val *args, int num_args)
+{
+	float f;
+	if (!debug_cast_float(args[0], &f)) {
+		return debug_float(0.0f);
+	}
+	return debug_float(sinf(f));
+}
+
+static debug_root *roots;
+static uint32_t num_roots, root_storage;
+
+debug_root *find_root(void *cpu)
+{
+	for (uint32_t i = 0; i < num_roots; i++)
+	{
+		if (roots[i].cpu_context == cpu) {
+			return roots + i;
+		}
+	}
+	if (num_roots == root_storage) {
+		root_storage = root_storage ? root_storage * 2 : 5;
+		roots = realloc(roots, root_storage * sizeof(debug_root));
+	}
+	debug_root *root = roots + num_roots++;
+	memset(root, 0, sizeof(debug_root));
+	root->cpu_context = cpu;
+	new_readonly_variable(root, "sin", new_native_func(debug_sin, 1, 1));
+	return root;
+}
+
+bp_def ** find_breakpoint(bp_def ** cur, uint32_t address, uint8_t type)
+{
+	while (*cur) {
+		if ((*cur)->type == type && (*cur)->address == (((*cur)->mask) & address)) {
+			break;
+		}
+		cur = &((*cur)->next);
+	}
+	return cur;
+}
+
+bp_def ** find_breakpoint_idx(bp_def ** cur, uint32_t index)
+{
+	while (*cur) {
+		if ((*cur)->index == index) {
+			break;
+		}
+		cur = &((*cur)->next);
+	}
+	return cur;
 }
 
 static const char *token_type_names[] = {
@@ -955,6 +1029,9 @@ static expr *parse_expression(char *start, char **end)
 uint8_t eval_expr(debug_root *root, expr *e, debug_val *out)
 {
 	debug_val right;
+	debug_val *args;
+	debug_func *func;
+	int num_args;
 	switch(e->type)
 	{
 	case EXPR_SCALAR:
@@ -1143,6 +1220,37 @@ uint8_t eval_expr(debug_root *root, expr *e, debug_val *out)
 			return 0;
 		}
 		return eval_expr(root, e->left, out);
+	case EXPR_FUNCALL:
+		if (!eval_expr(root, e->left, out)) {
+			return 0;
+		}
+		if (out->type != DBG_VAL_FUNC) {
+			fprintf(stderr, "Funcall expression requires function");
+			return 0;
+		}
+		func = funcs + out->v.u32;
+		num_args = e->op.v.num;
+		if (func->min_args > 0 && num_args < func->min_args) {
+			fprintf(stderr, "Function requires at least %d args, but %d given\n", func->min_args, num_args);
+			return 0;
+		}
+		if (func->max_args >= 0 && num_args > func->max_args) {
+			fprintf(stderr, "Function requires no more than %d args, but %d given\n", func->max_args, num_args);
+			return 0;
+		}
+		args = calloc(num_args, sizeof(debug_val));
+		for (int i = 0; i < num_args; i++)
+		{
+			if (!eval_expr(root, e->right + i, args + i)) {
+				return 0;
+			}
+		}
+		if (func->is_native) {
+			*out = func->impl.native(args, num_args);
+		} else {
+			//TODO: Implement me
+		}
+		return 1;
 	default:
 		return 0;
 	}
@@ -1227,43 +1335,6 @@ static uint8_t write_m68k(debug_root *root, uint32_t address, uint32_t value, ch
 		write_word(address, value, (void **)context->mem_pointers, &context->options->gen, context);
 	}
 	return 1;
-}
-
-static uint8_t debug_cast_int(debug_val val, uint32_t *out)
-{
-	if (val.type == DBG_VAL_U32) {
-		*out = val.v.u32;
-		return 1;
-	}
-	if (val.type == DBG_VAL_F32) {
-		*out = val.v.f32;
-		return 1;
-	}
-	return 0;
-}
-
-static uint8_t debug_cast_float(debug_val val, float *out)
-{
-	if (val.type == DBG_VAL_U32) {
-		*out = val.v.u32;
-		return 1;
-	}
-	if (val.type == DBG_VAL_F32) {
-		*out = val.v.f32;
-		return 1;
-	}
-	return 0;
-}
-
-static uint8_t debug_cast_bool(debug_val val)
-{
-	switch(val.type)
-	{
-	case DBG_VAL_U32: return val.v.u32 != 0;
-	case DBG_VAL_F32: return val.v.f32 != 0.0f;
-	case DBG_VAL_ARRAY: return get_array(val)->size != 0;
-	default: return 1;
-	}
 }
 
 static debug_val m68k_dreg_get(debug_var *var)

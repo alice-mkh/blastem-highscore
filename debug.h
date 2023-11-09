@@ -151,6 +151,18 @@ struct debug_array{
 	uint32_t           storage;
 };
 
+typedef debug_val (*debug_native_func)(debug_val *args, int num_args);
+typedef struct {
+	union {
+		debug_native_func native;
+		parsed_command    *commands;
+	} impl;
+	uint32_t num_commands;
+	int      max_args;
+	int      min_args;
+	uint8_t  is_native;
+} debug_func;
+
 typedef struct debug_var debug_var;
 typedef debug_val (*debug_var_get)(debug_var *var);
 typedef void (*debug_var_set)(debug_var *var, debug_val val);
