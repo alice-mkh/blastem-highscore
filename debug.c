@@ -52,6 +52,21 @@ static debug_val new_native_func(debug_native_func impl, int max_args, int min_a
 	};
 }
 
+static debug_val new_user_func(command_block *block, char **args, int num_args)
+{
+	debug_func *f = alloc_func();
+	f->impl.block = *block;
+	f->arg_names = args;
+	f->max_args = f->min_args = num_args;
+	f->is_native = 0;
+	return (debug_val) {
+		.v = {
+			.u32 = f - funcs
+		},
+		.type = DBG_VAL_FUNC
+	};
+}
+
 debug_val user_var_get(debug_var *var)
 {
 	return var->val;
@@ -1116,6 +1131,7 @@ static expr *parse_expression(char *start, char **end)
 	}
 }
 
+static uint8_t execute_block(debug_root *root, command_block * block);
 uint8_t eval_expr(debug_root *root, expr *e, debug_val *out)
 {
 	debug_val right;
@@ -1332,15 +1348,31 @@ uint8_t eval_expr(debug_root *root, expr *e, debug_val *out)
 		for (int i = 0; i < num_args; i++)
 		{
 			if (!eval_expr(root, e->right + i, args + i)) {
+				free(args);
 				return 0;
 			}
 		}
 		if (func->is_native) {
 			*out = func->impl.native(args, num_args);
+			free(args);
+			return 1;
 		} else {
 			//TODO: Implement me
+			debug_root *func_root = calloc(1, sizeof(debug_root));
+			for (int i = 0; i < num_args; i++)
+			{
+				new_user_variable(func_root, func->arg_names[i], args[i]);
+			}
+			free(args);
+			func_root->other_roots = tern_insert_ptr(func_root->other_roots, "parent", root);
+			execute_block(func_root, &func->impl.block);
+			*out = func_root->retval;
+			//FIXME: properly free root
+			tern_free(func_root->variables);
+			tern_free(func_root->other_roots);
+			free(func_root);
+			return 1;
 		}
-		return 1;
 	default:
 		return 0;
 	}
@@ -2568,9 +2600,9 @@ static uint8_t cmd_command(debug_root *root, parsed_command *cmd)
 static uint8_t execute_block(debug_root *root, command_block * block)
 {
 	uint8_t debugging = 1;
-	for (int i = 0; i < block->num_commands; i++)
+	for (int i = 0; i < block->num_commands && debugging; i++)
 	{
-		debugging = run_command(root, block->commands + i) && debugging;
+		debugging = run_command(root, block->commands + i);
 	}
 	return debugging;
 }
@@ -2604,6 +2636,53 @@ const char *expr_type_names[] = {
 	"EXPR_SIZE",
 	"EXPR_MEM"
 };
+
+static uint8_t cmd_function(debug_root *root, parsed_command *cmd)
+{
+	debug_root *set_root = root;
+	expr *set_expr = cmd->args[0].parsed;
+	while (set_expr->type == EXPR_NAMESPACE)
+	{
+		set_root = tern_find_ptr(set_root->other_roots, set_expr->op.v.str);
+		if (!set_root) {
+			fprintf(stderr, "%s is not a valid namespace\n", set_expr->op.v.str);
+			return 1;
+		}
+		set_expr = set_expr->left;
+	}
+	if (set_expr->type != EXPR_SCALAR || set_expr->op.type != TOKEN_NAME) {
+		fprintf(stderr, "Arguments to function must be names, bug argument 0 is %s\n", expr_type_names[set_expr->type]);
+		return 1;
+	}
+	debug_var *var = tern_find_ptr(set_root->variables, set_expr->op.v.str);
+	if (var) {
+		fprintf(stderr, "%s is already defined\n", set_expr->op.v.str);
+		return 1;
+	}
+	for (uint32_t i = 1; i < cmd->num_args; i++)
+	{
+		if (cmd->args[i].parsed->type != EXPR_SCALAR || cmd->args[i].parsed->op.type != TOKEN_NAME) {
+			fprintf(stderr, "Arguments to function must be names, bug argument %d is %s\n", i, expr_type_names[cmd->args[i].parsed->type]);
+			return 1;
+		}
+	}
+	char **args = calloc(cmd->num_args - 1, sizeof(char *));
+	for (uint32_t i = 1; i < cmd->num_args; i++)
+	{
+		args[i - 1] = cmd->args[i].parsed->op.v.str;
+		cmd->args[i].parsed->op.v.str = NULL;
+	}
+	new_readonly_variable(set_root, set_expr->op.v.str, new_user_func(&cmd->block, args, cmd->num_args - 1));
+	cmd->block.commands = NULL;
+	cmd->block.num_commands = 0;
+	return 1;
+}
+
+static uint8_t cmd_return(debug_root *root, parsed_command *cmd)
+{
+	root->retval = cmd->args[0].value;
+	return 0;
+}
 
 static uint8_t cmd_set(debug_root *root, parsed_command *cmd)
 {
@@ -3422,6 +3501,28 @@ command_def common_commands[] = {
 		.min_args = 1,
 		.max_args = 1,
 		.has_block = 1
+	},
+	{
+		.names = (const char *[]){
+			"function", NULL
+		},
+		.usage = "function NAME [ARGS...]",
+		.desc = "Creates a user-defined function named NAME with arguments ARGS",
+		.impl = cmd_function,
+		.min_args = 1,
+		.max_args = -1,
+		.has_block = 1,
+		.skip_eval = 1
+	},
+	{
+		.names = (const char *[]){
+			"return", NULL
+		},
+		.usage = "return VALUE",
+		.desc = "Return from a user defined function with the result VALUE",
+		.impl = cmd_return,
+		.min_args = 1,
+		.max_args = 1
 	},
 	{
 		.names = (const char *[]){

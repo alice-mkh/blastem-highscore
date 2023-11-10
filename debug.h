@@ -155,9 +155,9 @@ typedef debug_val (*debug_native_func)(debug_val *args, int num_args);
 typedef struct {
 	union {
 		debug_native_func native;
-		parsed_command    *commands;
+		command_block     block;
 	} impl;
-	uint32_t num_commands;
+	char     **arg_names;
 	int      max_args;
 	int      min_args;
 	uint8_t  is_native;
@@ -190,6 +190,7 @@ struct debug_root {
 	reader         read_mem;
 	writer         write_mem;
 	parsed_command last_cmd;
+	debug_val      retval;
 	uint32_t       bp_index;
 	uint32_t       disp_index;
 	uint32_t       branch_t;
