@@ -135,6 +135,7 @@ static debug_val new_user_array(uint32_t size)
 	array->append = user_array_append;
 	array->size = size;
 	array->storage = size ? size : 4;
+	array->base = calloc(size, sizeof(debug_val));
 	debug_val ret;
 	ret.type = DBG_VAL_ARRAY;
 	ret.v.u32 = array - arrays;
@@ -204,13 +205,93 @@ static debug_val debug_float(float f)
 	};
 }
 
-debug_val debug_sin(debug_val *args, int num_args)
+static debug_val debug_sin(debug_val *args, int num_args)
 {
 	float f;
 	if (!debug_cast_float(args[0], &f)) {
 		return debug_float(0.0f);
 	}
 	return debug_float(sinf(f));
+}
+
+static debug_val debug_cos(debug_val *args, int num_args)
+{
+	float f;
+	if (!debug_cast_float(args[0], &f)) {
+		return debug_float(0.0f);
+	}
+	return debug_float(cosf(f));
+}
+
+static debug_val debug_tan(debug_val *args, int num_args)
+{
+	float f;
+	if (!debug_cast_float(args[0], &f)) {
+		return debug_float(0.0f);
+	}
+	return debug_float(tanf(f));
+}
+
+static debug_val debug_asin(debug_val *args, int num_args)
+{
+	float f;
+	if (!debug_cast_float(args[0], &f)) {
+		return debug_float(0.0f);
+	}
+	return debug_float(asinf(f));
+}
+
+static debug_val debug_acos(debug_val *args, int num_args)
+{
+	float f;
+	if (!debug_cast_float(args[0], &f)) {
+		return debug_float(0.0f);
+	}
+	return debug_float(acosf(f));
+}
+
+static debug_val debug_atan(debug_val *args, int num_args)
+{
+	float f;
+	if (!debug_cast_float(args[0], &f)) {
+		return debug_float(0.0f);
+	}
+	return debug_float(atanf(f));
+}
+
+static debug_val debug_atan2(debug_val *args, int num_args)
+{
+	float f, f2;
+	if (!debug_cast_float(args[0], &f)) {
+		return debug_float(0.0f);
+	}
+	if (!debug_cast_float(args[1], &f2)) {
+		return debug_float(0.0f);
+	}
+	return debug_float(atan2f(f, f2));
+}
+
+static debug_val array_pop(debug_val *args, int num_args)
+{
+	debug_array *array = get_array(*args);
+	if (!array) {
+		return debug_int(0);
+	}
+	debug_val ret = array->get(array, array->size - 1);
+	if (array->append) {
+		array->size--;
+	}
+	return ret;
+}
+
+static debug_val debug_size(debug_val *args, int num_args)
+{
+	debug_array *array = get_array(*args);
+	if (!array) {
+		//TODO: string support
+		return debug_int(0);
+	}
+	return debug_int(array->size);
 }
 
 static debug_root *roots;
@@ -232,6 +313,14 @@ debug_root *find_root(void *cpu)
 	memset(root, 0, sizeof(debug_root));
 	root->cpu_context = cpu;
 	new_readonly_variable(root, "sin", new_native_func(debug_sin, 1, 1));
+	new_readonly_variable(root, "cos", new_native_func(debug_cos, 1, 1));
+	new_readonly_variable(root, "tan", new_native_func(debug_tan, 1, 1));
+	new_readonly_variable(root, "asin", new_native_func(debug_asin, 1, 1));
+	new_readonly_variable(root, "acos", new_native_func(debug_acos, 1, 1));
+	new_readonly_variable(root, "atan", new_native_func(debug_atan, 1, 1));
+	new_readonly_variable(root, "atan2", new_native_func(debug_atan2, 2, 2));
+	new_readonly_variable(root, "pop", new_native_func(array_pop, 1, 1));
+	new_readonly_variable(root, "size", new_native_func(debug_size, 1, 1));
 	return root;
 }
 
@@ -2699,7 +2788,7 @@ static uint8_t cmd_array(debug_root *root, parsed_command *cmd)
 			array->base = realloc(array->base, sizeof(debug_val) * array->storage);
 		}
 	}
-	for (uint32_t i = 1; i < cmd->num_args && i < array->size; i++)
+	for (uint32_t i = 1; i < cmd->num_args && i <= array->size; i++)
 	{
 		if (!eval_expr(root, cmd->args[i].parsed, &cmd->args[i].value)) {
 			fprintf(stderr, "Failed to eval %s\n", cmd->args[i].raw);
