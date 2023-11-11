@@ -2339,7 +2339,7 @@ void view_bios_settings(struct nk_context *context)
 {
 	if (nk_begin(context, "Firmware", nk_rect(0, 0, render_width(), render_height()), 0)) {
 		uint32_t desired_width = context->style.font->height * 10;
-		nk_layout_row_static(context, context->style.font->height, desired_width, 2);
+		nk_layout_row_static(context, context->style.font->height * 1.25f, desired_width, 2);
 		static const char* exts[] = {"md", "bin", "smd"};
 		settings_path(context, "TMSS ROM", "system\0tmss_path\0", "tmss.md", exts, 3);
 		settings_path(context, "US CD BIOS", "system\0scd_bios_us\0", "cdbios.md", exts, 3);
