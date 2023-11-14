@@ -159,6 +159,7 @@ static void render_close_audio()
 	*/
 }
 
+static uint8_t audio_active;
 void *render_new_audio_opaque(void)
 {
 	return SDL_CreateCond();
@@ -171,6 +172,7 @@ void render_free_audio_opaque(void *opaque)
 
 void render_audio_created(audio_source *source)
 {
+	audio_active = 1;
 	if (sync_src == SYNC_AUDIO) {
 		//SDL_PauseAudio acquires the audio device lock, which is held while the callback runs
 		//since our callback can itself be stuck waiting on the audio_ready condition variable
@@ -192,6 +194,7 @@ void render_source_paused(audio_source *src, uint8_t remaining_sources)
 	}
 	if (!remaining_sources && render_is_audio_sync()) {
 		SDL_PauseAudio(1);
+		audio_active = 0;
 		if (sync_src == SYNC_AUDIO_THREAD) {
 			SDL_CondSignal(frame_ready);
 		}
@@ -200,6 +203,7 @@ void render_source_paused(audio_source *src, uint8_t remaining_sources)
 
 void render_source_resumed(audio_source *src)
 {
+	audio_active = 1;
 	if (sync_src == SYNC_AUDIO) {
 		//SDL_PauseAudio acquires the audio device lock, which is held while the callback runs
 		//since our callback can itself be stuck waiting on the audio_ready condition variable
@@ -1586,8 +1590,8 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 		? (video_standard == VID_PAL ? 294 : 243) - (overscan_top[video_standard] + overscan_bot[video_standard])
 		: 240;
 	FILE *screenshot_file = NULL;
-	uint32_t shot_height, shot_width;
 	char *ext;
+	width -= overscan_left[video_standard] + overscan_right[video_standard];
 	if (screenshot_path && which == FRAMEBUFFER_ODD) {
 		screenshot_file = fopen(screenshot_path, "wb");
 		if (screenshot_file) {
@@ -1600,27 +1604,25 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 		}
 		free(screenshot_path);
 		screenshot_path = NULL;
-		shot_height = height;
-		shot_width = width;
 	}
 	interlaced = last != which;
-	width -= overscan_left[video_standard] + overscan_right[video_standard];
+	buffer += overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard];
 #ifndef DISABLE_OPENGL
 	if (render_gl && which <= FRAMEBUFFER_EVEN) {
 		SDL_GL_MakeCurrent(main_window, main_context);
 		glBindTexture(GL_TEXTURE_2D, textures[which]);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LINEBUF_SIZE, height, SRC_FORMAT, GL_UNSIGNED_BYTE, buffer + overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard]);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LINEBUF_SIZE, height, SRC_FORMAT, GL_UNSIGNED_BYTE, buffer);
 
 		if (screenshot_file) {
 			//properly supporting interlaced modes here is non-trivial, so only save the odd field for now
 #ifndef DISABLE_ZLIB
 			if (!strcasecmp(ext, "png")) {
 				free(ext);
-				save_png(screenshot_file, buffer, shot_width, shot_height, LINEBUF_SIZE*sizeof(uint32_t));
+				save_png(screenshot_file, buffer, width, height, LINEBUF_SIZE*sizeof(uint32_t));
 			} else {
 				free(ext);
 #endif
-				save_ppm(screenshot_file, buffer, shot_width, shot_height, LINEBUF_SIZE*sizeof(uint32_t));
+				save_ppm(screenshot_file, buffer, width, height, LINEBUF_SIZE*sizeof(uint32_t));
 #ifndef DISABLE_ZLIB
 			}
 #endif
@@ -1631,15 +1633,12 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 				//TODO: more precise frame rate
 				apng = start_apng(apng_file, width, height, video_standard == VID_PAL ? 50.0 : 60.0);
 			}
-			save_png24_frame(
-				apng_file,
-				buffer + overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard],
-				apng, width, height, LINEBUF_SIZE*sizeof(uint32_t)
-			);
+			save_png24_frame(apng_file, buffer, apng, width, height, LINEBUF_SIZE*sizeof(uint32_t));
 		}
 #endif
 	} else {
 #endif
+		uint32_t shot_height = height;
 		//TODO: Support SYNC_AUDIO_THREAD/SYNC_EXTERNAL for render API framebuffers
 		if (which <= FRAMEBUFFER_EVEN && last != which) {
 			uint8_t *cur_dst = (uint8_t *)locked_pixels;
@@ -1667,11 +1666,11 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 #ifndef DISABLE_ZLIB
 			if (!strcasecmp(ext, "png")) {
 				free(ext);
-				save_png(screenshot_file, locked_pixels, shot_width, shot_height, shot_pitch);
+				save_png(screenshot_file, locked_pixels, width, shot_height, shot_pitch);
 			} else {
 				free(ext);
 #endif
-				save_ppm(screenshot_file, locked_pixels, shot_width, shot_height, shot_pitch);
+				save_ppm(screenshot_file, locked_pixels, width, shot_height, shot_pitch);
 #ifndef DISABLE_ZLIB
 			}
 #endif
@@ -1834,7 +1833,7 @@ void render_video_loop(void)
 	SDL_LockMutex(frame_mutex);
 		for(;;)
 		{
-			while (!frame_queue_len && SDL_GetAudioStatus() == SDL_AUDIO_PLAYING)
+			while (!frame_queue_len && audio_active)
 			{
 				SDL_CondWait(frame_ready, frame_mutex);
 			}
@@ -1848,7 +1847,7 @@ void render_video_loop(void)
 				release_buffer(f.buffer);
 				SDL_LockMutex(frame_mutex);
 			}
-			if (SDL_GetAudioStatus() != SDL_AUDIO_PLAYING) {
+			if (!audio_active) {
 				break;
 			}
 		}
