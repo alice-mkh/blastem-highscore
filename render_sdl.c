@@ -159,6 +159,7 @@ static void render_close_audio()
 	*/
 }
 
+static uint8_t audio_active;
 void *render_new_audio_opaque(void)
 {
 	return SDL_CreateCond();
@@ -171,6 +172,7 @@ void render_free_audio_opaque(void *opaque)
 
 void render_audio_created(audio_source *source)
 {
+	audio_active = 1;
 	if (sync_src == SYNC_AUDIO) {
 		//SDL_PauseAudio acquires the audio device lock, which is held while the callback runs
 		//since our callback can itself be stuck waiting on the audio_ready condition variable
@@ -192,6 +194,7 @@ void render_source_paused(audio_source *src, uint8_t remaining_sources)
 	}
 	if (!remaining_sources && render_is_audio_sync()) {
 		SDL_PauseAudio(1);
+		audio_active = 0;
 		if (sync_src == SYNC_AUDIO_THREAD) {
 			SDL_CondSignal(frame_ready);
 		}
@@ -200,6 +203,7 @@ void render_source_paused(audio_source *src, uint8_t remaining_sources)
 
 void render_source_resumed(audio_source *src)
 {
+	audio_active = 1;
 	if (sync_src == SYNC_AUDIO) {
 		//SDL_PauseAudio acquires the audio device lock, which is held while the callback runs
 		//since our callback can itself be stuck waiting on the audio_ready condition variable
@@ -1829,7 +1833,7 @@ void render_video_loop(void)
 	SDL_LockMutex(frame_mutex);
 		for(;;)
 		{
-			while (!frame_queue_len && SDL_GetAudioStatus() == SDL_AUDIO_PLAYING)
+			while (!frame_queue_len && audio_active)
 			{
 				SDL_CondWait(frame_ready, frame_mutex);
 			}
@@ -1843,7 +1847,7 @@ void render_video_loop(void)
 				release_buffer(f.buffer);
 				SDL_LockMutex(frame_mutex);
 			}
-			if (SDL_GetAudioStatus() != SDL_AUDIO_PLAYING) {
+			if (!audio_active) {
 				break;
 			}
 		}
