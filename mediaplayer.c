@@ -46,6 +46,17 @@ void ym_adjust(chip_info *chip)
 	}
 }
 
+void ym_scope(chip_info *chip, oscilloscope *scope)
+{
+	ym_enable_scope(chip->context, scope, chip->clock);
+}
+
+void ym_no_scope(void *context)
+{
+	ym2612_context *ym = context;
+	ym->scope = NULL;
+}
+
 void psg_adjust(chip_info *chip)
 {
 	psg_context *psg = chip->context;
@@ -56,6 +67,17 @@ void psg_adjust(chip_info *chip)
 	}
 }
 
+void psg_scope(chip_info *chip, oscilloscope *scope)
+{
+	psg_enable_scope(chip->context, scope, chip->clock);
+}
+
+void psg_no_scope(void *context)
+{
+	psg_context *psg = context;
+	psg->scope = NULL;
+}
+
 void pcm_adjust(chip_info *chip)
 {
 	rf5c164 *pcm = chip->context;
@@ -64,6 +86,17 @@ void pcm_adjust(chip_info *chip)
 		chip->samples -= cycles_to_samples(chip->clock, deduction);
 		pcm->cycle -= deduction;
 	}
+}
+
+void pcm_scope(chip_info *chip, oscilloscope *scope)
+{
+	rf5c164_enable_scope(chip->context, scope);
+}
+
+void pcm_no_scope(void *context)
+{
+	rf5c164 *pcm = context;
+	pcm->scope = NULL;
 }
 
 uint8_t *find_block(data_block *head, uint32_t offset, uint32_t size)
@@ -103,6 +136,7 @@ void vgm_stop(media_player *player)
 	player->state = STATE_PAUSED;
 	player->playback_time = 0;
 	player->current_offset = player->vgm->data_offset + offsetof(vgm_header, data_offset);
+	player->loop_count = 2;
 }
 
 chip_info *find_chip(media_player *player, uint8_t cmd)
@@ -179,12 +213,12 @@ void vgm_frame(media_player *player)
 			player->wait_samples -= to_wait;
 			remaining_samples -= to_wait;
 			if (player->wait_samples) {
-				return;
+				goto frame_end;
 			}
 		}
 		if (player->current_offset >= player->media->size) {
 			vgm_stop(player);
-			return;
+			goto frame_end;
 		}
 		uint8_t cmd = read_byte(player);
 		psg_context *psg;
@@ -196,7 +230,7 @@ void vgm_frame(media_player *player)
 			psg = find_chip_context(player, CMD_PSG);
 			if (!psg || player->current_offset > player->media->size - 1) {
 				vgm_stop(player);
-				return;
+				goto frame_end;
 			}
 			psg->pan = read_byte(player);
 			break;
@@ -204,7 +238,7 @@ void vgm_frame(media_player *player)
 			psg = find_chip_context(player, CMD_PSG);
 			if (!psg || player->current_offset > player->media->size - 1) {
 				vgm_stop(player);
-				return;
+				goto frame_end;
 			}
 			psg_write(psg, read_byte(player));
 			break;
@@ -212,7 +246,7 @@ void vgm_frame(media_player *player)
 			ym = find_chip_context(player, CMD_YM2612_0);
 			if (!ym || player->current_offset > player->media->size - 2) {
 				vgm_stop(player);
-				return;
+				goto frame_end;
 			}
 			ym_address_write_part1(ym, read_byte(player));
 			ym_data_write(ym, read_byte(player));
@@ -221,7 +255,7 @@ void vgm_frame(media_player *player)
 			ym = find_chip_context(player, CMD_YM2612_0);
 			if (!ym || player->current_offset > player->media->size - 2) {
 				vgm_stop(player);
-				return;
+				goto frame_end;
 			}
 			ym_address_write_part2(ym, read_byte(player));
 			ym_data_write(ym, read_byte(player));
@@ -229,7 +263,7 @@ void vgm_frame(media_player *player)
 		case CMD_WAIT: {
 			if (player->current_offset > player->media->size - 2) {
 				vgm_stop(player);
-				return;
+				goto frame_end;
 			}
 			player->wait_samples += read_word_le(player);
 			break;
@@ -241,13 +275,23 @@ void vgm_frame(media_player *player)
 			player->wait_samples += 882;
 			break;
 		case CMD_END:
-			//TODO: loops
-			vgm_stop(player);
+			if (player->vgm->loop_offset && --player->loop_count) {
+				player->current_offset = player->vgm->loop_offset + offsetof(vgm_header, loop_offset);
+				if (player->current_offset < player->vgm->data_offset + offsetof(vgm_header, data_offset)) {
+					// invalid loop offset
+					vgm_stop(player);
+					goto frame_end;
+				}
+			} else {
+				//TODO: fade out?
+				vgm_stop(player);
+				goto frame_end;
+			}
 			return;
 		case CMD_PCM_WRITE: {
 			if (player->current_offset > player->media->size - 11) {
 				vgm_stop(player);
-				return;
+				goto frame_end;
 			}
 			player->current_offset++; //skip compatibility command
 			uint8_t data_type = read_byte(player);
@@ -337,7 +381,7 @@ void vgm_frame(media_player *player)
 				uint32_t data_size = read_long_le(player);
 				if (data_size > player->media->size || player->current_offset > player->media->size - data_size) {
 					vgm_stop(player);
-					return;
+					goto frame_end;
 				}
 				chip_info *chip = find_chip_by_data(player, data_type);
 				if (chip) {
@@ -402,9 +446,13 @@ void vgm_frame(media_player *player)
 			} else {
 				warning("unimplemented command: %X at offset %X\n", cmd, player->current_offset);
 				vgm_stop(player);
-				return;
+				goto frame_end;
 			}
 		}
+	}
+frame_end:
+	if (player->scope) {
+		scope_render(player->scope);
 	}
 }
 
@@ -493,19 +541,6 @@ void vgm_init(media_player *player, uint32_t opts)
 	}
 	player->chips = calloc(player->num_chips, sizeof(chip_info));
 	uint32_t chip = 0;
-	if (player->vgm->sn76489_clk) {
-		psg_context *psg = calloc(1, sizeof(psg_context));
-		psg_init(psg, player->vgm->sn76489_clk, 1);
-		player->chips[chip++] = (chip_info) {
-			.context = psg,
-			.run = (chip_run_fun)psg_run,
-			.adjust = psg_adjust,
-			.clock = player->vgm->sn76489_clk,
-			.samples = 0,
-			.cmd = CMD_PSG,
-			.data_type = 0xFF
-		};
-	}
 	if (player->vgm->ym2612_clk) {
 		ym2612_context *ym = calloc(1, sizeof(ym2612_context));
 		ym_init(ym, player->vgm->ym2612_clk, 1, opts);
@@ -513,10 +548,27 @@ void vgm_init(media_player *player, uint32_t opts)
 			.context = ym,
 			.run = (chip_run_fun)ym_run,
 			.adjust = ym_adjust,
+			.scope = ym_scope,
+			.no_scope = ym_no_scope,
 			.clock = player->vgm->ym2612_clk,
 			.samples = 0,
 			.cmd = CMD_YM2612_0,
 			.data_type = DATA_YM2612_PCM
+		};
+	}
+	if (player->vgm->sn76489_clk) {
+		psg_context *psg = calloc(1, sizeof(psg_context));
+		psg_init(psg, player->vgm->sn76489_clk, 16);
+		player->chips[chip++] = (chip_info) {
+			.context = psg,
+			.run = (chip_run_fun)psg_run,
+			.adjust = psg_adjust,
+			.scope = psg_scope,
+			.no_scope = ym_no_scope,
+			.clock = player->vgm->sn76489_clk,
+			.samples = 0,
+			.cmd = CMD_PSG,
+			.data_type = 0xFF
 		};
 	}
 	if (player->vgm_ext && player->vgm_ext->rf5c68_clk) {
@@ -526,6 +578,8 @@ void vgm_init(media_player *player, uint32_t opts)
 			.context = pcm,
 			.run = (chip_run_fun)rf5c164_run,
 			.adjust = pcm_adjust,
+			.scope = pcm_scope,
+			.no_scope = pcm_no_scope,
 			.clock = player->vgm_ext->rf5c68_clk,
 			.samples = 0,
 			.cmd = CMD_PCM68_REG,
@@ -539,6 +593,8 @@ void vgm_init(media_player *player, uint32_t opts)
 			.context = pcm,
 			.run = (chip_run_fun)rf5c164_run,
 			.adjust = pcm_adjust,
+			.scope = pcm_scope,
+			.no_scope = pcm_no_scope,
 			.clock = player->vgm_ext->rf5c164_clk,
 			.samples = 0,
 			.cmd = CMD_PCM164_REG,
@@ -546,6 +602,7 @@ void vgm_init(media_player *player, uint32_t opts)
 		};
 	}
 	player->current_offset = player->vgm->data_offset + offsetof(vgm_header, data_offset);
+	player->loop_count = 2;
 }
 
 static void wave_player_init(media_player *player)
@@ -688,6 +745,29 @@ static void request_exit(system_header *system)
 	player->should_return = 1;
 }
 
+static void toggle_debug_view(system_header *system, uint8_t debug_view)
+{
+#ifndef IS_LIB
+	media_player *player = (media_player *)system;
+	if (debug_view == DEBUG_OSCILLOSCOPE && player->chips) {
+		if (player->scope) {
+			for (uint32_t i = 0; i < player->num_chips; i++)
+			{
+				player->chips[i].no_scope(player->chips[i].context);
+			}
+			scope_close(player->scope);
+			player->scope = NULL;
+		} else {
+			player->scope = create_oscilloscope();
+			for (uint32_t i = 0; i < player->num_chips; i++)
+			{
+				player->chips[i].scope(player->chips + i, player->scope);
+			}
+		}
+	}
+#endif
+}
+
 media_player *alloc_media_player(system_media *media, uint32_t opts)
 {
 	media_player *player = calloc(1, sizeof(media_player));
@@ -697,6 +777,7 @@ media_player *alloc_media_player(system_media *media, uint32_t opts)
 	player->header.free_context = free_player;
 	player->header.gamepad_down = gamepad_down;
 	player->header.gamepad_up = gamepad_down;
+	player->header.toggle_debug_view = toggle_debug_view;
 	player->header.type = SYSTEM_MEDIA_PLAYER;
 	player->header.info.name = strdup(media->name);
 

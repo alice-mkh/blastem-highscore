@@ -6,15 +6,20 @@
 #include "vgm.h"
 #include "wave.h"
 #include "flac.h"
+#include "oscilloscope.h"
 #include "render_audio.h"
 
 typedef struct chip_info chip_info;
 typedef void (*chip_run_fun)(void *context, uint32_t cycle);
+typedef void (*chip_scope_fun)(chip_info *chip, oscilloscope *scope);
+typedef void (*chip_noarg_fun)(void *context);
 typedef void (*chip_adjust_fun)(chip_info *chip);
 struct chip_info {
 	void            *context;
 	chip_run_fun    run;
 	chip_adjust_fun adjust;
+	chip_scope_fun  scope;
+	chip_noarg_fun  no_scope;
 	data_block      *blocks;
 	uint32_t        clock;
 	uint32_t        samples;
@@ -32,12 +37,14 @@ typedef struct {
 	flac_file           *flac;
 	audio_source        *audio;
 	chip_info           *chips;
+	oscilloscope        *scope;
 	uint32_t            num_chips;
 	uint32_t            current_offset;
 	uint32_t            playback_time;
 	uint32_t            wait_samples;
 	uint32_t            ym_seek_offset;
 	uint32_t            ym_block_offset;
+	uint32_t            loop_count;
 	uint8_t             state;
 	uint8_t             media_type;
 	uint8_t             should_return;
