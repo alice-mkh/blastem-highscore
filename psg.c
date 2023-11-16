@@ -143,11 +143,11 @@ void psg_run(psg_context * context, uint32_t cycles)
 				if (context->pan & pan_right) {
 					right_accum += value;
 				}
-				pan_left <<= 1;
-				pan_right <<= 1;
 			} else {
 				value = 0;
 			}
+			pan_left <<= 1;
+			pan_right <<= 1;
 #ifndef IS_LIB
 			if (context->scope) {
 				scope_add_sample(context->scope, context->scope_channel[i], value, trigger[i]);
