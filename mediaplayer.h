@@ -28,6 +28,11 @@ struct chip_info {
 	uint8_t         data_type;
 };
 
+enum {
+	STATE_PLAY,
+	STATE_PAUSED
+};
+
 typedef struct {
 	system_header       header;
 	system_media        *media;

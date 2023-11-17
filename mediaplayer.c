@@ -21,11 +21,6 @@ enum {
 	MEDIA_UNKNOWN
 };
 
-enum {
-	STATE_PLAY,
-	STATE_PAUSED
-};
-
 uint32_t cycles_to_samples(uint32_t clock_rate, uint32_t cycles)
 {
 	return ((uint64_t)cycles) * ((uint64_t)44100) / ((uint64_t)clock_rate);
@@ -464,6 +459,7 @@ void wave_frame(media_player *player)
 		if (sample_size > player->media->size || player->current_offset > player->media->size - sample_size) {
 			player->current_offset = player->wave->format_header.size + offsetof(wave_header, audio_format);
 			player->state = STATE_PAUSED;
+			player->playback_time = 0;
 			return;
 		}
 		if (player->wave->bits_per_sample == 16) {
@@ -498,6 +494,7 @@ void flac_frame(media_player *player)
 			render_put_stereo_sample(player->audio, samples[0], samples[1]);
 		} else {
 			player->state = STATE_PAUSED;
+			player->playback_time = 0;
 			return;
 		}
 	}
@@ -654,6 +651,7 @@ static void resume_player(system_header *system)
 		switch (player->state)
 		{
 		case STATE_PLAY:
+			player->playback_time++;
 			switch(player->media_type)
 			{
 			case AUDIO_VGM:
