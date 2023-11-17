@@ -682,8 +682,16 @@ static void resume_player(system_header *system)
 
 static void gamepad_down(system_header *system, uint8_t pad, uint8_t button)
 {
-	if (button >= BUTTON_A && button <= BUTTON_C) {
-		media_player *player = (media_player *)system;
+	if (pad != 1) {
+		return;
+	}
+	media_player *player = (media_player *)system;
+	if (player->button_state[button]) {
+		//already pressed
+		return;
+	}
+	player->button_state[button] = 1;
+	if (button == BUTTON_A || button == BUTTON_C || button == BUTTON_START) {
 		if (player->state == STATE_PAUSED) {
 			player->state = STATE_PLAY;
 			puts("Now playing");
@@ -696,6 +704,11 @@ static void gamepad_down(system_header *system, uint8_t pad, uint8_t button)
 
 static void gamepad_up(system_header *system, uint8_t pad, uint8_t button)
 {
+	if (pad != 1) {
+		return;
+	}
+	media_player *player = (media_player *)system;
+	player->button_state[button] = 0;
 }
 
 static void start_player(system_header *system, char *statefile)
@@ -776,7 +789,7 @@ media_player *alloc_media_player(system_media *media, uint32_t opts)
 	player->header.request_exit = request_exit;
 	player->header.free_context = free_player;
 	player->header.gamepad_down = gamepad_down;
-	player->header.gamepad_up = gamepad_down;
+	player->header.gamepad_up = gamepad_up;
 	player->header.toggle_debug_view = toggle_debug_view;
 	player->header.type = SYSTEM_MEDIA_PLAYER;
 	player->header.info.name = strdup(media->name);

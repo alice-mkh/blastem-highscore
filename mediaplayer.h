@@ -8,6 +8,7 @@
 #include "flac.h"
 #include "oscilloscope.h"
 #include "render_audio.h"
+#include "io.h"
 
 typedef struct chip_info chip_info;
 typedef void (*chip_run_fun)(void *context, uint32_t cycle);
@@ -48,6 +49,7 @@ typedef struct {
 	uint8_t             state;
 	uint8_t             media_type;
 	uint8_t             should_return;
+	uint8_t             button_state[NUM_GAMEPAD_BUTTONS];
 } media_player;
 
 media_player *alloc_media_player(system_media *media, uint32_t opts);
