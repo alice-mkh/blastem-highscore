@@ -316,7 +316,7 @@ static void update_pad_menu_binding(char *key, tern_val val, uint8_t valtype, vo
 	*pads = tern_insert_node(*pads, key, val.ptrval);
 }
 
-#define CONFIG_VERSION 7
+#define CONFIG_VERSION 8
 static tern_node *migrate_config(tern_node *config, int from_version)
 {
 	tern_node *def_config = parse_bundled_config("default.cfg");
@@ -408,6 +408,42 @@ static tern_node *migrate_config(tern_node *config, int from_version)
 			config = tern_insert_path(config, "bindings\0pads\0", (tern_val){.ptrval = pad_bindings}, TVAL_NODE);
 		}
 	}
+	case 7: {
+		uint32_t num_exts;
+		char **exts = get_extension_list(config, &num_exts);
+		char *need_add[] = {"vgm", "vgz", "flac", "wav"};
+		uint32_t num_need_add = sizeof(need_add)/sizeof(*need_add);
+		for (uint32_t i = 0; i < num_exts && num_need_add; i++)
+		{
+			for (uint32_t j = 0; j < num_need_add; j++)
+			{
+				if (!strcmp(exts[i], need_add[j])) {
+					num_need_add--;
+					need_add[j] = need_add[num_need_add];
+					break;
+				}
+			}
+		}
+		if (num_need_add) {
+			const char **parts = calloc(2 * (num_exts + num_need_add) - 1, sizeof(char*));
+			uint32_t dest = 0;
+			for (uint32_t i = 0; i < num_exts; i++)
+			{
+				parts[dest++] = exts[i];
+				parts[dest++] = " ";
+			}
+			for (uint32_t i = 0; i < num_need_add - 1; i++)
+			{
+				parts[dest++] = need_add[i];
+				parts[dest++] = " ";
+			}
+			parts[dest++] = need_add[num_need_add - 1];
+			config = tern_insert_path(config, "ui\0extensions\0", (tern_val){.ptrval = alloc_concat_m(dest, parts)}, TVAL_PTR);
+			free(parts);
+		}
+		free(exts[0]);//All extensions in this list share an allocation, first one is a pointer to the buffer
+		free(exts);
+	}
 	}
 	char buffer[16];
 	sprintf(buffer, "%d", CONFIG_VERSION);
@@ -483,7 +519,7 @@ void delete_custom_config(void)
 
 char **get_extension_list(tern_node *config, uint32_t *num_exts_out)
 {
-	char *ext_filter = strdup(tern_find_path_default(config, "ui\0extensions\0", (tern_val){.ptrval = "bin gen md smd sms gg cue iso"}, TVAL_PTR).ptrval);
+	char *ext_filter = strdup(tern_find_path_default(config, "ui\0extensions\0", (tern_val){.ptrval = "bin gen md smd sms gg zip gz cue iso vgm vgz flac wav"}, TVAL_PTR).ptrval);
 	uint32_t num_exts = 0, ext_storage = 5;
 	char **ext_list = malloc(sizeof(char *) * ext_storage);
 	char *cur_filter = ext_filter;
