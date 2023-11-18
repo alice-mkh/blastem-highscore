@@ -21,6 +21,7 @@ struct chip_info {
 	chip_adjust_fun adjust;
 	chip_scope_fun  scope;
 	chip_noarg_fun  no_scope;
+	chip_noarg_fun  free;
 	data_block      *blocks;
 	uint32_t        clock;
 	uint32_t        samples;

@@ -94,6 +94,13 @@ void pcm_no_scope(void *context)
 	pcm->scope = NULL;
 }
 
+void pcm_free(void *context)
+{
+	rf5c164 *pcm = context;
+	rf5c164_deinit(pcm);
+	free(pcm);
+}
+
 uint8_t *find_block(data_block *head, uint32_t offset, uint32_t size)
 {
 	if (!head) {
@@ -547,6 +554,7 @@ void vgm_init(media_player *player, uint32_t opts)
 			.adjust = ym_adjust,
 			.scope = ym_scope,
 			.no_scope = ym_no_scope,
+			.free = (chip_noarg_fun)ym_free,
 			.clock = player->vgm->ym2612_clk,
 			.samples = 0,
 			.cmd = CMD_YM2612_0,
@@ -562,6 +570,7 @@ void vgm_init(media_player *player, uint32_t opts)
 			.adjust = psg_adjust,
 			.scope = psg_scope,
 			.no_scope = ym_no_scope,
+			.free = (chip_noarg_fun)psg_free,
 			.clock = player->vgm->sn76489_clk,
 			.samples = 0,
 			.cmd = CMD_PSG,
@@ -577,6 +586,7 @@ void vgm_init(media_player *player, uint32_t opts)
 			.adjust = pcm_adjust,
 			.scope = pcm_scope,
 			.no_scope = pcm_no_scope,
+			.free = pcm_free,
 			.clock = player->vgm_ext->rf5c68_clk,
 			.samples = 0,
 			.cmd = CMD_PCM68_REG,
@@ -592,6 +602,7 @@ void vgm_init(media_player *player, uint32_t opts)
 			.adjust = pcm_adjust,
 			.scope = pcm_scope,
 			.no_scope = pcm_no_scope,
+			.free = pcm_free,
 			.clock = player->vgm_ext->rf5c164_clk,
 			.samples = 0,
 			.cmd = CMD_PCM164_REG,
@@ -719,8 +730,7 @@ static void free_player(system_header *system)
 	media_player *player = (media_player *)system;
 	for (uint32_t i = 0; i < player->num_chips; i++)
 	{
-		//TODO properly free chips
-		free(player->chips[i].context);
+		player->chips[i].free(player->chips[i].context);
 	}
 	free(player->chips);
 	free(player->vgm);
