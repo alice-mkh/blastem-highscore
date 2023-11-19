@@ -1061,7 +1061,7 @@ void view_select_binding_dest(struct nk_context *context)
 	options[BY_INDEX].title = by_index_names[selected_controller];
 	options[SIMILAR_CONTROLLERS].title = make_human_readable_type_name(&selected_controller_info);
 
-	if ((context, "Select Binding Dest", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
+	if (nk_begin(context, "Select Binding Dest", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
 		menu(context, NUM_DEST_TYPES, options, handle_dest_clicked);
 		nk_end(context);
 	}
@@ -1087,7 +1087,7 @@ static ui_image *select_best_image(controller_info *info)
 
 void view_controller_bindings(struct nk_context *context)
 {
-	if ((context, "Controller Bindings", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
+	if (nk_begin(context, "Controller Bindings", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
 		if (!bindings) {
 			bindings = calloc(1, sizeof(*bindings));
 			tern_node *pad = get_binding_node_for_pad(selected_controller, &selected_controller_info);
@@ -1282,7 +1282,7 @@ static void view_controller_mappings(struct nk_context *context)
 	char buffer[512];
 	static int quiet, button_a = -1, button_a_axis = -1;
 	uint8_t added_mapping = 0;
-	if ((context, "Controllers", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
+	if (nk_begin(context, "Controllers", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
 
 		nk_layout_space_begin(context, NK_STATIC, render_height() - context->style.font->height, 3);
 
@@ -1423,7 +1423,7 @@ static void show_mapping_view(void)
 static void view_controller_variant(struct nk_context *context)
 {
 	uint8_t selected = 0;
-	if ((context, "Controller Type", nk_rect(0, 0, render_width(), render_height()), 0)) {
+	if (nk_begin(context, "Controller Type", nk_rect(0, 0, render_width(), render_height()), 0)) {
 		nk_layout_row_static(context, context->style.font->height*1.25, render_width() - context->style.font->height * 2, 1);
 		nk_label(context, "", NK_TEXT_CENTERED);
 		nk_label(context, "Select the layout that", NK_TEXT_CENTERED);
@@ -1518,7 +1518,7 @@ static void controller_type_group(struct nk_context *context, char *name, int ty
 
 void view_controller_type(struct nk_context *context)
 {
-	if ((context, "Controller Type", nk_rect(0, 0, render_width(), render_height()), 0)) {
+	if (nk_begin(context, "Controller Type", nk_rect(0, 0, render_width(), render_height()), 0)) {
 		controller_type_group(context, "Xbox", TYPE_XBOX, SUBTYPE_XBOX, (const char *[]){
 			"Original", "Xbox 360", "Xbox One/Series", "Xbox Elite"
 		}, 4);
@@ -1604,7 +1604,7 @@ void trigger_deadzone_widget(float left, float top, float size, SDL_GameControll
 
 void view_deadzones(struct nk_context *context)
 {
-	if ((context, "Deadzones", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
+	if (nk_begin(context, "Deadzones", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
 		nk_layout_space_begin(context, NK_STATIC, render_height() - 3 * context->style.font->height, 4);
 
 		float left = render_width() / 8.0f, top = render_height() / 8.0f;
@@ -1654,7 +1654,7 @@ void view_deadzones(struct nk_context *context)
 
 void view_controllers(struct nk_context *context)
 {
-	if ((context, "Controllers", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
+	if (nk_begin(context, "Controllers", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
 		int height = (render_height() - 2*context->style.font->height) / 5;
 		int inner_height = height - context->style.window.spacing.y;
 		const struct nk_user_font *font = context->style.font;
@@ -2034,7 +2034,7 @@ void view_video_settings(struct nk_context *context)
 	if (desired_width > width) {
 		desired_width = width;
 	}
-	if ((context, "Video Settings", nk_rect(0, 0, width, height), 0)) {
+	if (nk_begin(context, "Video Settings", nk_rect(0, 0, width, height), 0)) {
 		nk_layout_row_static(context, context->style.font->height, desired_width, 2);
 		settings_toggle(context, "Fullscreen", "video\0fullscreen\0", 0);
 		settings_toggle(context, "Open GL", "video\0gl\0", 1);
