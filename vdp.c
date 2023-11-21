@@ -2075,14 +2075,24 @@ static void vdp_advance_line(vdp_context *context)
 static void vram_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context)
 {
 	uint8_t pal = (context->debug_modes[DEBUG_VRAM] % 4) << 4;
+	int yshift, ymask, tilesize;
+	if (context->double_res) {
+		yshift = 5;
+		ymask = 0xF;
+		tilesize = 64;
+	} else {
+		yshift = 4;
+		ymask = 0x7;
+		tilesize = 32;
+	}
 	for (int y = 0; y < 512; y++)
 	{
 		uint32_t *line = fb + y * pitch / sizeof(uint32_t);
-		int row = y >> 4;
-		int yoff = y >> 1 & 7;
+		int row = y >> yshift;
+		int yoff = y >> 1 & ymask;
 		for (int col = 0; col < 64; col++)
 		{
-			uint16_t address = (row * 64 + col) * 32 + yoff * 4;
+			uint16_t address = (row * 64 + col) * tilesize + yoff * 4;
 			for (int x = 0; x < 4; x++)
 			{
 				uint8_t byte = context->vdpmem[address++];
@@ -2201,7 +2211,16 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 			break;
 		}
 		uint32_t bg_color = context->colors[context->regs[REG_BG_COLOR & 0x3F]];
-		for (uint16_t row = 0; row < 128; row++)
+		uint16_t num_rows;
+		int num_lines;
+		if (context->double_res) {
+			num_rows = 64;
+			num_lines = 16;
+		} else {
+			num_rows = 128;
+			num_lines = 8;
+		}
+		for (uint16_t row = 0; row < num_rows; row++)
 		{
 			uint16_t row_address = table_address + (row & vscroll_mask) * v_mul;
 			for (uint16_t col = 0; col < 128; col++)
@@ -2212,19 +2231,23 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 				uint16_t entry = context->vdpmem[address] << 8 | context->vdpmem[address + 1];
 				uint8_t pal = entry >> 9 & 0x30;
 
-				uint32_t *dst = fb + (row * pitch * 8 / sizeof(uint32_t)) + col * 8;
-				address = (entry & 0x7FF) * 32;
+				uint32_t *dst = fb + (row * pitch * num_lines / sizeof(uint32_t)) + col * 8;
+				if (context->double_res) {
+					address = (entry & 0x3FF) * 64;
+				} else {
+					address = (entry & 0x7FF) * 32;
+				}
 				int y_diff = 4;
 				if (entry & 0x1000) {
 					y_diff = -4;
-					address += 7 * 4;
+					address += (num_lines - 1) * 4;
 				}
 				int x_diff = 1;
 				if (entry & 0x800) {
 					x_diff = -1;
 					address += 3;
 				}
-				for (int y = 0; y < 8; y++)
+				for (int y = 0; y < num_lines; y++)
 				{
 					uint16_t trow_address = address;
 					uint32_t *row_dst = dst;
