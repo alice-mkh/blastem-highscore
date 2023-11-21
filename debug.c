@@ -309,23 +309,23 @@ static debug_val debug_size(debug_val *args, int num_args)
 	return debug_int(array->size);
 }
 
-static debug_root *roots;
+static debug_root **roots;
 static uint32_t num_roots, root_storage;
 
 debug_root *find_root(void *cpu)
 {
 	for (uint32_t i = 0; i < num_roots; i++)
 	{
-		if (roots[i].cpu_context == cpu) {
-			return roots + i;
+		if (roots[i]->cpu_context == cpu) {
+			return roots[i];
 		}
 	}
 	if (num_roots == root_storage) {
 		root_storage = root_storage ? root_storage * 2 : 5;
-		roots = realloc(roots, root_storage * sizeof(debug_root));
+		roots = realloc(roots, root_storage * sizeof(debug_root*));
 	}
-	debug_root *root = roots + num_roots++;
-	memset(root, 0, sizeof(debug_root));
+	debug_root *root = calloc(1, sizeof(debug_root));
+	roots[num_roots++] = root;
 	root->cpu_context = cpu;
 	new_readonly_variable(root, "sin", new_native_func(debug_sin, 1, 1));
 	new_readonly_variable(root, "cos", new_native_func(debug_cos, 1, 1));
