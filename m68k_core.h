@@ -80,6 +80,12 @@ typedef struct {
 	uint32_t           address;
 } m68k_breakpoint;
 
+#ifdef X86_64
+#define M68K_STACK_STORAGE 12
+#else
+#define M68K_STACK_STORAGE 20
+#endif
+
 struct m68k_context {
 	uint8_t         flags[5];
 	uint8_t         status;
@@ -99,7 +105,7 @@ struct m68k_context {
 	m68k_options    *options;
 	void            *system;
 	void            *host_sp_entry;
-	void            *stack_storage[12];
+	void            *stack_storage[M68K_STACK_STORAGE];
 	m68k_breakpoint *breakpoints;
 	uint32_t        num_breakpoints;
 	uint32_t        bp_storage;
