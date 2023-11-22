@@ -144,6 +144,10 @@ static void update_video_params(vdp_context *context)
 	}
 	context->border_top = calc_crop(top_crop, border_top);
 	context->top_offset = border_top - context->border_top;
+	context->double_res = (context->regs[REG_MODE_4] & (BIT_INTERLACE | BIT_DOUBLE_RES)) == (BIT_INTERLACE | BIT_DOUBLE_RES);
+	if (!context->double_res) {
+		context->flags2 &= ~FLAG2_EVEN_FIELD;
+	}
 }
 
 static uint8_t static_table_init_done;
@@ -4646,12 +4650,6 @@ void vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
 		uint8_t buffer[2] = {reg, value};
 		event_log(EVENT_VDP_REG, context->cycles, sizeof(buffer), buffer);
 		context->regs[reg] = value;
-		if (reg == REG_MODE_4) {
-			context->double_res = (value & (BIT_INTERLACE | BIT_DOUBLE_RES)) == (BIT_INTERLACE | BIT_DOUBLE_RES);
-			if (!context->double_res) {
-				context->flags2 &= ~FLAG2_EVEN_FIELD;
-			}
-		}
 		if (reg == REG_MODE_1 || reg == REG_MODE_2 || reg == REG_MODE_4) {
 			update_video_params(context);
 		}
