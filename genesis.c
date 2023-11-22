@@ -1806,6 +1806,12 @@ static void config_updated(system_header *system)
 	genesis_context *gen = (genesis_context *)system;
 	setup_io_devices(config, &system->info, &gen->io);
 	set_audio_config(gen);
+	//sample rate may have changed
+	ym_adjust_master_clock(gen->ym, gen->master_clock);
+	psg_adjust_master_clock(gen->psg, gen->master_clock);
+	if (gen->expansion) {
+		segacd_config_updated(gen->expansion);
+	}
 }
 
 static void start_vgm_log(system_header *system, char *filename)

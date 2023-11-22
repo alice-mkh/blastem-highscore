@@ -25,6 +25,7 @@ typedef struct {
 	uint32_t        graphics_cycle;
 	uint32_t        base;
 	uint32_t        m68k_pc;
+	uint32_t        speed_percent;
 	uint32_t        graphics_x;
 	uint32_t        graphics_y;
 	uint32_t        graphics_dx;
@@ -69,5 +70,6 @@ void segacd_set_speed_percent(segacd_context *cd, uint32_t percent);
 void segacd_serialize(segacd_context *cd, serialize_buffer *buf, uint8_t all);
 void segacd_register_section_handlers(segacd_context *cd, deserialize_buffer *buf);
 void segacd_format_bram(uint8_t *buffer, size_t size);
+void segacd_config_updated(segacd_context *cd);
 
 #endif //SEGACD_H_

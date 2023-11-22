@@ -683,6 +683,8 @@ static void config_updated(system_header *system)
 {
 	sms_context *sms = (sms_context *)system;
 	setup_io_devices(config, &system->info, &sms->io);
+	//sample rate may have changed
+	psg_adjust_master_clock(sms->psg, sms->master_clock);
 }
 
 static void toggle_debug_view(system_header *system, uint8_t debug_view)
