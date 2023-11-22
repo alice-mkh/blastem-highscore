@@ -1423,13 +1423,13 @@ static uint8_t read_m68k(debug_root *root, uint32_t *out, char size)
 		*out = m68k_read_byte(*out, context);
 	} else if (size == 'l') {
 		if (*out & 1) {
-			fprintf(stderr, "Longword access to odd addresses (%X) is not allowed\n", *out);
+			fprintf(stderr, "Longword access to odd addresses ($%X) is not allowed\n", *out);
 			return 0;
 		}
 		*out = m68k_read_long(*out, context);
 	} else {
 		if (*out & 1) {
-			fprintf(stderr, "Wword access to odd addresses (%X) is not allowed\n", *out);
+			fprintf(stderr, "Wword access to odd addresses ($%X) is not allowed\n", *out);
 			return 0;
 		}
 		*out = m68k_read_word(*out, context);
@@ -1444,14 +1444,14 @@ static uint8_t write_m68k(debug_root *root, uint32_t address, uint32_t value, ch
 		write_byte(address, value, (void **)context->mem_pointers, &context->options->gen, context);
 	} else if (size == 'l') {
 		if (address & 1) {
-			fprintf(stderr, "Longword access to odd addresses (%X) is not allowed\n", address);
+			fprintf(stderr, "Longword access to odd addresses ($%X) is not allowed\n", address);
 			return 0;
 		}
 		write_word(address, value >> 16, (void **)context->mem_pointers, &context->options->gen, context);
 		write_word(address + 2, value, (void **)context->mem_pointers, &context->options->gen, context);
 	} else {
 		if (address & 1) {
-			fprintf(stderr, "Wword access to odd addresses (%X) is not allowed\n", address);
+			fprintf(stderr, "Wword access to odd addresses ($%X) is not allowed\n", address);
 			return 0;
 		}
 		write_word(address, value, (void **)context->mem_pointers, &context->options->gen, context);
@@ -2745,7 +2745,7 @@ static uint8_t cmd_set(debug_root *root, parsed_command *cmd)
 				return 1;
 			}
 			if (address.v.u32 >= array->size) {
-				fprintf(stderr, "Address %X is out of bounds for array %s\n", address.v.u32, set_expr->right->op.v.str);
+				fprintf(stderr, "Address $%X is out of bounds for array %s\n", address.v.u32, set_expr->right->op.v.str);
 				return 1;
 			}
 		}
@@ -2785,7 +2785,7 @@ static uint8_t cmd_set(debug_root *root, parsed_command *cmd)
 	} else if (array) {
 		array->set(array, address.v.u32, value);
 	} else if (!root->write_mem(root, address.v.u32, value.v.u32, size)) {
-		fprintf(stderr, "Failed to write to address %X\n", address.v.u32);
+		fprintf(stderr, "Failed to write to address $%X\n", address.v.u32);
 	}
 	return 1;
 }
@@ -2965,7 +2965,7 @@ static void print_symbol(char *key, tern_val val, uint8_t valtype, void *data)
 		putchar(' ');
 		len++;
 	}
-	printf("%X\n", (uint32_t)val.intval);
+	printf("$%X\n", (uint32_t)val.intval);
 }
 
 static uint8_t cmd_symbols(debug_root *root, parsed_command *cmd)
@@ -3045,7 +3045,7 @@ static uint8_t cmd_breakpoint_m68k(debug_root *root, parsed_command *cmd)
 	new_bp->index = root->bp_index++;
 	new_bp->type = BP_TYPE_CPU;
 	root->breakpoints = new_bp;
-	printf("68K Breakpoint %d set at %X\n", new_bp->index, address);
+	printf("68K Breakpoint %d set at $%X\n", new_bp->index, address);
 	return 1;
 }
 
@@ -3077,7 +3077,7 @@ static void on_vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
 			debugging = run_command(root, (*this_bp)->commands + i);
 		}
 		if (debugging) {
-			printf("VDP Register Breakpoint %d hit on register write %X - Old: %X, New: %X\n", (*this_bp)->index, reg, context->regs[reg], value);
+			printf("VDP Register Breakpoint %d hit on register write $%X - Old: $%X, New: $%X\n", (*this_bp)->index, reg, context->regs[reg], value);
 			gen->header.enter_debugger = 1;
 			if (gen->m68k->sync_cycle > gen->m68k->current_cycle + 1) {
 				gen->m68k->sync_cycle = gen->m68k->current_cycle + 1;
@@ -3876,7 +3876,7 @@ static uint8_t cmd_breakpoint_z80(debug_root *root, parsed_command *cmd)
 	new_bp->type = BP_TYPE_CPU;
 	new_bp->index = root->bp_index++;
 	root->breakpoints = new_bp;
-	printf("Z80 Breakpoint %d set at %X\n", new_bp->index, address);
+	printf("Z80 Breakpoint %d set at $%X\n", new_bp->index, address);
 	return 1;
 }
 
