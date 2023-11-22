@@ -2096,7 +2096,7 @@ void view_audio_settings(struct nk_context *context)
 	static int32_t selected_size = -1;
 	static int32_t selected_dac = -1;
 	if (selected_rate < 0 || selected_size < 0 || selected_dac < 0) {
-		selected_rate = find_match(rates, num_rates, "autio\0rate\0", "48000");
+		selected_rate = find_match(rates, num_rates, "audio\0rate\0", "48000");
 		selected_size = find_match(sizes, num_sizes, "audio\0buffer\0", "512");
 		selected_dac = find_match(dac, num_dacs, "audio\0fm_dac\0", "zero_offset");
 	}
