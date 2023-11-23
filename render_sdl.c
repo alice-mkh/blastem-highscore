@@ -905,6 +905,7 @@ static int32_t handle_event(SDL_Event *event)
 			need_ui_fb_resize = 1;
 #ifndef DISABLE_OPENGL
 			if (render_gl) {
+				SDL_GL_MakeCurrent(main_window, main_context);
 				if (on_context_destroyed) {
 					on_context_destroyed();
 				}
