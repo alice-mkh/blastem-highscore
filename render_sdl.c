@@ -476,8 +476,10 @@ static void render_alloc_surfaces()
 	if (texture_init) {
 		return;
 	}
-	sdl_textures= calloc(sizeof(SDL_Texture *), 3);
-	num_textures = 3;
+	if (!sdl_textures) {
+		sdl_textures= calloc(sizeof(SDL_Texture *), 3);
+		num_textures = 3;
+	}
 	texture_init = 1;
 #ifndef DISABLE_OPENGL
 	if (render_gl) {
@@ -1273,7 +1275,15 @@ static int in_toggle;
 
 void render_config_updated(void)
 {
-	free_surfaces();
+	int n = num_textures < FRAMEBUFFER_USER_START ? num_textures : FRAMEBUFFER_USER_START;
+	for (int i = 0; i < n; i++)
+	{
+		if (sdl_textures[i]) {
+			SDL_DestroyTexture(sdl_textures[i]);
+			sdl_textures[i] = NULL;
+		}
+	}
+	texture_init = 0;
 #ifndef DISABLE_OPENGL
 	if (render_gl) {
 		if (on_context_destroyed) {
