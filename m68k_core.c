@@ -1312,4 +1312,5 @@ void m68k_deserialize(deserialize_buffer *buf, void *vcontext)
 	context->int_num = load_int8(buf);
 	context->int_pending = load_int8(buf);
 	context->trace_pending = load_int8(buf);
+	context->stack_storage_count = 0;
 }
