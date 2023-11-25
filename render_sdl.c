@@ -303,7 +303,8 @@ void render_set_external_sync(uint8_t ext_sync_on)
 
 static int tex_width, tex_height;
 #ifndef DISABLE_OPENGL
-static GLuint textures[3], buffers[2], vshader, fshader, program, un_textures[2], un_width, un_height, un_texsize, at_pos;
+static GLuint textures[3], buffers[2], vshader, fshader, program;
+static GLint un_textures[2], un_width, un_height, un_texsize, un_curfield, un_interlaced, un_scanlines, at_pos;
 
 static GLfloat vertex_data_default[] = {
 	-1.0f, -1.0f,
@@ -457,6 +458,9 @@ static void gl_setup()
 	un_width = glGetUniformLocation(program, "width");
 	un_height = glGetUniformLocation(program, "height");
 	un_texsize = glGetUniformLocation(program, "texsize");
+	un_curfield = glGetUniformLocation(program, "curfield");
+	un_interlaced = glGetUniformLocation(program, "interlaced");
+	un_scanlines = glGetUniformLocation(program, "scanlines");
 	at_pos = glGetAttribLocation(program, "pos");
 }
 
@@ -1582,10 +1586,9 @@ uint8_t events_processed;
 #endif
 
 static uint32_t last_width, last_height;
-static uint8_t interlaced;
+static uint8_t interlaced, last_field;
 static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 {
-	static uint8_t last;
 	if (sync_src == SYNC_VIDEO && which <= FRAMEBUFFER_EVEN && source_frame_count < 0) {
 		source_frame++;
 		if (source_frame >= source_hz) {
@@ -1616,7 +1619,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 		free(screenshot_path);
 		screenshot_path = NULL;
 	}
-	interlaced = last != which;
+	interlaced = last_field != which;
 	buffer += overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard];
 #ifndef DISABLE_OPENGL
 	if (render_gl && which <= FRAMEBUFFER_EVEN) {
@@ -1651,7 +1654,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 #endif
 		uint32_t shot_height = height;
 		//TODO: Support SYNC_AUDIO_THREAD/SYNC_EXTERNAL for render API framebuffers
-		if (which <= FRAMEBUFFER_EVEN && last != which) {
+		if (which <= FRAMEBUFFER_EVEN && last_field != which) {
 			uint8_t *cur_dst = (uint8_t *)locked_pixels;
 			uint8_t *cur_saved = (uint8_t *)texture_buf;
 			uint32_t dst_off = which == FRAMEBUFFER_EVEN ? 0 : locked_pitch;
@@ -1711,7 +1714,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 		fclose(screenshot_file);
 	}
 	if (which <= FRAMEBUFFER_EVEN) {
-		last = which;
+		last_field = which;
 		static uint32_t frame_counter, start;
 		frame_counter++;
 		last_frame= SDL_GetTicks();
@@ -1886,12 +1889,27 @@ void render_update_display()
 		glUniform1i(un_textures[0], 0);
 
 		glActiveTexture(GL_TEXTURE1);
-		glBindTexture(GL_TEXTURE_2D, textures[interlaced ? 1 : scanlines ? 2 : 0]);
+		int bot_texture = 2; //black texture
+		if (interlaced) {
+			bot_texture = 1;
+		} else if (!scanlines && un_scanlines == -1) {
+			bot_texture = 0;
+		}
+		glBindTexture(GL_TEXTURE_2D, textures[bot_texture]);
 		glUniform1i(un_textures[1], 1);
 
 		glUniform1f(un_width, render_emulated_width());
 		glUniform1f(un_height, last_height);
 		glUniform2f(un_texsize, tex_width, tex_height);
+		if (un_curfield != -1) {
+			glUniform1i(un_curfield, last_field);
+		}
+		if (un_interlaced != -1) {
+			glUniform1i(un_interlaced, interlaced);
+		}
+		if (un_scanlines != -1) {
+			glUniform1i(un_scanlines, scanlines);
+		}
 
 		glBindBuffer(GL_ARRAY_BUFFER, buffers[0]);
 		glVertexAttribPointer(at_pos, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat[2]), (void *)0);
