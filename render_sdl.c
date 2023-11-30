@@ -39,10 +39,10 @@ static uint8_t num_textures;
 static SDL_Rect      main_clip;
 static SDL_GLContext *main_context;
 
-static int main_width, main_height, windowed_width, windowed_height, is_fullscreen;
+static int main_width, main_height, windowed_width, windowed_height;
 
 static uint8_t render_gl = 1;
-static uint8_t scanlines = 0;
+static uint8_t scanlines, is_fullscreen, force_cursor;
 
 static uint32_t last_frame = 0;
 
@@ -275,7 +275,7 @@ int render_height()
 	return main_height;
 }
 
-int render_fullscreen()
+uint8_t render_fullscreen()
 {
 	return is_fullscreen;
 }
@@ -1037,12 +1037,26 @@ static void init_audio()
 	render_audio_initialized(format, actual.freq, actual.channels, actual.samples, SDL_AUDIO_BITSIZE(actual.format) / 8);
 }
 
-void window_setup(void)
+static void update_cursor(void)
+{
+	SDL_ShowCursor((is_fullscreen && !force_cursor) ? SDL_DISABLE : SDL_ENABLE);
+}
+
+void render_force_cursor(uint8_t force)
+{
+	if (force != force_cursor) {
+		force_cursor = force;
+		update_cursor();
+	}
+}
+
+static void window_setup(void)
 {
 	uint32_t flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI;
 	if (is_fullscreen) {
 		flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 	}
+	update_cursor();
 
 	tern_val def = {.ptrval = "audio"};
 	if (external_sync) {
@@ -2130,6 +2144,7 @@ void render_toggle_fullscreen()
 		SDL_SetWindowSize(main_window, mode.w, mode.h);
 	}
 	SDL_SetWindowFullscreen(main_window, is_fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+	update_cursor();
 	//Since we change the window size on transition to full screen
 	//we need to set it back to normal so we can also go back to windowed mode
 	//normally you would think that this should only be done when actually transitioning

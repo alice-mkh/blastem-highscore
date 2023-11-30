@@ -2445,6 +2445,7 @@ void view_menu(struct nk_context *context)
 void blastem_nuklear_render(void)
 {
 	if (current_view != view_play || (current_system && current_system->type == SYSTEM_MEDIA_PLAYER)) {
+		render_force_cursor(1);
 		nk_input_end(context);
 		current_view(context);
 		if (fb_context) {
@@ -2457,6 +2458,8 @@ void blastem_nuklear_render(void)
 #endif
 		}
 		nk_input_begin(context);
+	} else {
+		render_force_cursor(0);
 	}
 }
 
