@@ -705,11 +705,13 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 	sync_components(context, 0);
 	vdp_context *v_context = gen->vdp;
 	uint32_t before_cycle = v_context->cycles;
+	uint8_t did_dma = 0;
 	if (vdp_port < 0x10) {
 		int blocked;
 		if (vdp_port < 4) {
 			while (vdp_data_port_write(v_context, value) < 0) {
 				while(v_context->flags & FLAG_DMA_RUN) {
+					did_dma = 1;
 					vdp_run_dma_done(v_context, gen->frame_end);
 					if (v_context->cycles >= gen->frame_end) {
 						uint32_t cycle_diff = v_context->cycles - context->current_cycle;
@@ -732,6 +734,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 			if (blocked) {
 				while (blocked) {
 					while(v_context->flags & FLAG_DMA_RUN) {
+						did_dma = 1;
 						vdp_run_dma_done(v_context, gen->frame_end);
 						if (v_context->cycles >= gen->frame_end) {
 							uint32_t cycle_diff = v_context->cycles - context->current_cycle;
@@ -779,9 +782,14 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 		vdp_test_port_write(gen->vdp, value);
 	}
 
-	//refresh may have happened while we were waiting on the VDP,
-	//so advance refresh_counter but don't add any delays
-	gen_update_refresh_no_wait(context);
+	if (did_dma) {
+		gen->refresh_counter = 0;
+		gen->last_sync_cycle = context->current_cycle;
+	} else {
+		//refresh may have happened while we were waiting on the VDP,
+		//so advance refresh_counter but don't add any delays
+		gen_update_refresh_no_wait(context);
+	}
 	return context;
 }
 
