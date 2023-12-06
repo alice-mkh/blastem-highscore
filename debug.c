@@ -3002,6 +3002,160 @@ static uint8_t cmd_symbols(debug_root *root, parsed_command *cmd)
 	return 1;
 }
 
+static uint8_t cmd_save(debug_root *root, parsed_command *cmd)
+{
+	char size = cmd->format ? cmd->format[0] : 'b';
+	if (size != 'b' && size != 'w' && size != 'l') {
+		fprintf(stderr, "Invalid size %s\n", cmd->format);
+		return 1;
+	}
+	FILE *f = fopen(cmd->args[0].raw, "wb");
+	if (!f) {
+		fprintf(stderr, "Failed to open %s for writing\n", cmd->args[0].raw);
+		return 1;
+	}
+	uint32_t start = 0;
+	debug_val val;
+	debug_array * arr = NULL;
+	if (cmd->args[1].parsed->type == EXPR_MEM) {
+		
+		if (!eval_expr(root, cmd->args[1].parsed->left, &val)) {
+			fprintf(stderr, "Failed to eval start index\n");
+			goto cleanup;
+		}
+		if (!debug_cast_int(val, &start)) {
+			fprintf(stderr, "Start index must evaluate to integer\n");
+			goto cleanup;
+		}
+		if (cmd->args[1].parsed->right) {
+			if (!eval_expr(root, cmd->args[1].parsed->right, &val)) {
+				fprintf(stderr, "Failed to eval array name in argument %s\n", cmd->args[1].raw);
+				goto cleanup;
+			}
+			arr = get_array(val);
+			if (!arr) {
+				fprintf(stderr, "Name in argument %s did not evaluate to an array\n", cmd->args[1].raw);
+				goto cleanup;
+			}
+		}
+	} else {
+		if (!eval_expr(root, cmd->args[1].parsed, &val)) {
+			fprintf(stderr, "Failed to eval %s\n", cmd->args[1].raw);
+			goto cleanup;
+		}
+		arr = get_array(val);
+		if (!arr) {
+			fprintf(stderr, "Argument %s did not evaluate to an array\n", cmd->args[1].raw);
+			goto cleanup;
+		}
+	}
+	uint32_t count = 0;
+	if (cmd->num_args > 2) {
+		if (!eval_expr(root, cmd->args[2].parsed, &val)) {
+			fprintf(stderr, "Failed to eval %s\n", cmd->args[2].raw);
+			goto cleanup;
+		}
+		if (!debug_cast_int(val, &count)) {
+			fprintf(stderr, "Count must evaluate to integer\n");
+			goto cleanup;
+		}
+	} else if (arr) {
+		count = arr->size < start ? 0 : arr->size - start;
+	} else {
+		count = root->chunk_end(root, start) - start;
+		if (size == 'l') {
+			count /= 4;
+		} else if (size == 'w') {
+			count /= 2;
+		}
+	}
+	union {
+		uint8_t b[1024];
+		uint16_t w[512];
+		uint32_t l[256];
+	} buffer;
+	uint32_t cur = start;
+	if (size == 'l') {
+		while (count)
+		{
+			uint32_t n = count < 256 ? count : 256;
+			count -= n;
+			for (uint32_t i = 0; i < n ; i++)
+			{
+				if (arr) {
+					val = arr->get(arr, cur++);
+					if (!debug_cast_int(val, buffer.l + i)) {
+						n = i;
+						count = 0;
+					}
+				} else {
+					buffer.l[i] = cur;
+					cur += 4;
+					if (!root->read_mem(root, buffer.l + i, 'l')) {
+						n = i;
+						count = 0;
+					}
+				}
+			}
+			fwrite(buffer.l, sizeof(uint32_t), n, f);
+		}
+	} else if (size == 'w') {
+		while (count)
+		{
+			uint32_t n = count < 512 ? count : 512;
+			count -= n;
+			uint32_t tmp;
+			for (uint32_t i = 0; i < n ; i++)
+			{
+				if (arr) {
+					val = arr->get(arr, cur++);
+					if (!debug_cast_int(val, &tmp)) {
+						n = i;
+						count = 0;
+					}
+				} else {
+					tmp = cur;
+					cur += 2;
+					if (!root->read_mem(root, &tmp, 'w')) {
+						n = i;
+						count = 0;
+					}
+				}
+				buffer.w[i] = tmp;
+			}
+			fwrite(buffer.w, sizeof(uint16_t), n, f);
+		}
+	} else {
+		while (count)
+		{
+			uint32_t n = count < 1024 ? count : 1024;
+			count -= n;
+			uint32_t tmp;
+			for (uint32_t i = 0; i < n ; i++)
+			{
+				if (arr) {
+					val = arr->get(arr, cur++);
+					if (!debug_cast_int(val, &tmp)) {
+						n = i;
+						count = 0;
+					}
+				} else {
+					tmp = cur++;
+					if (!root->read_mem(root, &tmp, 'b')) {
+						n = i;
+						count = 0;
+					}
+				}
+				buffer.b[i] = tmp;
+			}
+			fwrite(buffer.b, sizeof(uint8_t), n, f);
+		}
+	}
+cleanup:
+	fclose(f);
+	return 1;
+}
+
 static uint8_t cmd_delete_m68k(debug_root *root, parsed_command *cmd)
 {
 	uint32_t index;
@@ -3644,6 +3798,17 @@ command_def common_commands[] = {
 		.min_args = 0,
 		.max_args = 1,
 		.raw_args = 1
+	},
+	{
+		.names = (const char *[]){
+			"save", NULL
+		},
+		.usage = "save[/SIZE] FILENAME ARRAY [COUNT]",
+		.desc = "Saves COUNT elements of size SIZE from the array or memory region specified by ARRAY to a file",
+		.impl = cmd_save,
+		.min_args = 2,
+		.max_args = 3,
+		.skip_eval = 1
 	}
 };
 #define NUM_COMMON (sizeof(common_commands)/sizeof(*common_commands))
@@ -4223,6 +4388,19 @@ static debug_val debug_frame_get(debug_var *var)
 	return debug_int(vdp->frame);
 }
 
+static uint32_t m68k_chunk_end(debug_root *root, uint32_t start_address)
+{
+	m68k_context *m68k = root->cpu_context;
+	memmap_chunk const *chunk = find_map_chunk(start_address, &m68k->options->gen, 0, NULL);
+	if (!chunk) {
+		return start_address;
+	}
+	if (chunk->mask == m68k->options->gen.address_mask) {
+		return chunk->end;
+	}
+	return (start_address & ~chunk->mask) + chunk->mask + 1;
+}
+
 debug_root *find_m68k_root(m68k_context *context)
 {
 	debug_root *root = find_root(context);
@@ -4231,6 +4409,7 @@ debug_root *find_m68k_root(m68k_context *context)
 		add_commands(root, m68k_commands, NUM_68K);
 		root->read_mem = read_m68k;
 		root->write_mem = write_m68k;
+		root->chunk_end = m68k_chunk_end;
 		root->disasm = create_68000_disasm();
 		m68k_names(root);
 		debug_var *var;
@@ -4611,6 +4790,19 @@ static void z80_names(debug_root *root)
 	root->variables = tern_insert_ptr(root->variables, "PC", var);
 }
 
+static uint32_t z80_chunk_end(debug_root *root, uint32_t start_address)
+{
+	z80_context *z80 = root->cpu_context;
+	memmap_chunk const *chunk = find_map_chunk(start_address, &z80->options->gen, 0, NULL);
+	if (!chunk) {
+		return start_address;
+	}
+	if (chunk->mask == z80->options->gen.address_mask) {
+		return chunk->end;
+	}
+	return (start_address & ~chunk->mask) + chunk->mask + 1;
+}
+
 debug_root *find_z80_root(z80_context *context)
 {
 	debug_root *root = find_root(context);
@@ -4647,6 +4839,7 @@ debug_root *find_z80_root(z80_context *context)
 		root->read_mem = read_z80;
 		root->write_mem = write_z80;
 		root->disasm = create_z80_disasm();
+		root->chunk_end = z80_chunk_end;
 	}
 	return root;
 }

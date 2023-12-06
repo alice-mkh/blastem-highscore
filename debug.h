@@ -177,6 +177,7 @@ struct debug_var {
 typedef debug_var *(*resolver)(debug_root *root, const char *name);
 typedef uint8_t (*reader)(debug_root *root, uint32_t *out, char size);
 typedef uint8_t (*writer)(debug_root *root, uint32_t address, uint32_t value, char size);
+typedef uint32_t (*find_chunk_end)(debug_root *root, uint32_t start_address);
 
 struct debug_root {
 	void           *cpu_context;
@@ -189,6 +190,7 @@ struct debug_root {
 	disasm_context *disasm;
 	reader         read_mem;
 	writer         write_mem;
+	find_chunk_end chunk_end;
 	parsed_command last_cmd;
 	debug_val      retval;
 	uint32_t       bp_index;
