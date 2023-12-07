@@ -150,7 +150,7 @@ static debug_val new_user_array(uint32_t size)
 	array->append = user_array_append;
 	array->size = size;
 	array->storage = size ? size : 4;
-	array->base = calloc(size, sizeof(debug_val));
+	array->base = calloc(array->storage, sizeof(debug_val));
 	debug_val ret;
 	ret.type = DBG_VAL_ARRAY;
 	ret.v.u32 = array - arrays;
@@ -543,7 +543,7 @@ static void free_expr_int(expr *e)
 	} else {
 		free_expr(e->right);
 	}
-	if (e->op.type == TOKEN_NAME) {
+	if (e->op.type == TOKEN_NAME || e->op.type == TOKEN_ARRAY) {
 		free(e->op.v.str);
 	}
 }
@@ -3156,6 +3156,170 @@ cleanup:
 	return 1;
 }
 
+static uint8_t cmd_load(debug_root *root, parsed_command *cmd)
+{
+	char size = cmd->format ? cmd->format[0] : 'b';
+	if (size != 'b' && size != 'w' && size != 'l') {
+		fprintf(stderr, "Invalid size %s\n", cmd->format);
+		return 1;
+	}
+	FILE *f = fopen(cmd->args[0].raw, "rb");
+	if (!f) {
+		fprintf(stderr, "Failed to open %s for reading\n", cmd->args[0].raw);
+		return 1;
+	}
+	uint32_t start = 0;
+	debug_val val;
+	debug_array * arr = NULL;
+	if (cmd->args[1].parsed->type == EXPR_MEM) {
+		
+		if (!eval_expr(root, cmd->args[1].parsed->left, &val)) {
+			fprintf(stderr, "Failed to eval start index\n");
+			goto cleanup;
+		}
+		if (!debug_cast_int(val, &start)) {
+			fprintf(stderr, "Start index must evaluate to integer\n");
+			goto cleanup;
+		}
+		if (cmd->args[1].parsed->right) {
+			if (!eval_expr(root, cmd->args[1].parsed->right, &val)) {
+				fprintf(stderr, "Failed to eval array name in argument %s\n", cmd->args[1].raw);
+				goto cleanup;
+			}
+			arr = get_array(val);
+			if (!arr) {
+				fprintf(stderr, "Name in argument %s did not evaluate to an array\n", cmd->args[1].raw);
+				goto cleanup;
+			}
+		}
+	} else {
+		if (!eval_expr(root, cmd->args[1].parsed, &val)) {
+			fprintf(stderr, "Failed to eval %s\n", cmd->args[1].raw);
+			goto cleanup;
+		}
+		arr = get_array(val);
+		if (!arr) {
+			fprintf(stderr, "Argument %s did not evaluate to an array\n", cmd->args[1].raw);
+			goto cleanup;
+		}
+	}
+	uint32_t count = 0;
+	uint8_t has_count = 0;
+	if (cmd->num_args > 2) {
+		if (!eval_expr(root, cmd->args[2].parsed, &val)) {
+			fprintf(stderr, "Failed to eval %s\n", cmd->args[2].raw);
+			goto cleanup;
+		}
+		if (!debug_cast_int(val, &count)) {
+			fprintf(stderr, "Count must evaluate to integer\n");
+			goto cleanup;
+		}
+		has_count = 1;
+	}
+	union {
+		uint8_t b[1024];
+		uint16_t w[512];
+		uint32_t l[256];
+	} buffer;
+	uint32_t cur = start;
+	if (size == 'l') {
+		while (count || !has_count)
+		{
+			uint32_t n = (has_count && count < 256) ? count : 256;
+			count -= n;
+			n = fread(buffer.l, sizeof(uint32_t), n, f);
+			if (!n) {
+				break;
+			}
+			for (uint32_t i = 0; i < n ; i++)
+			{
+				if (arr) {
+					val = debug_int(buffer.l[i]);
+					if (cur >= arr->size) {
+						if (arr->append) {
+							arr->append(arr, val);
+						} else {
+							goto cleanup;
+						}
+					} else {
+						arr->set(arr, cur, val);
+					}
+					cur++;
+				} else {
+					if (!root->write_mem(root, cur, buffer.l[i], 'l')) {
+						goto cleanup;
+					}
+					cur += 4;
+				}
+			}
+		}
+	} else if (size == 'w') {
+		while (count || !has_count)
+		{
+			uint32_t n = (has_count && count < 512) ? count : 512;
+			count -= n;
+			n = fread(buffer.w, sizeof(uint16_t), n, f);
+			if (!n) {
+				break;
+			}
+			for (uint32_t i = 0; i < n ; i++)
+			{
+				if (arr) {
+					val = debug_int(buffer.w[i]);
+					if (cur >= arr->size) {
+						if (arr->append) {
+							arr->append(arr, val);
+						} else {
+							goto cleanup;
+						}
+					} else {
+						arr->set(arr, cur, val);
+					}
+					cur++;
+				} else {
+					if (!root->write_mem(root, cur, buffer.w[i], 'w')) {
+						goto cleanup;
+					}
+					cur += 2;
+				}
+			}
+		}
+	} else {
+		while (count || !has_count)
+		{
+			uint32_t n = (has_count && count < 1024) ? count : 1024;
+			count -= n;
+			n = fread(buffer.b, sizeof(uint8_t), n, f);
+			if (!n) {
+				break;
+			}
+			for (uint32_t i = 0; i < n ; i++)
+			{
+				if (arr) {
+					val = debug_int(buffer.b[i]);
+					if (cur >= arr->size) {
+						if (arr->append) {
+							arr->append(arr, val);
+						} else {
+							goto cleanup;
+						}
+					} else {
+						arr->set(arr, cur, val);
+					}
+				} else {
+					if (!root->write_mem(root, cur, buffer.b[i], 'b')) {
+						goto cleanup;
+					}
+				}
+				cur++;
+			}
+		}
+	}
+cleanup:
+	fclose(f);
+	return 1;
+}
+
 static uint8_t cmd_delete_m68k(debug_root *root, parsed_command *cmd)
 {
 	uint32_t index;
@@ -3806,6 +3970,17 @@ command_def common_commands[] = {
 		.usage = "save[/SIZE] FILENAME ARRAY [COUNT]",
 		.desc = "Saves COUNT elements of size SIZE from the array or memory region specified by ARRAY to a file",
 		.impl = cmd_save,
+		.min_args = 2,
+		.max_args = 3,
+		.skip_eval = 1
+	},
+	{
+		.names = (const char *[]){
+			"load", NULL
+		},
+		.usage = "load[/SIZE] FILENAME ARRAY [COUNT]",
+		.desc = "Loads COUNT elements of size SIZE from a file to the array or memory region specified by ARRAY",
+		.impl = cmd_load,
 		.min_args = 2,
 		.max_args = 3,
 		.skip_eval = 1
