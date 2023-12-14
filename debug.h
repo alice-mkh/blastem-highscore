@@ -23,7 +23,8 @@ typedef enum {
 	TOKEN_LBRACKET,
 	TOKEN_RBRACKET,
 	TOKEN_LPAREN,
-	TOKEN_RPAREN
+	TOKEN_RPAREN,
+	TOKEN_STRING
 } token_type;
 
 typedef struct {
@@ -162,6 +163,12 @@ typedef struct {
 	int      min_args;
 	uint8_t  is_native;
 } debug_func;
+
+typedef struct {
+	char     *buffer;
+	uint32_t size;
+	uint32_t storage;
+} debug_string;
 
 typedef struct debug_var debug_var;
 typedef debug_val (*debug_var_get)(debug_var *var);

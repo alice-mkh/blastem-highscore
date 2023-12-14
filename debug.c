@@ -165,6 +165,45 @@ debug_array *get_array(debug_val val)
 	return arrays + val.v.u32;
 }
 
+static debug_string **debug_strings;
+static uint32_t num_debug_strings;
+static uint32_t debug_string_storage;
+static debug_val new_debug_string(char *str)
+{
+	if (num_debug_strings == debug_string_storage) {
+		debug_string_storage = debug_string_storage ? 2 * debug_string_storage : 4;
+		debug_strings = realloc(debug_strings, debug_string_storage * sizeof(debug_string*));
+	}
+	debug_string *string = calloc(1, sizeof(debug_string));
+	string->size = string->storage = strlen(str);
+	string->buffer = calloc(1, string->size + 1);
+	memcpy(string->buffer, str, string->size + 1);
+	debug_strings[num_debug_strings] = string;
+	return (debug_val){
+		.type = DBG_VAL_STRING,
+		.v = {
+			.u32 = num_debug_strings++
+		}
+	};
+}
+
+static debug_string* get_string(debug_val val)
+{
+	if (val.type != DBG_VAL_STRING) {
+		return NULL;
+	}
+	return debug_strings[val.v.u32];
+}
+
+static char* get_cstring(debug_val val)
+{
+	debug_string *str = get_string(val);
+	if (!str) {
+		return NULL;
+	}
+	return str->buffer;
+}
+
 static uint8_t debug_cast_int(debug_val val, uint32_t *out)
 {
 	if (val.type == DBG_VAL_U32) {
@@ -373,8 +412,73 @@ static const char *token_type_names[] = {
 	"TOKEN_LBRACKET",
 	"TOKEN_RBRACKET",
 	"TOKEN_LPAREN",
-	"TOKEN_RPAREN"
+	"TOKEN_RPAREN",
+	"TOKEN_STRING"
 };
+
+static char *parse_string_literal(char *start, char **end)
+{
+	uint32_t length = 0;
+	uint8_t is_escape = 0;
+	char *cur;
+	for (cur = start; *cur && *cur != '"'; cur++)
+	{
+		if (is_escape) {
+			switch (*cur)
+			{
+			case 't':
+			case 'n':
+			case 'r':
+			case '\\':
+				break;
+			default:
+				fprintf(stderr, "Unsupported escape character %c\n", *cur);
+				return NULL;
+			}
+			is_escape = 0;
+		} else if (*cur == '\\') {
+			is_escape = 1;
+			continue;
+		}
+		length++;
+	}
+	if (!*cur) {
+		fprintf(stderr, "Unterminated string literal: %s\n", start);
+		return NULL;
+	}
+	*end = cur + 1;
+	char *ret = calloc(1, length + 1);
+	char *dst = ret;
+	is_escape = 0;
+	for (cur = start; *cur != '"'; ++cur)
+	{
+		if (is_escape) {
+			switch (*cur)
+			{
+			case 't':
+				*(dst++) = '\t';
+				break;
+			case 'n':
+				*(dst++) = '\n';
+				break;
+			case 'r':
+				*(dst++) = '\r';
+				break;
+			case '\\':
+				*(dst++) = '\\';
+				break;
+			}
+			is_escape = 0;
+		} else if (*cur == '\\') {
+			is_escape = 1;
+			continue;
+		} else {
+			*(dst++) = *cur;
+		}
+	}
+	*dst = 0;
+	return ret;
+}
 
 static token parse_token(char *start, char **end)
 {
@@ -383,16 +487,31 @@ static token parse_token(char *start, char **end)
 		++start;
 	}
 	if (!*start || *start == '\n' || *start == '\r') {
+		*end = start;
 		return (token){
 			.type = TOKEN_NONE
 		};
-		*end = start;
 	}
 	if (*start == '$' || (*start == '0' && start[1] == 'x')) {
 		return (token) {
 			.type = TOKEN_INT,
 			.v = {
 				.num = strtol(start + (*start == '$' ? 1 : 2), end, 16)
+			}
+		};
+	}
+	if (*start == '"') {
+		char *str = parse_string_literal(start + 1, end);
+		if (!str) {
+			*end = start;
+			return (token){
+				.type = TOKEN_NONE
+			};
+		}
+		return (token){
+			.type = TOKEN_STRING,
+			.v = {
+				.str = str
 			}
 		};
 	}
@@ -543,7 +662,7 @@ static void free_expr_int(expr *e)
 	} else {
 		free_expr(e->right);
 	}
-	if (e->op.type == TOKEN_NAME || e->op.type == TOKEN_ARRAY) {
+	if (e->op.type == TOKEN_NAME || e->op.type == TOKEN_ARRAY || e->op.type == TOKEN_STRING) {
 		free(e->op.v.str);
 	}
 }
@@ -697,7 +816,7 @@ static expr *parse_scalar(char *start, char **end)
 		}
 		return ret;
 	}
-	if (first.type != TOKEN_INT && first.type != TOKEN_DECIMAL && first.type != TOKEN_NAME) {
+	if (first.type != TOKEN_INT && first.type != TOKEN_DECIMAL && first.type != TOKEN_NAME && first.type != TOKEN_STRING) {
 		fprintf(stderr, "Unexpected token %s\n", token_type_names[first.type]);
 		return NULL;
 	}
@@ -889,7 +1008,7 @@ static expr *parse_scalar_or_muldiv(char *start, char **end)
 		}
 		return maybe_muldiv(ret, *end, end);
 	}
-	if (first.type != TOKEN_INT && first.type != TOKEN_DECIMAL && first.type != TOKEN_NAME) {
+	if (first.type != TOKEN_INT && first.type != TOKEN_DECIMAL && first.type != TOKEN_NAME && first.type != TOKEN_STRING) {
 		fprintf(stderr, "Unexpected token %s\n", token_type_names[first.type]);
 		return NULL;
 	}
@@ -1055,7 +1174,7 @@ static expr *parse_expression(char *start, char **end)
 		}
 		return maybe_binary(ret, *end, end);
 	}
-	if (first.type != TOKEN_INT && first.type != TOKEN_DECIMAL && first.type != TOKEN_NAME) {
+	if (first.type != TOKEN_INT && first.type != TOKEN_DECIMAL && first.type != TOKEN_NAME && first.type != TOKEN_STRING) {
 		fprintf(stderr, "Unexpected token %s\n", token_type_names[first.type]);
 		return NULL;
 	}
@@ -1151,8 +1270,11 @@ uint8_t eval_expr(debug_root *root, expr *e, debug_val *out)
 		} else if (e->op.type == TOKEN_INT) {
 			*out = debug_int(e->op.v.num);
 			return 1;
-		} else {
+		} else if (e->op.type == TOKEN_DECIMAL){
 			*out = debug_float(e->op.v.f);
+			return 1;
+		} else {
+			*out = new_debug_string(e->op.v.str);
 			return 1;
 		}
 	case EXPR_UNARY:
@@ -2390,54 +2512,14 @@ static uint8_t cmd_print(debug_root *root, parsed_command *cmd)
 
 static uint8_t cmd_printf(debug_root *root, parsed_command *cmd)
 {
-	char *param = cmd->raw;
-	if (!param) {
-		fputs("printf requires at least one parameter\n", stderr);
+	char *fmt = get_cstring(cmd->args[0].value);
+	if (!fmt) {
+		fprintf(stderr, "First parameter to printf must be a string\n");
 		return 1;
 	}
-	while (isblank(*param))
-	{
-		++param;
-	}
-	if (*param != '"') {
-		fprintf(stderr, "First parameter to printf must be a string, found '%s'\n", param);
-		return 1;
-	}
-	++param;
-	char *fmt = strdup(param);
-	char *cur = param, *out = fmt;
-	while (*cur && *cur != '"')
-	{
-		if (*cur == '\\') {
-			switch (cur[1])
-			{
-			case 't':
-				*(out++) = '\t';
-				break;
-			case 'n':
-				*(out++) = '\n';
-				break;
-			case 'r':
-				*(out++) = '\r';
-				break;
-			case '\\':
-				*(out++) = '\\';
-				break;
-			default:
-				fprintf(stderr, "Unsupported escape character %c in string %s\n", cur[1], fmt);
-				free(fmt);
-				return 1;
-			}
-			cur += 2;
-		} else {
-			*(out++) = *(cur++);
-		}
-	}
-	*out = 0;
-	++cur;
-	param = cur;
-	cur = fmt;
+	char *cur = fmt;
 	char format_str[3] = {'%', 'd', 0};
+	uint32_t cur_param = 1;
 	while (*cur)
 	{
 		if (*cur == '%') {
@@ -2452,29 +2534,22 @@ static uint8_t cmd_printf(debug_root *root, parsed_command *cmd)
 				break;
 			default:
 				fprintf(stderr, "Unsupported format character %c\n", cur[1]);
-				free(fmt);
 				return 1;
 			}
 			format_str[1] = cur[1];
-			expr *arg = parse_expression(param, &param);
-			if (!arg) {
-				free(fmt);
+			if (cur_param == cmd->num_args) {
+				fprintf(stderr, "Not enough arguments for format char %c\n", *cur);
 				return 1;
 			}
-			debug_val val;
-			if (!eval_expr(root, arg, &val)) {
-				free(fmt);
-				return 1;
-			}
+			debug_val val = cmd->args[cur_param++].value;
 			if (cur[1] == 's') {
 				if (val.type == DBG_VAL_STRING) {
-					//TODO: implement me
+					printf(format_str, get_cstring(val));
 				} else {
 					char tmp[128];
 					uint32_t address;
 					if (!debug_cast_int(val, &address)) {
 						fprintf(stderr, "Format char 's' accepts only integers and strings\n");
-						free(fmt);
 						return 1;
 					}
 					int j;
@@ -2495,7 +2570,6 @@ static uint8_t cmd_printf(debug_root *root, parsed_command *cmd)
 				float fval;
 				if (!debug_cast_float(val, &fval)) {
 					fprintf(stderr, "Format char '%c' only accepts floats\n", cur[1]);
-					free(fmt);
 					return 1;
 				}
 				printf(format_str, fval);
@@ -2503,7 +2577,6 @@ static uint8_t cmd_printf(debug_root *root, parsed_command *cmd)
 				uint32_t ival;
 				if (!debug_cast_int(val, &ival)) {
 					fprintf(stderr, "Format char '%c' only accepts integers\n", cur[1]);
-					free(fmt);
 					return 1;
 				}
 				printf(format_str, ival);
@@ -2906,16 +2979,26 @@ static uint8_t cmd_frames(debug_root *root, parsed_command *cmd)
 
 static uint8_t cmd_bindup(debug_root *root, parsed_command *cmd)
 {
-	if (!bind_up(cmd->raw)) {
-		fprintf(stderr, "%s is not a valid binding name\n", cmd->raw);
+	char *bind = get_cstring(cmd->args[0].value);
+	if (!bind) {
+		fprintf(stderr, "Argument to bindup must be a string\n");
+		return 1;
+	}
+	if (!bind_up(bind)) {
+		fprintf(stderr, "%s is not a valid binding name\n", bind);
 	}
 	return 1;
 }
 
 static uint8_t cmd_binddown(debug_root *root, parsed_command *cmd)
 {
-	if (!bind_down(cmd->raw)) {
-		fprintf(stderr, "%s is not a valid binding name\n", cmd->raw);
+	char *bind = get_cstring(cmd->args[0].value);
+	if (!bind) {
+		fprintf(stderr, "Argument to binddown must be a string\n");
+		return 1;
+	}
+	if (!bind_down(bind)) {
+		fprintf(stderr, "%s is not a valid binding name\n", bind);
 	}
 	return 1;
 }
@@ -2970,8 +3053,12 @@ static void print_symbol(char *key, tern_val val, uint8_t valtype, void *data)
 
 static uint8_t cmd_symbols(debug_root *root, parsed_command *cmd)
 {
-	char *filename = cmd->raw ? strip_ws(cmd->raw) : NULL;
-	if (filename && *filename) {
+	if (cmd->num_args) {
+		char *filename = get_cstring(cmd->args[0].value);
+		if (!filename) {
+			fprintf(stderr, "Argument to symbols must be a string if provided\n");
+			return 1;
+		}
 		FILE *f = fopen(filename, "r");
 		if (!f) {
 			fprintf(stderr, "Failed to open %s for reading\n", filename);
@@ -3009,9 +3096,18 @@ static uint8_t cmd_save(debug_root *root, parsed_command *cmd)
 		fprintf(stderr, "Invalid size %s\n", cmd->format);
 		return 1;
 	}
-	FILE *f = fopen(cmd->args[0].raw, "wb");
+	if (!eval_expr(root, cmd->args[0].parsed, &cmd->args[0].value)) {
+		fprintf(stderr, "Failed to eval %s\n", cmd->args[0].raw);
+		return 1;
+	}
+	char *fname = get_cstring(cmd->args[0].value);
+	if (!fname) {
+		fprintf(stderr, "First argument to save must be a string\n");
+		return 1;
+	}
+	FILE *f = fopen(fname, "wb");
 	if (!f) {
-		fprintf(stderr, "Failed to open %s for writing\n", cmd->args[0].raw);
+		fprintf(stderr, "Failed to open %s for writing\n", fname);
 		return 1;
 	}
 	uint32_t start = 0;
@@ -3163,9 +3259,18 @@ static uint8_t cmd_load(debug_root *root, parsed_command *cmd)
 		fprintf(stderr, "Invalid size %s\n", cmd->format);
 		return 1;
 	}
-	FILE *f = fopen(cmd->args[0].raw, "rb");
+	if (!eval_expr(root, cmd->args[0].parsed, &cmd->args[0].value)) {
+		fprintf(stderr, "Failed to eval %s\n", cmd->args[0].raw);
+		return 1;
+	}
+	char *fname = get_cstring(cmd->args[0].value);
+	if (!fname) {
+		fprintf(stderr, "First argument to load must be a string\n");
+		return 1;
+	}
+	FILE *f = fopen(fname, "rb");
 	if (!f) {
-		fprintf(stderr, "Failed to open %s for reading\n", cmd->args[0].raw);
+		fprintf(stderr, "Failed to open %s for reading\n", fname);
 		return 1;
 	}
 	uint32_t start = 0;
@@ -3776,8 +3881,7 @@ command_def common_commands[] = {
 		.desc = "Print a string with C-style formatting specifiers replaced with the value of the remaining arguments",
 		.impl = cmd_printf,
 		.min_args = 1,
-		.max_args = -1,
-		.raw_args = 1
+		.max_args = -1
 	},
 	{
 		.names = (const char *[]){
@@ -3903,8 +4007,7 @@ command_def common_commands[] = {
 		.desc = "Simulate a keyup for binding NAME",
 		.impl = cmd_bindup,
 		.min_args = 1,
-		.max_args = 1,
-		.raw_args = 1
+		.max_args = 1
 	},
 	{
 		.names = (const char *[]){
@@ -3914,8 +4017,7 @@ command_def common_commands[] = {
 		.desc = "Simulate a keydown for binding NAME",
 		.impl = cmd_binddown,
 		.min_args = 1,
-		.max_args = 1,
-		.raw_args = 1
+		.max_args = 1
 	},
 	{
 		.names = (const char *[]){
@@ -3960,8 +4062,7 @@ command_def common_commands[] = {
 		.desc = "Loads a list of symbols from the file indicated by FILENAME or lists currently loaded symbols if FILENAME is omitted",
 		.impl = cmd_symbols,
 		.min_args = 0,
-		.max_args = 1,
-		.raw_args = 1
+		.max_args = 1
 	},
 	{
 		.names = (const char *[]){
