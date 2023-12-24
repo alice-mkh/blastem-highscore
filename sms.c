@@ -494,6 +494,10 @@ static void run_sms(system_header *system)
 				z80_assert_nmi(sms->z80, nmi);
 			}
 		}
+
+		if (system->enter_debugger) {
+			target_cycle = sms->z80->Z80_CYCLE + 1;
+		}
 		z80_run(sms->z80, target_cycle);
 		if (sms->z80->reset) {
 			z80_clear_reset(sms->z80, sms->z80->Z80_CYCLE + 128*15);

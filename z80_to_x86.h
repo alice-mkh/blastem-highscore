@@ -27,6 +27,12 @@ enum {
 	ZF_NUM
 };
 
+typedef struct {
+	uint16_t start;
+	uint16_t end;
+	uint8_t  check_change;
+} z80_watchpoint;
+
 typedef struct z80_context z80_context;
 typedef void (*z80_ctx_fun)(z80_context * context);
 
@@ -78,6 +84,15 @@ struct z80_context {
 	uint32_t          int_pulse_start;
 	uint32_t          int_pulse_end;
 	uint32_t          nmi_start;
+	z80_watchpoint    *watchpoints;
+	uint32_t          num_watchpoints;
+	uint32_t          wp_storage;
+	uint16_t          watchpoint_min;
+	uint16_t          watchpoint_max;
+	uint16_t          wp_hit_address;
+	uint8_t           wp_hit_value;
+	uint8_t           wp_old_value;
+	uint8_t           wp_hit;
 	uint8_t           breakpoint_flags[(16 * 1024)/sizeof(uint8_t)];
 	uint8_t *         bp_handler;
 	uint8_t *         bp_stub;
@@ -102,6 +117,8 @@ void z80_invalidate_code_range(z80_context *context, uint32_t start, uint32_t en
 void z80_reset(z80_context * context);
 void zinsert_breakpoint(z80_context * context, uint16_t address, uint8_t * bp_handler);
 void zremove_breakpoint(z80_context * context, uint16_t address);
+void z80_add_watchpoint(z80_context *context, uint16_t address, uint16_t size);
+void z80_remove_watchpoint(z80_context *context, uint32_t address, uint32_t size);
 void z80_run(z80_context * context, uint32_t target_cycle);
 void z80_assert_reset(z80_context * context, uint32_t cycle);
 void z80_clear_reset(z80_context * context, uint32_t cycle);

@@ -923,7 +923,7 @@ static void m68k_enable_watchpoints(m68k_context *context)
 
 void m68k_add_watchpoint(m68k_context *context, uint32_t address, uint32_t size)
 {
-	uint32_t end = address + size;
+	uint32_t end = address + size - 1;
 	for (uint32_t i = 0; i < context->num_watchpoints; i++)
 	{
 		if (context->watchpoints[i].start == address && context->watchpoints[i].end == end) {
@@ -944,14 +944,14 @@ void m68k_add_watchpoint(m68k_context *context, uint32_t address, uint32_t size)
 	if (context->watchpoint_min > address) {
 		context->watchpoint_min = address;
 	}
-	if (context->watchpoint_max < address + size) {
-		context->watchpoint_max = address + size;
+	if (context->watchpoint_max < end) {
+		context->watchpoint_max = end;
 	}
 }
 
 void m68k_remove_watchpoint(m68k_context *context, uint32_t address, uint32_t size)
 {
-	uint32_t end = address + size;
+	uint32_t end = address + size - 1;
 	for (uint32_t i = 0; i < context->num_watchpoints; i++)
 	{
 		if (context->watchpoints[i].start == address && context->watchpoints[i].end == end) {

@@ -138,7 +138,7 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 		jcc(code, CC_C, code->cur + 2);
 		cmp_rdispr(code, opts->context_reg, opts->watchpoint_range_off + (opts->address_size == SZ_D ? 4 : 2), adr_reg, opts->address_size);
 		code_ptr watch_ub = code->cur + 1;
-		jcc(code, CC_NC, code->cur + 2);
+		jcc(code, CC_A, code->cur + 2);
 
 		push_r(code, opts->scratch1);
 		push_r(code, opts->scratch2);

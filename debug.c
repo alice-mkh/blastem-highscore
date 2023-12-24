@@ -4339,7 +4339,11 @@ static uint8_t cmd_delete_z80(debug_root *root, parsed_command *cmd)
 		return 1;
 	}
 	bp_def *tmp = *this_bp;
-	zremove_breakpoint(root->cpu_context, tmp->address);
+	if (tmp->type == BP_TYPE_CPU) {
+		zremove_breakpoint(root->cpu_context, tmp->address);
+	} else if (tmp->type == BP_TYPE_CPU_WATCH) {
+		z80_remove_watchpoint(root->cpu_context, tmp->address, tmp->mask);
+	}
 	*this_bp = (*this_bp)->next;
 	if (tmp->commands) {
 		for (uint32_t i = 0; i < tmp->num_commands; i++)
@@ -4368,6 +4372,32 @@ static uint8_t cmd_breakpoint_z80(debug_root *root, parsed_command *cmd)
 	new_bp->index = root->bp_index++;
 	root->breakpoints = new_bp;
 	printf("Z80 Breakpoint %d set at $%X\n", new_bp->index, address);
+	return 1;
+}
+
+static uint8_t cmd_watchpoint_z80(debug_root *root, parsed_command *cmd)
+{
+	uint32_t address;
+	if (!debug_cast_int(cmd->args[0].value, &address)) {
+		fprintf(stderr, "First argument to watchpoint must be an integer\n");
+		return 1;
+	}
+	uint32_t size = 1;
+	if (cmd->num_args > 1) {
+		if (!debug_cast_int(cmd->args[1].value, &size)) {
+			fprintf(stderr, "Second argument to watchpoint must be an integer if provided\n");
+			return 1;
+		}
+	}
+	z80_add_watchpoint(root->cpu_context, address, size);
+	bp_def *new_bp = calloc(1, sizeof(bp_def));
+	new_bp->next = root->breakpoints;
+	new_bp->address = address;
+	new_bp->mask = size;
+	new_bp->index = root->bp_index++;
+	new_bp->type = BP_TYPE_CPU_WATCH;
+	root->breakpoints = new_bp;
+	printf("Z80 Watchpoint %d set for $%X\n", new_bp->index, address);
 	return 1;
 }
 
@@ -4569,6 +4599,16 @@ command_def z80_commands[] = {
 		.impl = cmd_breakpoint_z80,
 		.min_args = 1,
 		.max_args = 1
+	},
+	{
+		.names = (const char *[]){
+			"watchpoint", NULL
+		},
+		.usage = "watchpoint ADDRESS [SIZE]",
+		.desc = "Set a watchpoint at ADDRESS with an optional SIZE in bytes. SIZE defaults to 1",
+		.impl = cmd_watchpoint_z80,
+		.min_args = 1,
+		.max_args = 2
 	},
 	{
 		.names = (const char *[]){
@@ -5183,6 +5223,7 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 	}
 	root->address = address;
 	//Check if this is a user set breakpoint, or just a temporary one
+	int debugging;
 	bp_def ** this_bp = find_breakpoint(&root->breakpoints, address, BP_TYPE_CPU);
 	if (*this_bp) {
 		if ((*this_bp)->condition) {
@@ -5197,7 +5238,7 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 				(*this_bp)->condition = NULL;
 			}
 		}
-		int debugging = 1;
+		debugging = 1;
 		for (uint32_t i = 0; debugging && i < (*this_bp)->num_commands; i++)
 		{
 			debugging = run_command(root, (*this_bp)->commands + i);
@@ -5205,10 +5246,44 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 		if (debugging) {
 			printf("Z80 Breakpoint %d hit\n", (*this_bp)->index);
 		} else {
+			fflush(stdout);
 			return context;
 		}
 	} else {
 		zremove_breakpoint(context, address);
+	}
+	if (context->wp_hit) {
+		context->wp_hit = 0;
+		this_bp = find_breakpoint(&root->breakpoints, context->wp_hit_address, BP_TYPE_CPU_WATCH);
+		if (*this_bp) {
+			if ((*this_bp)->condition) {
+				debug_val condres;
+				if (eval_expr(root, (*this_bp)->condition, &condres)) {
+					if (!condres.v.u32) {
+						return context;
+					}
+				} else {
+					fprintf(stderr, "Failed to eval condition for Z80 watchpoint %u\n", (*this_bp)->index);
+					free_expr((*this_bp)->condition);
+					(*this_bp)->condition = NULL;
+				}
+			}
+			debugging = 1;
+			for (uint32_t i = 0; debugging && i < (*this_bp)->num_commands; i++)
+			{
+				debugging = run_command(root, (*this_bp)->commands + i);
+			}
+			if (debugging) {
+				if (context->wp_old_value != context->wp_hit_value) {
+					printf("Z80 Watchpoint %d hit, old value: %X, new value %X\n", (*this_bp)->index, context->wp_old_value, context->wp_hit_value);
+				} else {
+					printf("Z80 Watchpoint %d hit\n", (*this_bp)->index);
+				}
+			} else {
+				fflush(stdout);
+				return context;
+			}
+		}
 	}
 	uint8_t * pc = get_native_pointer(address, (void **)context->mem_pointers, &context->Z80_OPTS->gen);
 	if (!pc) {
@@ -5306,7 +5381,7 @@ void debugger(m68k_context * context, uint32_t address)
 						return;
 					}
 				} else {
-					fprintf(stderr, "Failed to eval condition for M68K breakpoint %u\n", (*this_bp)->index);
+					fprintf(stderr, "Failed to eval condition for M68K watchpoint %u\n", (*this_bp)->index);
 					free_expr((*this_bp)->condition);
 					(*this_bp)->condition = NULL;
 				}
