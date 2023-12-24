@@ -380,11 +380,20 @@ debug_root *find_root(void *cpu)
 
 bp_def ** find_breakpoint(bp_def ** cur, uint32_t address, uint8_t type)
 {
-	while (*cur) {
-		if ((*cur)->type == type && (*cur)->address == (((*cur)->mask) & address)) {
-			break;
+	if (type == BP_TYPE_CPU_WATCH) {
+		while (*cur) {
+			if ((*cur)->type == type && address >= (*cur)->address && address < ((*cur)->address + (*cur)->mask)) {
+				break;
+			}
+			cur = &((*cur)->next);
 		}
-		cur = &((*cur)->next);
+	} else {
+		while (*cur) {
+			if ((*cur)->type == type && (*cur)->address == (((*cur)->mask) & address)) {
+				break;
+			}
+			cur = &((*cur)->next);
+		}
 	}
 	return cur;
 }
@@ -3114,7 +3123,7 @@ static uint8_t cmd_save(debug_root *root, parsed_command *cmd)
 	debug_val val;
 	debug_array * arr = NULL;
 	if (cmd->args[1].parsed->type == EXPR_MEM) {
-		
+
 		if (!eval_expr(root, cmd->args[1].parsed->left, &val)) {
 			fprintf(stderr, "Failed to eval start index\n");
 			goto cleanup;
@@ -3277,7 +3286,7 @@ static uint8_t cmd_load(debug_root *root, parsed_command *cmd)
 	debug_val val;
 	debug_array * arr = NULL;
 	if (cmd->args[1].parsed->type == EXPR_MEM) {
-		
+
 		if (!eval_expr(root, cmd->args[1].parsed->left, &val)) {
 			fprintf(stderr, "Failed to eval start index\n");
 			goto cleanup;
@@ -3440,6 +3449,8 @@ static uint8_t cmd_delete_m68k(debug_root *root, parsed_command *cmd)
 	bp_def *tmp = *this_bp;
 	if (tmp->type == BP_TYPE_CPU) {
 		remove_breakpoint(root->cpu_context, tmp->address);
+	} else if (tmp->type == BP_TYPE_CPU_WATCH) {
+		m68k_remove_watchpoint(root->cpu_context, tmp->address, tmp->mask);
 	}
 	*this_bp = (*this_bp)->next;
 	if (tmp->commands) {
@@ -3469,6 +3480,35 @@ static uint8_t cmd_breakpoint_m68k(debug_root *root, parsed_command *cmd)
 	new_bp->type = BP_TYPE_CPU;
 	root->breakpoints = new_bp;
 	printf("68K Breakpoint %d set at $%X\n", new_bp->index, address);
+	return 1;
+}
+
+static uint8_t cmd_watchpoint_m68k(debug_root *root, parsed_command *cmd)
+{
+	uint32_t address;
+	if (!debug_cast_int(cmd->args[0].value, &address)) {
+		fprintf(stderr, "First argument to watchpoint must be an integer\n");
+		return 1;
+	}
+	uint32_t size;
+	if (cmd->num_args > 1) {
+		if (!debug_cast_int(cmd->args[1].value, &size)) {
+			fprintf(stderr, "Second argument to watchpoint must be an integer if provided\n");
+			return 1;
+		}
+	} else {
+		//default to byte for odd addresses, word for even
+		size = (address & 1) ? 1 : 2;
+	}
+	m68k_add_watchpoint(root->cpu_context, address, size);
+	bp_def *new_bp = calloc(1, sizeof(bp_def));
+	new_bp->next = root->breakpoints;
+	new_bp->address = address;
+	new_bp->mask = size;
+	new_bp->index = root->bp_index++;
+	new_bp->type = BP_TYPE_CPU_WATCH;
+	root->breakpoints = new_bp;
+	printf("68K Watchpoint %d set for $%X\n", new_bp->index, address);
 	return 1;
 }
 
@@ -4099,6 +4139,16 @@ command_def m68k_commands[] = {
 		.impl = cmd_breakpoint_m68k,
 		.min_args = 1,
 		.max_args = 1
+	},
+	{
+		.names = (const char *[]){
+			"watchpoint", NULL
+		},
+		.usage = "watchpoint ADDRESS [SIZE]",
+		.desc = "Set a watchpoint at ADDRESS with an optional SIZE in bytes. SIZE defaults to 2 for even address and 1 for odd",
+		.impl = cmd_watchpoint_m68k,
+		.min_args = 1,
+		.max_args = 2
 	},
 	{
 		.names = (const char *[]){
@@ -5195,10 +5245,6 @@ void debugger(m68k_context * context, uint32_t address)
 	init_terminal();
 
 	context->options->sync_components(context, 0);
-	if (context->system == current_system) {
-		genesis_context *gen = context->system;
-		vdp_force_update_framebuffer(gen->vdp);
-	}
 	debug_root *root = find_m68k_root(context);
 	if (!root) {
 		return;
@@ -5243,10 +5289,47 @@ void debugger(m68k_context * context, uint32_t address)
 		if (debugging) {
 			printf("68K Breakpoint %d hit\n", (*this_bp)->index);
 		} else {
+			fflush(stdout);
 			return;
 		}
 	} else {
 		remove_breakpoint(context, address);
+	}
+	if (context->wp_hit) {
+		context->wp_hit = 0;
+		this_bp = find_breakpoint(&root->breakpoints, context->wp_hit_address, BP_TYPE_CPU_WATCH);
+		if (*this_bp) {
+			if ((*this_bp)->condition) {
+				debug_val condres;
+				if (eval_expr(root, (*this_bp)->condition, &condres)) {
+					if (!condres.v.u32) {
+						return;
+					}
+				} else {
+					fprintf(stderr, "Failed to eval condition for M68K breakpoint %u\n", (*this_bp)->index);
+					free_expr((*this_bp)->condition);
+					(*this_bp)->condition = NULL;
+				}
+			}
+			for (uint32_t i = 0; debugging && i < (*this_bp)->num_commands; i++)
+			{
+				debugging = run_command(root, (*this_bp)->commands + i);
+			}
+			if (debugging) {
+				if (context->wp_old_value != context->wp_hit_value) {
+					printf("68K Watchpoint %d hit, old value: %X, new value %X\n", (*this_bp)->index, context->wp_old_value, context->wp_hit_value);
+				} else {
+					printf("68K Watchpoint %d hit\n", (*this_bp)->index);
+				}
+			} else {
+				fflush(stdout);
+				return;
+			}
+		}
+	}
+	if (context->system == current_system) {
+		genesis_context *gen = context->system;
+		vdp_force_update_framebuffer(gen->vdp);
 	}
 	uint32_t after = m68k_decode(m68k_instruction_fetch, context, &inst, address);
 	root->after = after;

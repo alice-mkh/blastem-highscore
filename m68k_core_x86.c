@@ -2595,6 +2595,7 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	opts->gen.max_address = 0x1000000;
 	opts->gen.bus_cycles = BUS;
 	opts->gen.clock_divider = clock_divider;
+	opts->gen.watchpoint_range_off = offsetof(m68k_context, watchpoint_min);
 	opts->gen.mem_ptr_off = offsetof(m68k_context, mem_pointers);
 	opts->gen.ram_flags_off = offsetof(m68k_context, ram_code_flags);
 	opts->gen.ram_flags_shift = 11;

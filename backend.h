@@ -43,6 +43,9 @@ typedef struct deferred_addr {
 #include "memmap.h"
 #include "system.h"
 
+typedef void * (*watchpoint16_fun)(uint32_t address, void * context, uint16_t);
+typedef void * (*watchpoint8_fun)(uint32_t address, void * context, uint8_t);
+
 typedef struct {
 	uint32_t flags;
 	native_map_slot    *native_code_map;
@@ -57,6 +60,8 @@ typedef struct {
 	code_ptr           handle_code_write;
 	code_ptr           handle_align_error_write;
 	code_ptr           handle_align_error_read;
+	watchpoint16_fun   check_watchpoints_16;
+	watchpoint8_fun    check_watchpoints_8;
 	system_str_fun_r8  debug_cmd_handler;
 	uint32_t           memmap_chunks;
 	uint32_t           address_mask;
@@ -65,6 +70,7 @@ typedef struct {
 	uint32_t           clock_divider;
 	uint32_t           move_pc_off;
 	uint32_t           move_pc_size;
+	int32_t            watchpoint_range_off;
 	int32_t            mem_ptr_off;
 	int32_t            ram_flags_off;
 	uint8_t            ram_flags_shift;

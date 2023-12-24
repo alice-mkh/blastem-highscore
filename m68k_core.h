@@ -80,6 +80,12 @@ typedef struct {
 	uint32_t           address;
 } m68k_breakpoint;
 
+typedef struct {
+	uint32_t start;
+	uint32_t end;
+	uint8_t  check_change;
+} m68k_watchpoint;
+
 #ifdef X86_64
 #define M68K_STACK_STORAGE 12
 #else
@@ -109,6 +115,15 @@ struct m68k_context {
 	m68k_breakpoint *breakpoints;
 	uint32_t        num_breakpoints;
 	uint32_t        bp_storage;
+	uint32_t        watchpoint_min;
+	uint32_t        watchpoint_max;
+	m68k_watchpoint *watchpoints;
+	uint32_t        num_watchpoints;
+	uint32_t        wp_storage;
+	uint32_t        wp_hit_address;
+	uint16_t        wp_hit_value;
+	uint16_t        wp_old_value;
+	uint8_t         wp_hit;
 	uint8_t         int_pending;
 	uint8_t         trace_pending;
 	uint8_t         should_return;
@@ -128,6 +143,8 @@ void m68k_reset(m68k_context * context);
 void m68k_options_free(m68k_options *opts);
 void insert_breakpoint(m68k_context * context, uint32_t address, m68k_debug_handler bp_handler);
 void remove_breakpoint(m68k_context * context, uint32_t address);
+void m68k_add_watchpoint(m68k_context *context, uint32_t address, uint32_t size);
+void m68k_remove_watchpoint(m68k_context *context, uint32_t address, uint32_t size);
 m68k_context * m68k_handle_code_write(uint32_t address, m68k_context * context);
 uint32_t get_instruction_start(m68k_options *opts, uint32_t address);
 uint16_t m68k_get_ir(m68k_context *context);

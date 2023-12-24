@@ -122,6 +122,7 @@ struct parsed_command {
 
 enum {
 	BP_TYPE_CPU,
+	BP_TYPE_CPU_WATCH,
 	BP_TYPE_VDPREG,
 	BP_TYPE_VDPDMA,
 	BP_TYPE_VDPDATA

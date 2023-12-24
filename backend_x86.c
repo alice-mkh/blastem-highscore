@@ -129,6 +129,30 @@ code_ptr gen_mem_fun(cpu_options * opts, memmap_chunk const * memmap, uint32_t n
 	} else if (opts->address_size == SZ_W && opts->address_mask != 0xFFFF) {
 		and_ir(code, opts->address_mask, adr_reg, SZ_W);
 	}
+
+	code_ptr check_watchpoints = size == SZ_W ? (code_ptr)opts->check_watchpoints_16 : (code_ptr)opts->check_watchpoints_8;
+	if (is_write && check_watchpoints) {
+		//watchpoints are enabled, check if the address is within the watchpoint range
+		cmp_rdispr(code, opts->context_reg, opts->watchpoint_range_off, adr_reg, opts->address_size);
+		code_ptr watch_lb = code->cur + 1;
+		jcc(code, CC_C, code->cur + 2);
+		cmp_rdispr(code, opts->context_reg, opts->watchpoint_range_off + (opts->address_size == SZ_D ? 4 : 2), adr_reg, opts->address_size);
+		code_ptr watch_ub = code->cur + 1;
+		jcc(code, CC_NC, code->cur + 2);
+
+		push_r(code, opts->scratch1);
+		push_r(code, opts->scratch2);
+		call(code, opts->save_context);
+		call_args_abi(code, check_watchpoints, 3, opts->scratch2, opts->context_reg, opts->scratch1);
+		mov_rr(code, RAX, opts->context_reg, SZ_PTR);
+		call(code, opts->load_context);
+		pop_r(code, opts->scratch2);
+		pop_r(code, opts->scratch1);
+
+		*watch_lb = code->cur - (watch_lb + 1);
+		*watch_ub = code->cur - (watch_ub + 1);
+	}
+
 	code_ptr lb_jcc = NULL, ub_jcc = NULL;
 	uint16_t access_flag = is_write ? MMAP_WRITE : MMAP_READ;
 	uint32_t ram_flags_off = opts->ram_flags_off;

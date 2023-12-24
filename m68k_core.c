@@ -835,6 +835,133 @@ m68k_context *m68k_bp_dispatcher(m68k_context *context, uint32_t address)
 	return context;
 }
 
+static m68k_watchpoint *m68k_find_watchpoint(uint32_t address, m68k_context *context)
+{
+	for (uint32_t i = 0; i < context->num_watchpoints; i++)
+	{
+		if (address >= context->watchpoints[i].start && address < context->watchpoints[i].end) {
+			return context->watchpoints + i;
+		}
+	}
+	return NULL;
+}
+
+static void *m68k_watchpoint_check16(uint32_t address, void *vcontext, uint16_t value)
+{
+	m68k_context *context = vcontext;
+	m68k_watchpoint *watch = m68k_find_watchpoint(address, context);
+	if (!watch) {
+		return vcontext;
+	}
+	if (watch->check_change) {
+		uint16_t old = read_word(address, (void **)context->mem_pointers, &context->options->gen, context);
+		if (old == value) {
+			return vcontext;
+		}
+		context->wp_old_value = old;
+	} else {
+		context->wp_old_value = value;
+	}
+	context->wp_hit_address = address;
+	context->wp_hit_value = value;
+	context->wp_hit = 1;
+	context->target_cycle = context->sync_cycle = context->current_cycle;
+	system_header *system = context->system;
+	system->enter_debugger = 1;
+	return vcontext;
+}
+
+static void *m68k_watchpoint_check8(uint32_t address, void *vcontext, uint8_t value)
+{
+	m68k_context *context = vcontext;
+	m68k_watchpoint *watch = m68k_find_watchpoint(address, context);
+	if (!watch) {
+		return vcontext;
+	}
+	if (watch->check_change) {
+		uint8_t old = read_byte(address, (void **)context->mem_pointers, &context->options->gen, context);
+		if (old == value) {
+			return vcontext;
+		}
+		context->wp_old_value = old;
+	} else {
+		context->wp_old_value = value;
+	}
+	context->wp_hit_address = address;
+	context->wp_hit_value = value;
+	context->wp_hit = 1;
+	context->target_cycle = context->sync_cycle = context->current_cycle;
+	system_header *system = context->system;
+	system->enter_debugger = 1;
+	return vcontext;
+}
+
+static void m68k_enable_watchpoints(m68k_context *context)
+{
+	if (context->options->gen.check_watchpoints_16) {
+		//already enabled
+		return;
+	}
+	context->options->gen.check_watchpoints_16 = m68k_watchpoint_check16;
+	context->options->gen.check_watchpoints_8 = m68k_watchpoint_check8;
+	//re-generate write handlers with watchpoints enabled
+	code_ptr new_write16 = gen_mem_fun(&context->options->gen, context->options->gen.memmap, context->options->gen.memmap_chunks, WRITE_16, NULL);
+	code_ptr new_write8 = gen_mem_fun(&context->options->gen, context->options->gen.memmap, context->options->gen.memmap_chunks, WRITE_8, NULL);
+
+	//patch old write handlers to point to the new ones
+	code_info code = {
+		.cur = context->options->write_16,
+		.last = context->options->write_16 + 256
+	};
+	jmp(&code, new_write16);
+	code.cur = context->options->write_8;
+	code.last = code.cur + 256;
+	jmp(&code, new_write8);
+	context->options->write_16 = new_write16;
+	context->options->write_8 = new_write8;
+}
+
+void m68k_add_watchpoint(m68k_context *context, uint32_t address, uint32_t size)
+{
+	uint32_t end = address + size;
+	for (uint32_t i = 0; i < context->num_watchpoints; i++)
+	{
+		if (context->watchpoints[i].start == address && context->watchpoints[i].end == end) {
+			return;
+		}
+	}
+	m68k_enable_watchpoints(context);
+	if (context->wp_storage == context->num_watchpoints) {
+		context->wp_storage = context->wp_storage ? context->wp_storage * 2 : 4;
+		context->watchpoints = realloc(context->watchpoints, context->wp_storage * sizeof(m68k_breakpoint));
+	}
+	const memmap_chunk *chunk = find_map_chunk(address, &context->options->gen, 0, NULL);
+	context->watchpoints[context->num_watchpoints++] = (m68k_watchpoint){
+		.start = address,
+		.end = end,
+		.check_change = chunk && (chunk->flags & MMAP_READ)
+	};
+	if (context->watchpoint_min > address) {
+		context->watchpoint_min = address;
+	}
+	if (context->watchpoint_max < address + size) {
+		context->watchpoint_max = address + size;
+	}
+}
+
+void m68k_remove_watchpoint(m68k_context *context, uint32_t address, uint32_t size)
+{
+	uint32_t end = address + size;
+	for (uint32_t i = 0; i < context->num_watchpoints; i++)
+	{
+		if (context->watchpoints[i].start == address && context->watchpoints[i].end == end) {
+			context->watchpoints[i] = context->watchpoints[context->num_watchpoints-1];
+			context->num_watchpoints--;
+			return;
+		}
+	}
+}
+
 typedef enum {
 	RAW_FUNC = 1,
 	BINARY_ARITH,
