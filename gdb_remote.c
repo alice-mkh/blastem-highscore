@@ -221,8 +221,10 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 		break;
 	case 'Z': {
 		uint8_t type = command[1];
+		char *after_address;
+		uint32_t address = strtoul(command+3, &after_address, 16);
+		uint32_t kind = strtoul(after_address +1, NULL, 16);
 		if (type < '2') {
-			uint32_t address = strtoul(command+3, NULL, 16);
 			insert_breakpoint(context, address, gdb_debug_enter);
 			bp_def *new_bp = malloc(sizeof(bp_def));
 			new_bp->next = root->breakpoints;
@@ -232,16 +234,28 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 			new_bp->index = root->bp_index++;
 			root->breakpoints = new_bp;
 			gdb_send_command("OK");
+		} else if (type == '2') {
+			m68k_add_watchpoint(context, address, kind);
+			bp_def *new_bp = malloc(sizeof(bp_def));
+			new_bp->next = root->breakpoints;
+			new_bp->address = address;
+			new_bp->mask = kind;
+			new_bp->type = BP_TYPE_CPU_WATCH;
+			new_bp->index = root->bp_index++;
+			root->breakpoints = new_bp;
+			gdb_send_command("OK");
 		} else {
-			//watchpoints are not currently supported
+			//read and access watchpoints are not currently supported
 			gdb_send_command("");
 		}
 		break;
 	}
 	case 'z': {
 		uint8_t type = command[1];
+		char *after_address;
+		uint32_t address = strtoul(command+3, &after_address, 16);
+		uint32_t kind = strtoul(after_address +1, NULL, 16);
 		if (type < '2') {
-			uint32_t address = strtoul(command+3, NULL, 16);
 			remove_breakpoint(context, address);
 			bp_def **found = find_breakpoint(&root->breakpoints, address, BP_TYPE_CPU);
 			if (*found)
@@ -251,8 +265,24 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 				free(to_remove);
 			}
 			gdb_send_command("OK");
+		} else if (type == '2') {
+			m68k_remove_watchpoint(context, address, kind);
+			bp_def **cur = &root->breakpoints;
+			while (*cur)
+			{
+				if ((*cur)->type == BP_TYPE_CPU_WATCH && (*cur)->address == address && (*cur)->mask == kind) {
+					break;
+				}
+				cur = &(*cur)->next;
+			}
+			if (*cur) {
+				bp_def *to_remove = *cur;
+				*cur = to_remove->next;
+				free(to_remove);
+			}
+			gdb_send_command("OK");
 		} else {
-			//watchpoints are not currently supported
+			//read and access watchpoints are not currently supported
 			gdb_send_command("");
 		}
 		break;
@@ -459,7 +489,14 @@ void  gdb_debug_enter(m68k_context * context, uint32_t pc)
 {
 	dfprintf(stderr, "Entered debugger at address %X\n", pc);
 	if (expect_break_response) {
-		gdb_send_command("S05");
+		if (context->wp_hit) {
+			context->wp_hit = 0;
+			char reply[128];
+			snprintf(reply, sizeof(reply), "T05watch:%X;", context->wp_hit_address);
+			gdb_send_command(reply);
+		} else {
+			gdb_send_command("S05");
+		}
 		expect_break_response = 0;
 	}
 	debug_root *root = find_root(context);
