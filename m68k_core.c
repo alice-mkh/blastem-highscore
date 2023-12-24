@@ -933,7 +933,7 @@ void m68k_add_watchpoint(m68k_context *context, uint32_t address, uint32_t size)
 	m68k_enable_watchpoints(context);
 	if (context->wp_storage == context->num_watchpoints) {
 		context->wp_storage = context->wp_storage ? context->wp_storage * 2 : 4;
-		context->watchpoints = realloc(context->watchpoints, context->wp_storage * sizeof(m68k_breakpoint));
+		context->watchpoints = realloc(context->watchpoints, context->wp_storage * sizeof(m68k_watchpoint));
 	}
 	const memmap_chunk *chunk = find_map_chunk(address, &context->options->gen, 0, NULL);
 	context->watchpoints[context->num_watchpoints++] = (m68k_watchpoint){
