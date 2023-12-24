@@ -307,6 +307,8 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 		gdb_send_command(send_buf);
 		break;
 	}
+	case 'k':
+		exit(0);
 	case 'm': {
 		char * rest;
 		uint32_t address = strtoul(command+1, &rest, 16);
@@ -469,6 +471,8 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 			default:
 				goto not_impl;
 			}
+		} else if (!memcmp("Kill;", command+1, strlen("Kill;"))) {
+			exit(0);
 		} else {
 			goto not_impl;
 		}
