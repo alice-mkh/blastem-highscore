@@ -469,6 +469,7 @@ rom_info configure_rom_heuristics(uint8_t *rom, uint32_t rom_size, memmap_chunk 
 {
 	rom_info info;
 	info.mapper_type = MAPPER_NONE;
+	info.mapper_start_index = 0;
 	info.name = get_header_name(rom);
 	info.regions = get_header_regions(rom);
 	info.is_save_lock_on = 0;
@@ -834,6 +835,8 @@ void map_iter_fun(char *key, tern_val val, uint8_t valtype, void *data)
 			//skip this entry if there is no lock on cartridge attached
 			return;
 		}
+		//TODO: detect if this conflicts with host cart mapper
+		state->info->mapper_start_index = lock_info.mapper_start_index;
 		uint32_t matching_chunks = 0;
 		for (int i = 0; i < lock_info.map_chunks; i++)
 		{
