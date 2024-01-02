@@ -109,6 +109,7 @@ static uint8_t use_native_filechooser;
 static void handle_chooser_result(uint8_t normal_open, char *full_path)
 {
 	if(normal_open) {
+		lockon_media(NULL);
 		if (current_system) {
 			current_system->next_rom = full_path;
 			current_system->request_exit(current_system);

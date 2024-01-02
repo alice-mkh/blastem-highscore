@@ -436,17 +436,34 @@ void reload_media(void)
 		num_parts -= 2;
 	}
 	current_system->next_rom = alloc_concat_m(num_parts, start);
+	if (cart.chain) {
+		parts[0] = cart.chain->dir;
+		parts[2] = cart.chain->name;
+		parts[4] = cart.chain->extension;
+		start = parts[0] ? parts : parts + 2;
+		num_parts = parts[0] ? 5 : 3;
+		char *lock_on_path = alloc_concat_m(num_parts, start);
+		load_media(lock_on_path, cart.chain, NULL);
+		free(lock_on_path);
+	}
 	system_request_exit(current_system, 1);
 }
 
 void lockon_media(char *lock_on_path)
 {
-	reload_media();
-	cart.chain = &lock_on;
 	free(lock_on.dir);
 	free(lock_on.name);
 	free(lock_on.extension);
-	load_media(lock_on_path, &lock_on, NULL);
+	if (lock_on_path) {
+		reload_media();
+		cart.chain = &lock_on;
+		load_media(lock_on_path, &lock_on, NULL);
+	} else {
+		lock_on.dir = NULL;
+		lock_on.name = NULL;
+		lock_on.extension = NULL;
+		cart.chain = NULL;
+	}
 }
 
 static uint32_t opts = 0;
