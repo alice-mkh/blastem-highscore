@@ -862,9 +862,12 @@ void map_iter_fun(char *key, tern_val val, uint8_t valtype, void *data)
 			*map = lock_info.map[i];
 			if (map->start < 0x200000) {
 				if (map->buffer) {
-					uint8_t *buf = map->buffer;
-					buf += (0x200000 - map->start) & ((map->flags & MMAP_AUX_BUFF) ? map->aux_mask : map->mask);
-					map->buffer = buf;
+					uint32_t mask = (map->flags & MMAP_AUX_BUFF) ? map->aux_mask : map->mask;
+					if (mask < 0x3FFFFF) {
+						uint8_t *buf = map->buffer;
+						buf += (0x200000 - map->start) & mask;
+						map->buffer = buf;
+					}
 				}
 				map->start = 0x200000;
 			}
