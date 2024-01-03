@@ -958,7 +958,7 @@ static int32_t handle_event(SDL_Event *event)
 		break;
 	case SDL_DROPFILE:
 		if (drag_drop_handler) {
-			drag_drop_handler(event->drop.file);
+			drag_drop_handler(strdup(event->drop.file));
 		}
 		SDL_free(event->drop.file);
 		break;

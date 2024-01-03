@@ -94,7 +94,7 @@ typedef enum {
 #define RENDER_NOT_MAPPED -2
 #define RENDER_NOT_PLUGGED_IN -3
 
-typedef void (*drop_handler)(const char *filename);
+typedef void (*drop_handler)(char *filename);
 typedef void (*window_close_handler)(uint8_t which);
 typedef void (*ui_render_fun)(void);
 typedef int (*render_thread_fun)(void*);

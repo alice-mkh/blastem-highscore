@@ -132,6 +132,7 @@ struct system_media {
 	char         *dir;
 	char         *name;
 	char         *extension;
+	char         *orig_path; //Full path before splitting and any extension manipulation
 	system_media *chain;
 	track_info   *tracks;
 	uint8_t      *tmp_buffer;

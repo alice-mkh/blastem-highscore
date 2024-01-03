@@ -184,9 +184,10 @@ uint32_t load_media_zip(const char *filename, system_media *dst)
 	return 0;
 }
 
-uint32_t load_media(const char * filename, system_media *dst, system_type *stype)
+uint32_t load_media(char * filename, system_media *dst, system_type *stype)
 {
 	uint8_t header[10];
+	dst->orig_path = filename;
 	char *ext = path_extension(filename);
 	if (ext && !strcasecmp(ext, "zip")) {
 		free(ext);
@@ -388,7 +389,7 @@ void apply_updated_config(void)
 	}
 }
 
-static void on_drag_drop(const char *filename)
+static void on_drag_drop(char *filename)
 {
 	if (current_system) {
 		if (current_system->next_rom) {
@@ -421,30 +422,16 @@ const system_media *current_media(void)
 
 void reload_media(void)
 {
-	if (!current_system) {
+	if (!current_system || !cart.orig_path) {
 		return;
 	}
 	if (current_system->next_rom) {
 		free(current_system->next_rom);
 	}
-	char const *parts[] = {
-		cart.dir, PATH_SEP, cart.name, ".", cart.extension
-	};
-	char const **start = parts[0] ? parts : parts + 2;
-	int num_parts = parts[0] ? 5 : 3;
-	if (!parts[4]) {
-		num_parts -= 2;
-	}
-	current_system->next_rom = alloc_concat_m(num_parts, start);
+	current_system->next_rom = cart.orig_path;
+	cart.orig_path = NULL;
 	if (cart.chain) {
-		parts[0] = cart.chain->dir;
-		parts[2] = cart.chain->name;
-		parts[4] = cart.chain->extension;
-		start = parts[0] ? parts : parts + 2;
-		num_parts = parts[0] ? 5 : 3;
-		char *lock_on_path = alloc_concat_m(num_parts, start);
-		load_media(lock_on_path, cart.chain, NULL);
-		free(lock_on_path);
+		load_media(cart.chain->orig_path, cart.chain, NULL);
 	}
 	system_request_exit(current_system, 1);
 }
@@ -454,6 +441,7 @@ void lockon_media(char *lock_on_path)
 	free(lock_on.dir);
 	free(lock_on.name);
 	free(lock_on.extension);
+	free(lock_on.orig_path);
 	if (lock_on_path) {
 		reload_media();
 		cart.chain = &lock_on;
@@ -462,13 +450,14 @@ void lockon_media(char *lock_on_path)
 		lock_on.dir = NULL;
 		lock_on.name = NULL;
 		lock_on.extension = NULL;
+		lock_on.orig_path = NULL;
 		cart.chain = NULL;
 	}
 }
 
 static uint32_t opts = 0;
 static uint8_t force_region = 0;
-void init_system_with_media(const char *path, system_type force_stype)
+void init_system_with_media(char *path, system_type force_stype)
 {
 	if (game_system) {
 		if (game_system->persist_save) {
@@ -487,6 +476,7 @@ void init_system_with_media(const char *path, system_type force_stype)
 	free(cart.dir);
 	free(cart.name);
 	free(cart.extension);
+	free(cart.orig_path);
 	system_type stype = SYSTEM_UNKNOWN;
 	if (!(cart.size = load_media(path, &cart, &stype))) {
 		fatal_error("Failed to open %s for reading\n", path);
@@ -681,11 +671,11 @@ int main(int argc, char ** argv)
 			if (reader_port) {
 				reader_addr = argv[i];
 			} else {
-			if (!load_media(argv[i], &cart, stype == SYSTEM_UNKNOWN ? &stype : NULL)) {
-				fatal_error("Failed to open %s for reading\n", argv[i]);
+				romfname = strdup(argv[i]);
+				if (!load_media(romfname, &cart, stype == SYSTEM_UNKNOWN ? &stype : NULL)) {
+					fatal_error("Failed to open %s for reading\n", argv[i]);
+				}
 			}
-			}
-			romfname = argv[i];
 			loaded = 1;
 		} else if (width < 0) {
 			width = atoi(argv[i]);
@@ -736,6 +726,7 @@ int main(int argc, char ** argv)
 		if (!romfname) {
 			romfname = "menu.bin";
 		}
+		romfname = strdup(romfname);
 		if (is_absolute_path(romfname)) {
 			if (!(cart.size = load_media(romfname, &cart, &stype))) {
 				fatal_error("Failed to open UI ROM %s for reading", romfname);
@@ -753,6 +744,7 @@ int main(int argc, char ** argv)
 			cart.dir = path_dirname(romfname);
 			cart.name = basename_no_extension(romfname);
 			cart.extension = path_extension(romfname);
+			cart.orig_path = romfname;
 		}
 		//force system detection, value on command line is only for games not the menu
 		stype = detect_system_type(&cart);
@@ -821,7 +813,6 @@ int main(int argc, char ** argv)
 			char *next_rom = current_system->next_rom;
 			current_system->next_rom = NULL;
 			init_system_with_media(next_rom, force_stype);
-			free(next_rom);
 			menu = 0;
 			current_system = game_system;
 			current_system->debugger_type = dtype;
