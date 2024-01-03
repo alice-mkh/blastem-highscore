@@ -34,7 +34,6 @@ void * alloc_code(size_t *size)
 		perror("alloc_code");
 		return NULL;
 	}
-	printf("alloc_code next was %p, ret is %p, alloc_code address %p\n", next, ret, alloc_code);
 	track_block(ret);
 	next = ret + *size;
 	return ret;
