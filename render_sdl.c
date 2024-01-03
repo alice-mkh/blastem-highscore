@@ -275,7 +275,7 @@ int render_height()
 	return main_height;
 }
 
-uint8_t render_fullscreen()
+uint8_t render_fullscreen(void)
 {
 	return is_fullscreen;
 }

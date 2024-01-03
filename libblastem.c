@@ -398,7 +398,7 @@ void render_set_video_standard(vid_std std)
 	video_standard = std;
 }
 
-int render_fullscreen(void)
+uint8_t render_fullscreen(void)
 {
 	return 1;
 }

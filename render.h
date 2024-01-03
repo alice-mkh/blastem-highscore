@@ -118,7 +118,7 @@ void render_wait_quit(void);
 void process_events();
 int render_width();
 int render_height();
-uint8_t render_fullscreen();
+uint8_t render_fullscreen(void);
 void render_force_cursor(uint8_t force);
 void render_set_drag_drop_handler(drop_handler handler);
 void process_events();
