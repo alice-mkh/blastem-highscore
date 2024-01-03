@@ -17,15 +17,11 @@
 #define MAP_ANONYMOUS MAP_ANON
 #endif
 
-#ifndef MAP_32BIT
-#define MAP_32BIT 0
-#endif
-
 void * alloc_code(size_t *size)
 {
-	//start at the 1GB mark to allow plenty of room for sbrk based malloc implementations
+	//start at 1GB above compiled code to allow plenty of room for sbrk based malloc implementations
 	//while still keeping well within 32-bit displacement range for calling code compiled into the executable
-	static uint8_t *next = (uint8_t *)0x40000000;
+	static uint8_t *next = ((uint8_t *)alloc_code) + 0x40000000;
 	uint8_t *ret = try_alloc_arena();
 	if (ret) {
 		return ret;
@@ -33,11 +29,12 @@ void * alloc_code(size_t *size)
 	if (*size & (PAGE_SIZE -1)) {
 		*size += PAGE_SIZE - (*size & (PAGE_SIZE - 1));
 	}
-	ret = mmap(next, *size, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_32BIT, -1, 0);
+	ret = mmap(next, *size, PROT_EXEC | PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (ret == MAP_FAILED) {
 		perror("alloc_code");
 		return NULL;
 	}
+	printf("alloc_code next was %p, ret is %p, alloc_code address %p\n", next, ret, alloc_code);
 	track_block(ret);
 	next = ret + *size;
 	return ret;
