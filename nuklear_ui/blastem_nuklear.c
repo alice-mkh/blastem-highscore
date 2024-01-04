@@ -115,7 +115,6 @@ static void handle_chooser_result(uint8_t normal_open, char *full_path)
 			current_system->request_exit(current_system);
 		} else {
 			init_system_with_media(full_path, SYSTEM_UNKNOWN);
-			free(full_path);
 		}
 
 		clear_view_stack();
