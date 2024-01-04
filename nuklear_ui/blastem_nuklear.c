@@ -126,7 +126,6 @@ static void handle_chooser_result(uint8_t normal_open, char *full_path)
 		pop_view();
 	} else {
 		lockon_media(full_path);
-		free(full_path);
 
 		clear_view_stack();
 		show_play_view();
