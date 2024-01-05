@@ -3787,6 +3787,13 @@ void z80_adjust_cycles(z80_context * context, uint32_t deduction)
 			}
 		}
 	}
+	if (context->nmi_start != CYCLE_NEVER) {
+		if (context->nmi_start < deduction) {
+			context->nmi_start = 0;
+		} else {
+			context->nmi_start -= deduction;
+		}
+	}
 }
 
 uint32_t zbreakpoint_patch(z80_context * context, uint16_t address, code_ptr dst)
