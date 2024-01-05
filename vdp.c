@@ -3698,7 +3698,7 @@ static void tms_fetch_pattern_value(vdp_context *context)
 		address &= 0x2000;
 		address |= context->vcounter << 5 & mask;
 	}
-	address |= context->col_1 << 3;
+	address |= context->col_1 << 3 & 0x7F8;
 	if (context->regs[REG_MODE_2] & BIT_M2) {
 		//Multicolor
 		address |= context->vcounter >> 2 & 0x3;
