@@ -1,8 +1,9 @@
 //******************************************************************************
-// NTSC composite simulator for BlastEm
+// NTSC composite simulator for BlastEm, fixed rainbow frequency edition
 // Shader by Sik, based on BlastEm's default shader
 //
-// Now with gamma correction (NTSC = 2.5 gamma, sRGB = 2.2 gamma)
+// Now with gamma correction (NTSC = 2.5 gamma, sRGB = 2.2 gamma*)
+// *sorta, sRGB isn't exactly a gamma curve, but close enough
 //
 // It works by converting from RGB to YIQ and then encoding it into NTSC, then
 // trying to decode it back. The lossy nature of the encoding process results in
@@ -15,12 +16,16 @@
 // low-pass filtering, but we need seven because decoding chroma also requires
 // four samples so we're filtering over overlapping samples... just see the
 // comments in the I/Q code to understand).
+//
+// Thanks to Tulio Adriano for helping adjust the frequency of the banding.
 //******************************************************************************
 
 uniform mediump float width;
 uniform sampler2D textures[2];
 uniform mediump vec2 texsize;
 varying mediump vec2 texcoord;
+uniform int curfield;
+uniform int scanlines;
 
 // Converts from RGB to YIQ
 mediump vec3 rgba2yiq(vec4 rgba)
@@ -51,21 +56,17 @@ mediump vec4 yiq2rgba(vec3 yiq)
 
 void main()
 {
-	// Use first pair of lines for hard line edges
-	// Use second pair of lines for soft line edges
-	mediump float modifiedY0 = (floor(texcoord.y * texsize.y + 0.25) + 0.5) / texsize.y;
-	mediump float modifiedY1 = (floor(texcoord.y * texsize.y - 0.25) + 0.5) / texsize.y;
-	//mediump float modifiedY0 = (texcoord.y * texsize.y + 0.75) / texsize.y;
-	//mediump float modifiedY1 = (texcoord.y * texsize.y + 0.25) / texsize.y;
-	
-	// Used by the mixing when fetching texels, related to the way BlastEm
-	// handles interlaced mode (nothing to do with composite)
-	mediump float factorY = (sin(texcoord.y * texsize.y * 6.283185307) + 1.0) * 0.5;
+	// The coordinate of the pixel we're supposed to access
+	// In interlaced mode, the entire screen is shifted down by half a scanline,
+	// y_offset is used to account for this.
+	mediump float y_offset = float(curfield) * -0.5 / texsize.y;
+	mediump float x = texcoord.x;
+	mediump float y = texcoord.y + y_offset;
 	
 	// Horizontal distance of half a colorburst cycle
-	mediump float factorX = (1.0 / texsize.x) / 170.667 * 0.5 * (width - 27.0);
+	mediump float factorX = (1.0 / texsize.x) / 170.667 * 0.5 * width;
 	
-	// sRGB has a gamma of 2.2 while NTSC has a gamma of 2.5
+	// sRGB approximates a gamma ramp of 2.2 while NTSC has a gamma of 2.5
 	// Use this value to do gamma correction of every RGB value
 	mediump float gamma = 2.5 / 2.2;
 	
@@ -81,22 +82,17 @@ void main()
 	mediump float raw[7];		// Raw encoded composite signal
 	
 	// Sample all the pixels we're going to use
-	mediump float x = texcoord.x;
 	for (int n = 0; n < 7; n++, x -= factorX * 0.5) {
 		// Compute colorburst phase at this point
 		phase[n] = x / factorX * 3.1415926;
 		
 		// Decode RGB into YIQ and then into composite
-		// Reading two textures is a BlastEm thing :P (the two fields in
-		// interlaced mode, that's taken as-is from the stock shaders)
-		raw[n] = yiq2raw(mix(
-			rgba2yiq(texture2D(textures[1], vec2(x, modifiedY1))),
-			rgba2yiq(texture2D(textures[0], vec2(x, modifiedY0))),
-			factorY
-		), phase[n]);
+		raw[n] = yiq2raw(rgba2yiq(
+		         texture2D(textures[curfield], vec2(x, y))
+		         ), phase[n]);
 	}
 	
-	// Decode Y by averaging over the the whole sampled cycle (effectively
+	// Decode Y by averaging over the last whole sampled cycle (effectively
 	// filtering anything above the colorburst frequency)
 	mediump float y_mix = (raw[0] + raw[1] + raw[2] + raw[3]) * 0.25;
 	
@@ -154,4 +150,16 @@ void main()
 	// If you're curious to see what the raw composite signal looks like,
 	// comment out the above and uncomment the line below instead
 	//gl_FragColor = vec4(raw[0], raw[0], raw[0], 1.0);
+	
+	// Basic scanlines effect. This is done by multiplying the color against a
+	// "half sine" wave so the center is brighter and a narrow outer area in
+	// each scanline is noticeable darker.
+	// The weird constant in the middle line is 1-sqrt(2)/4 and it's used to
+	// make sure that the average multiplied value across the whole screen is 1
+	// to preserve the original brightness.
+	if (scanlines != 0) {
+		mediump float mult = sin(y * texsize.y * 3.1415926);
+		mult = abs(mult) * 0.5 + 0.646446609;
+		gl_FragColor *= vec4(mult, mult, mult, 1.0);
+	}
 }
