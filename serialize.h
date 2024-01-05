@@ -50,7 +50,8 @@ enum {
 	SECTION_LC8951,
 	SECTION_RF5C164,
 	SECTION_CDD_FADER,
-	SECTION_CDROM
+	SECTION_CDROM,
+	SECTION_COLECO_IO
 };
 
 void init_serialize(serialize_buffer *buf);

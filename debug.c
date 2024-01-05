@@ -17,6 +17,7 @@
 #include "z80inst.h"
 #ifndef NO_Z80
 #include "sms.h"
+#include "coleco.h"
 #endif
 
 #ifdef NEW_CORE
@@ -1815,6 +1816,9 @@ static debug_val vdp_status_get(debug_var *var)
 static debug_val debug_vram_get(debug_array *array, uint32_t index)
 {
 	vdp_context *vdp = array->base;
+	if (!(vdp->regs[REG_MODE_2] & BIT_MODE_5)) {
+		index = mode4_address_map[index & 0x3FFF] ^ 1;
+	}
 	return debug_int(vdp->vdpmem[index]);
 }
 
@@ -1826,6 +1830,9 @@ static void debug_vram_set(debug_array *array, uint32_t index, debug_val val)
 		return;
 	}
 	vdp_context *vdp = array->base;
+	if (!(vdp->regs[REG_MODE_2] & BIT_MODE_5)) {
+		index = mode4_address_map[index & 0x3FFF] ^ 1;
+	}
 	vdp->vdpmem[index] = ival;
 }
 
@@ -5178,6 +5185,7 @@ debug_root *find_z80_root(z80_context *context)
 		z80_names(root);
 		genesis_context *gen;
 		sms_context *sms;
+		coleco_context *coleco;
 		debug_var *var;
 		//TODO: populate names
 		switch (current_system->type)
@@ -5198,6 +5206,11 @@ debug_root *find_z80_root(z80_context *context)
 			var->get = debug_frame_get;
 			var->ptr = sms->vdp;
 			root->variables = tern_insert_ptr(root->variables, "frame", var);
+			break;
+		case SYSTEM_COLECOVISION:
+			coleco = context->system;
+			root->other_roots = tern_insert_ptr(root->other_roots, "vdp", find_vdp_root(coleco->vdp));
+			root->other_roots = tern_insert_ptr(root->other_roots, "psg", find_psg_root(coleco->psg));
 			break;
 		//default:
 			//root->resolve = resolve_z80;

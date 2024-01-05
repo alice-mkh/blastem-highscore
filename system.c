@@ -4,6 +4,7 @@
 #include "gen_player.h"
 #include "sms.h"
 #include "mediaplayer.h"
+#include "coleco.h"
 
 uint8_t safe_cmp(char *str, long offset, uint8_t *buffer, long filesize)
 {
@@ -39,6 +40,15 @@ system_type detect_system_type(system_media *media)
 		|| safe_cmp("fLaC", 0, media->buffer, media->size)) {
 		return SYSTEM_MEDIA_PLAYER;
 	}
+	if (
+		(safe_cmp("\xAA\x55", 0, media->buffer, media->size)
+		|| safe_cmp("\x55\xAA", 0, media->buffer, media->size))
+		&& media->size > 0xB) {
+		uint8_t *buffer = media->buffer;
+		if (((buffer[0xB] << 8) | buffer[0xA]) > 0x8000) {
+			return SYSTEM_COLECOVISION;
+		}
+	}
 
 
 	//TODO: Detect Jaguar ROMs here
@@ -53,6 +63,9 @@ system_type detect_system_type(system_media *media)
 		}
 		if (!strcmp("j64", media->extension)) {
 			return SYSTEM_JAGUAR;
+		}
+		if (!strcmp("col", media->extension)) {
+			return SYSTEM_COLECOVISION;
 		}
 	}
 
@@ -87,6 +100,8 @@ system_header *alloc_config_system(system_type stype, system_media *media, uint3
 #ifndef NO_Z80
 	case SYSTEM_SMS:
 		return &(alloc_configure_sms(media, opts, force_region))->header;
+	case SYSTEM_COLECOVISION:
+		return &(alloc_configure_coleco(media))->header;
 #endif
 	case SYSTEM_MEDIA_PLAYER:
 		return &(alloc_media_player(media, opts))->header;
