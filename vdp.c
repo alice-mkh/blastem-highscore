@@ -60,7 +60,7 @@ enum {
 	ACTIVE
 };
 
-static uint16_t mode4_address_map[0x4000];
+uint16_t mode4_address_map[0x4000];
 static uint32_t planar_to_chunky[256];
 static uint8_t levels[] = {0, 27, 49, 71, 87, 103, 119, 130, 146, 157, 174, 190, 206, 228, 255};
 
@@ -2030,12 +2030,40 @@ static void vdp_advance_line(vdp_context *context)
 						*(fb++) = context->colors[i];
 					}
 				}
-			} else {
+			} else if (context->type == VDP_GENESIS || (context->regs[REG_MODE_1] & BIT_MODE_4)) {
 				for (int i = MODE4_OFFSET; i < MODE4_OFFSET+32; i++)
 				{
 					for (int x = 0; x < 16; x++)
 					{
 						*(fb++) = context->colors[i];
+					}
+				}
+			} else if (context->type != VDP_GENESIS) {
+				uint16_t address = context->regs[REG_COLOR_TABLE] << 6;
+				for (int i = 0; i < 32; i++, address++)
+				{
+					uint8_t entry = context->vdpmem[mode4_address_map[address] ^ 1];
+					uint8_t fg = entry >> 4, bg = entry & 0xF;
+					uint32_t fg_full, bg_full;
+					if (context->type == VDP_GAMEGEAR) {
+						//Game Gear uses CRAM entries 16-31 for TMS9918A modes
+						fg_full = context->colors[fg + 16 + MODE4_OFFSET];
+						bg_full = context->colors[bg + 16 + MODE4_OFFSET];
+					} else {
+						fg <<= 1;
+						fg = (fg & 0xE) | (fg << 1 & 0x20);
+						fg_full = context->color_map[fg | FBUF_TMS];
+						bg <<= 1;
+						bg = (bg & 0xE) | (bg << 1 & 0x20);
+						bg_full = context->color_map[bg | FBUF_TMS];
+					}
+					for (int x = 0; x < 8; x++)
+					{
+						*(fb++) = fg_full;
+					}
+					for (int x = 0; x < 8; x++)
+					{
+						*(fb++) = bg_full;
 					}
 				}
 			}
@@ -3636,7 +3664,7 @@ static void tms_fetch_color(vdp_context *context)
 		return;
 	}
 	uint16_t address = context->regs[REG_COLOR_TABLE] << 6;
-	if (context->regs[REG_MODE_2] & BIT_M3) {
+	if (context->regs[REG_MODE_1] & BIT_M3) {
 		//Graphics II
 		uint16_t upper_vcounter_mask;
 		uint16_t pattern_name_mask;
