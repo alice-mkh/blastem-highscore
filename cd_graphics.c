@@ -120,9 +120,9 @@ enum {
 void draw_pixels(segacd_context *cd)
 {
 	uint16_t to_draw = 4 - (cd->graphics_dst_x & 3);
-	uint16_t x_end = cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3);
+	uint16_t x_end = cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 7);
 	if (cd->graphics_dst_x + to_draw > x_end) {
-		to_draw = cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3) - cd->graphics_dst_x;
+		to_draw = cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 7) - cd->graphics_dst_x;
 	}
 	for(uint16_t i = 0; i < to_draw; i++)
 	{
@@ -184,7 +184,7 @@ static void do_graphics(segacd_context *cd, uint32_t cycle)
 		case FETCH_X:
 			cd->graphics_x = cd->word_ram[cd->gate_array[GA_TRACE_VECTOR_BASE] << 1] << 8;
 			cd->graphics_cycle += 3*4;
-			cd->graphics_dst_x = cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3;
+			cd->graphics_dst_x = cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 7;
 			CHECK_CYCLES;
 		case FETCH_Y:
 			cd->graphics_y = cd->word_ram[(cd->gate_array[GA_TRACE_VECTOR_BASE] << 1) + 1] << 8;
@@ -207,7 +207,7 @@ static void do_graphics(segacd_context *cd, uint32_t cycle)
 		case PIXEL0:
 			cd->graphics_pixels[0] = get_src_pixel(cd);
 			cd->graphics_cycle += 2*4;
-			if ((cd->graphics_dst_x & 3) == 3 || (cd->graphics_dst_x + 1 == cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3))) {
+			if ((cd->graphics_dst_x & 3) == 3 || (cd->graphics_dst_x + 1 == cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 7))) {
 				cd->graphics_step = DRAW;
 				CHECK_ONLY;
 				goto draw;
@@ -217,7 +217,7 @@ static void do_graphics(segacd_context *cd, uint32_t cycle)
 		case PIXEL1:
 			cd->graphics_pixels[1] = get_src_pixel(cd);
 			cd->graphics_cycle += 2*4;
-			if ((cd->graphics_dst_x & 3) == 2 || (cd->graphics_dst_x + 2 == cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3))) {
+			if ((cd->graphics_dst_x & 3) == 2 || (cd->graphics_dst_x + 2 == cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 7))) {
 				cd->graphics_step = DRAW;
 				CHECK_ONLY;
 				goto draw;
@@ -227,7 +227,7 @@ static void do_graphics(segacd_context *cd, uint32_t cycle)
 		case PIXEL2:
 			cd->graphics_pixels[2] = get_src_pixel(cd);
 			cd->graphics_cycle += 2*4;
-			if ((cd->graphics_dst_x & 3) == 1 || (cd->graphics_dst_x + 3 == cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3))) {
+			if ((cd->graphics_dst_x & 3) == 1 || (cd->graphics_dst_x + 3 == cd->gate_array[GA_IMAGE_BUFFER_HDOTS] + (cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 7))) {
 				cd->graphics_step = DRAW;
 				CHECK_ONLY;
 				goto draw;
@@ -343,7 +343,7 @@ void cd_graphics_start(segacd_context *cd)
 		//with an additional 13? cycle setup cost per line
 		uint32_t lines = cd->gate_array[GA_IMAGE_BUFFER_LINES];
 		uint32_t hdots = cd->gate_array[GA_IMAGE_BUFFER_HDOTS];
-		uint32_t hoffset = cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 3;
+		uint32_t hoffset = cd->gate_array[GA_IMAGE_BUFFER_OFFSET] & 7;
 		uint16_t pm = cd->gate_array[1] >> 3 & 3;
 		cd->graphics_int_cycle = cd->graphics_cycle + 4 * lines * (13 + 2 * hoffset + 9 * (hdots + hoffset - 1));
 		cd->graphics_dst_y = cd->gate_array[GA_IMAGE_BUFFER_OFFSET] >> 3;
