@@ -1,5 +1,7 @@
 //******************************************************************************
-// NTSC composite simulator for BlastEm, fixed rainbow frequency edition
+//***************** FOR PARAMETERS TO ADJUST SEE BELOW THIS! *******************
+//******************************************************************************
+// NTSC composite simulator for BlastEm, now with comb filter
 // Shader by Sik, based on BlastEm's default shader
 //
 // Now with gamma correction (NTSC = 2.5 gamma, sRGB = 2.2 gamma*)
@@ -17,15 +19,30 @@
 // four samples so we're filtering over overlapping samples... just see the
 // comments in the I/Q code to understand).
 //
-// Thanks to Tulio Adriano for helping adjust the frequency of the banding.
+// The comb filter works by comparing against the previous scanline (which means
+// sampling twice). This is done at the composite signal step, i.e. before the
+// filtering to decode back YIQ is performed.
+//
+// Thanks to Tulio Adriano for helping compare against real hardware on a CRT.
 //******************************************************************************
 
-uniform mediump float width;
-uniform sampler2D textures[2];
-uniform mediump vec2 texsize;
-varying mediump vec2 texcoord;
-uniform int curfield;
-uniform int scanlines;
+// How strong is the comb filter when reducing crosstalk between Y and IQ.
+// 0% (0.0) means no separation at all, 100% (1.0) means complete filtering.
+// 80% seems to approximate a model 1, while 90% is closer to a model 2 or 32X.
+const mediump float comb_strength = 0.8;
+
+// Gamma of the TV to simulate.
+const mediump float gamma_correction = 2.5;
+
+//******************************************************************************
+
+// Parameters coming from BlastEm
+uniform mediump float width;        // Screen width (depends on video mode)
+uniform sampler2D textures[2];      // Raw display for each field
+uniform mediump vec2 texsize;       // Texture size
+varying mediump vec2 texcoord;      // Texture coordinate of current pixel
+uniform int curfield;               // Even or odd field?
+uniform int scanlines;              // Enable scanlines?
 
 // Converts from RGB to YIQ
 mediump vec3 rgba2yiq(vec4 rgba)
@@ -68,7 +85,7 @@ void main()
 	
 	// sRGB approximates a gamma ramp of 2.2 while NTSC has a gamma of 2.5
 	// Use this value to do gamma correction of every RGB value
-	mediump float gamma = 2.5 / 2.2;
+	mediump float gamma = gamma_correction / 2.2;
 	
 	// Where we store the sampled pixels.
 	// [0] = current pixel
@@ -79,22 +96,44 @@ void main()
 	// [5] = 1 1/4 colorburst cycles earlier
 	// [6] = 1 2/4 colorburst cycles earlier
 	mediump float phase[7];		// Colorburst phase (in radians)
-	mediump float raw[7];		// Raw encoded composite signal
+	mediump float raw_y[7];    // Luma isolated from raw composite signal
+	mediump float raw_iq[7];   // Chroma isolated from raw composite signal
 	
 	// Sample all the pixels we're going to use
 	for (int n = 0; n < 7; n++, x -= factorX * 0.5) {
 		// Compute colorburst phase at this point
 		phase[n] = x / factorX * 3.1415926;
 		
-		// Decode RGB into YIQ and then into composite
-		raw[n] = yiq2raw(rgba2yiq(
-		         texture2D(textures[curfield], vec2(x, y))
-		         ), phase[n]);
+		// Y coordinate one scanline above
+		// Apparently GLSL doesn't allow a vec2 with a full expression for
+		// texture samplers? Whatever, putting it here (also makes the code
+		// below a bit easier to read I guess?)
+		mediump float y_above = y - texcoord.y / texsize.y;
+		
+		// Get the raw composite data for this scanline
+		mediump float raw1 = yiq2raw(rgba2yiq(
+		                     texture2D(textures[curfield], vec2(x, y))
+		                     ), phase[n]);
+		
+		// Get the raw composite data for scanline above
+		// Note that the colorburst phase is shifted 180°
+		mediump float raw2 = yiq2raw(rgba2yiq(
+		                     texture2D(textures[curfield], vec2(x, y_above))
+		                     ), phase[n] + 3.1415926);
+		
+		// Comb filter: isolate Y and IQ using the above two.
+		// Luma is obtained by adding the two scanlines, chroma will cancel out
+		// because chroma will be on opposite phases.
+		// Chroma is then obtained by cancelling this scanline from the luma
+		// to reduce the crosstalk. We don't cancel it entirely though since the
+		// filtering isn't perfect (which is why the rainbow leaks a bit).
+		raw_y[n] = (raw1 + raw2) * 0.5;
+		raw_iq[n] = raw1 - (raw1 + raw2) * (comb_strength * 0.5);
 	}
 	
 	// Decode Y by averaging over the last whole sampled cycle (effectively
 	// filtering anything above the colorburst frequency)
-	mediump float y_mix = (raw[0] + raw[1] + raw[2] + raw[3]) * 0.25;
+	mediump float y_mix = (raw_y[0] + raw_y[1] + raw_y[2] + raw_y[3]) * 0.25;
 	
 	// Decode I and Q (see page below to understand what's going on)
 	// https://codeandlife.com/2012/10/09/composite-video-decoding-theory-and-practice/
@@ -126,22 +165,22 @@ void main()
 	// what you see below is the resulting simplification.
 	
 	mediump float i_mix =
-		0.125 * raw[0] * sin(phase[0]) +
-		0.25  * raw[1] * sin(phase[1]) +
-		0.375 * raw[2] * sin(phase[2]) +
-		0.5   * raw[3] * sin(phase[3]) +
-		0.375 * raw[4] * sin(phase[4]) +
-		0.25  * raw[5] * sin(phase[5]) +
-		0.125 * raw[6] * sin(phase[6]);
+		0.125 * raw_iq[0] * sin(phase[0]) +
+		0.25  * raw_iq[1] * sin(phase[1]) +
+		0.375 * raw_iq[2] * sin(phase[2]) +
+		0.5   * raw_iq[3] * sin(phase[3]) +
+		0.375 * raw_iq[4] * sin(phase[4]) +
+		0.25  * raw_iq[5] * sin(phase[5]) +
+		0.125 * raw_iq[6] * sin(phase[6]);
 	
 	mediump float q_mix =
-		0.125 * raw[0] * cos(phase[0]) +
-		0.25  * raw[1] * cos(phase[1]) +
-		0.375 * raw[2] * cos(phase[2]) +
-		0.5   * raw[3] * cos(phase[3]) +
-		0.375 * raw[4] * cos(phase[4]) +
-		0.25  * raw[5] * cos(phase[5]) +
-		0.125 * raw[6] * cos(phase[6]);
+		0.125 * raw_iq[0] * cos(phase[0]) +
+		0.25  * raw_iq[1] * cos(phase[1]) +
+		0.375 * raw_iq[2] * cos(phase[2]) +
+		0.5   * raw_iq[3] * cos(phase[3]) +
+		0.375 * raw_iq[4] * cos(phase[4]) +
+		0.25  * raw_iq[5] * cos(phase[5]) +
+		0.125 * raw_iq[6] * cos(phase[6]);
 	
 	// Convert YIQ back to RGB and output it
 	gl_FragColor = pow(yiq2rgba(vec3(y_mix, i_mix, q_mix)),
