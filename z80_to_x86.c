@@ -325,7 +325,7 @@ void z80_print_regs_exit(z80_context * context)
 
 void translate_z80inst(z80inst * inst, z80_context * context, uint16_t address, uint8_t interp)
 {
-	uint32_t num_cycles;
+	uint32_t num_cycles = 0;
 	host_ea src_op, dst_op;
 	uint8_t size;
 	z80_options *opts = context->options;
@@ -2861,15 +2861,21 @@ code_info z80_make_interp_stub(z80_context * context, uint16_t address)
 {
 	z80_options *opts = context->options;
 	code_info * code = &opts->gen.code;
-	check_alloc_code(code, 32);
+	check_alloc_code(code, 64);
 	code_info stub = {code->cur, NULL};
-	//TODO: make this play well with the breakpoint code
+
+	check_cycles_int(&opts->gen, address);
+	if (context->breakpoint_flags[address / 8] & (1 << (address % 8))) {
+		zbreakpoint_patch(context, address, stub.cur);
+	}
+	add_ir(code, 1, opts->regs[Z80_R], SZ_B);
+#ifdef Z80_LOG_ADDRESS
+	log_address(&opts->gen, address, "Z80: %X @ %d\n");
+#endif
 	mov_ir(code, address, opts->gen.scratch1, SZ_W);
 	call(code, opts->read_8);
 	//opcode fetch M-cycles have one extra T-state
 	cycles(&opts->gen, 1);
-	//TODO: increment R
-	check_cycles_int(&opts->gen, address);
 	call(code, opts->gen.save_context);
 	mov_irdisp(code, address, opts->gen.context_reg, offsetof(z80_context, pc), SZ_W);
 	push_r(code, opts->gen.context_reg);
