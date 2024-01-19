@@ -56,6 +56,7 @@ enum {
 
 //CTRL0
 #define BIT_DECEN  0x80
+#define BIT_EDCRQ  0x40
 #define BIT_WRRQ   0x04
 #define BIT_ORQ    0x02
 #define BIT_PRQ    0x01
@@ -240,11 +241,12 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 				uint16_t block_start = (context->regs[PTL] | (context->regs[PTH] << 8)) & (sizeof(context->buffer)-1);
 				for (int reg = HEAD0; reg < PTL; reg++)
 				{
+					printf("Setting header reg %X to %X: %X\n", reg, block_start, context->buffer[block_start]);
 					context->regs[reg] =context->buffer[block_start++];
 					block_start &= (sizeof(context->buffer)-1);
 				}
 			}
-			printf("Decode done %X:%X:%X mode %X\n", context->regs[HEAD0], context->regs[HEAD1], context->regs[HEAD2], context->regs[HEAD3]);
+			printf("Decode done %X:%X:%X mode %X @ %u\n", context->regs[HEAD0], context->regs[HEAD1], context->regs[HEAD2], context->regs[HEAD3], context->cycle);
 			// This check is a hack until I properly implement error detection
 			if (context->regs[HEAD0] < 0x74 && (context->regs[HEAD0] & 0xF) < 0xA
 				&& context->regs[HEAD1] < 0x60 && (context->regs[HEAD1] & 0xF) < 0xA
@@ -258,7 +260,7 @@ void lc8951_run(lc8951 *context, uint32_t cycle)
 				context->regs[STAT1] = 0;
 				context->regs[STAT2] = 0x10;
 			} else {
-				if (context->ctrl0 & (BIT_WRRQ|BIT_ORQ|BIT_PRQ)) {
+				if (context->ctrl0 & (BIT_EDCRQ|BIT_ORQ|BIT_PRQ)) {
 					context->regs[STAT0] |= BIT_UCEBLK;
 				}
 				context->regs[STAT1] = 0xFF;
@@ -341,7 +343,19 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 		if ((context->ctrl0 & (BIT_DECEN|BIT_WRRQ)) == (BIT_DECEN)) {
 			//monitor only mode
 			context->regs[HEAD0 + context->sector_counter] = byte;
+			if (context->sector_counter == 3) {
+				printf("Monitoring sector %02d:%02d:%02d\n", context->regs[HEAD0], context->regs[HEAD1], context->regs[HEAD2]);
+			}
+		} else {
+			if (context->sector_counter == 3) {
+				printf("Writing sector %02d:%02d:%02d @ %u\n",
+					context->buffer[(current_write_addr - 3) & (sizeof(context->buffer)-1)],
+					context->buffer[(current_write_addr - 2) & (sizeof(context->buffer)-1)],
+					context->buffer[(current_write_addr - 1) & (sizeof(context->buffer)-1)],
+					context->cycle);
+			}
 		}
+
 	}
 
 	if (sync_detected || sync_inserted) {
@@ -369,9 +383,10 @@ void lc8951_write_byte(lc8951 *context, uint32_t cycle, int sector_offset, uint8
 				context->regs[PTL] = block_start;
 				context->regs[PTH] = block_start >> 8;
 			}
-			printf("Decoding block starting at %X (WRRQ: %d, sector_offset: %X)\n", context->regs[PTL] | (context->regs[PTH] << 8), !!(context->ctrl0 & BIT_WRRQ), sector_offset);
-			//Based on measurements of a Wondermega M1 (LC8951) with SYDEN, SYIEN and DECEN only
-			context->decode_end = context->cycle + 22030 * context->clock_step;
+			printf("Decoding block starting at %X (WRRQ: %d, sector_offset: %X), current write address: %X @ %u\n", context->regs[PTL] | (context->regs[PTH] << 8), !!(context->ctrl0 & BIT_WRRQ), sector_offset, current_write_addr, context->cycle);
+			//Based on mcd-verificator results on an MCD2 with LC89515
+			//value seems to be between ~132500 and ~133500
+			context->decode_end = context->cycle + 133000 * context->clock_step;
 		}
 	} else {
 		context->sector_counter++;

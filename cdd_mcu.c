@@ -11,7 +11,7 @@
 #define NIBBLE_CLOCKS (CDD_MCU_DIVIDER * 77)
 #define BYTE_CLOCKS (SECTOR_CLOCKS/2352) // 96
 #define SUBCODE_CLOCKS (SECTOR_CLOCKS/98)
-#define PROCESSING_DELAY 54000 //approximate, based on Wondermega M1 measurements
+#define PROCESSING_DELAY 121600 //approximate, based on relative level 4 and level 5 interrupt timing on MCD2 in pause_test
 
 //lead in start max diameter 46 mm
 //program area start max diameter 50 mm
@@ -179,7 +179,6 @@ static void lba_to_status(cdd_mcu *context, uint32_t lba)
 static void update_status(cdd_mcu *context, uint16_t *gate_array)
 {
 	gate_array[GAO_CDD_CTRL] |= BIT_MUTE;
-	uint32_t prev_pba = context->head_pba;
 	switch (context->status)
 	{
 	case DS_STOP:
@@ -255,16 +254,16 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		switch (force_not_ready ? SF_NOTREADY : context->requested_format)
 		{
 		case SF_ABSOLUTE:
-			if (context->toc_valid && prev_pba >= LEADIN_SECTORS) {
-				lba_to_status(context, prev_pba - LEADIN_SECTORS);
+			if (context->toc_valid && context->head_pba >= LEADIN_SECTORS) {
+				lba_to_status(context, context->head_pba - LEADIN_SECTORS);
 				context->status_buffer.format = SF_ABSOLUTE;
 			} else {
 				context->status_buffer.format = SF_NOTREADY;
 			}
 			break;
 		case SF_RELATIVE:
-			if (context->toc_valid && prev_pba >= LEADIN_SECTORS) {
-				uint32_t lba =prev_pba - LEADIN_SECTORS;
+			if (context->toc_valid && context->head_pba >= LEADIN_SECTORS) {
+				uint32_t lba =context->head_pba - LEADIN_SECTORS;
 				for (uint32_t i = 0; i < context->media->num_tracks; i++)
 				{
 					if (lba < context->media->tracks[i].end_lba) {
@@ -295,8 +294,8 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 			}
 			break;
 		case SF_TRACK:
-			if (context->toc_valid && prev_pba >= LEADIN_SECTORS) {
-				uint32_t lba =prev_pba - LEADIN_SECTORS;
+			if (context->toc_valid && context->head_pba >= LEADIN_SECTORS) {
+				uint32_t lba =context->head_pba - LEADIN_SECTORS;
 				uint32_t i;
 				for (i = 0; i < context->media->num_tracks; i++)
 				{
@@ -373,7 +372,7 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 				}
 				lba_to_status(context, lba);
 				if (context->media->tracks[context->requested_track - 1].type == TRACK_DATA) {
-					context->status_buffer.b.tocn.frame_low |= 0x80;
+					context->status_buffer.b.tocn.frame_high |= 0x8;
 				}
 				context->status_buffer.b.tocn.track_low = context->requested_track % 10;
 				context->status_buffer.format = SF_TOCN;
@@ -663,10 +662,7 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 				context->next_subcode_int_cycle = CYCLE_NEVER;
 			}
 			if (old_coarse != context->coarse_seek) {
-				context->next_int_cycle = cd_block_to_mclks(context->cycle + PROCESSING_DELAY + 7 * NIBBLE_CLOCKS);
-				if (context->coarse_seek % 3) {
-					context->next_int_cycle += cd_block_to_mclks(SECTOR_CLOCKS * (3 - (context->coarse_seek % 3)));
-				}
+				context->next_int_cycle = cd_block_to_mclks(next_nibble + 7 * NIBBLE_CLOCKS);
 			}
 		}
 		if (context->cycle >= next_nibble) {
@@ -721,7 +717,16 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			}
 		}
 		if (context->cycle >= context->next_byte_cycle) {
-			if (context->current_sector_byte >= 0 && (!fader->byte_counter || context->current_sector_byte)) {
+			if (context->current_sector_byte >= 0/* && (!fader->byte_counter || context->current_sector_byte)*/) {
+				if (!context->current_sector_byte) {
+					//HACK: things can get a little out of sync currently which causes a mess in the fader code
+					// since it expects even multiples of 4 bytes (1 stereo sample)
+					while (fader->byte_counter)
+					{
+						lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), 0, 0);
+						cdd_fader_data(fader, 0);
+					}
+				}
 				uint8_t byte = context->media->read(context->media, context->current_sector_byte);
 				if (context->status != DS_PLAY) {
 					byte = 0;
@@ -731,10 +736,6 @@ void cdd_mcu_run(cdd_mcu *context, uint32_t cycle, uint16_t *gate_array, lc8951*
 			} else {
 				lc8951_write_byte(cdc, cd_block_to_mclks(context->cycle), 0, 0);
 				cdd_fader_data(fader, 0);
-				if (context->current_sector_byte >= 0) {
-					next_subcode += BYTE_CLOCKS;
-					context->last_sector_cycle += BYTE_CLOCKS;
-				}
 			}
 			if (context->current_sector_byte == 2352) {
 				context->current_sector_byte = -1;
