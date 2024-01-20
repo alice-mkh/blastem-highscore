@@ -406,7 +406,7 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 		memset(&context->status_buffer, 0, sizeof(context->status_buffer) - 1);
 	}
 	context->status_buffer.checksum = checksum((uint8_t *)&context->status_buffer);
-	if (context->status_buffer.format != SF_NOTREADY) {
+	if (context->status_buffer.format != SF_NOTREADY || (context->status != DS_STOP && context->status < DS_SUM_ERROR)) {
 		printf("CDD Status %X%X.%X%X%X%X%X%X.%X%X (lba %u)\n",
 			context->status_buffer.status, context->status_buffer.format,
 			context->status_buffer.b.time.min_high, context->status_buffer.b.time.min_low,
@@ -467,6 +467,9 @@ static void run_command(cdd_mcu *context)
 			break;
 		}
 		context->seek_pba = lba + LEADIN_SECTORS - 3;
+		if (context->cmd_buffer.cmd_type == CMD_SEEK) {
+			context->pause_pba = lba + LEADIN_SECTORS;
+		}
 		context->seeking = 1;
 		context->status = context->cmd_buffer.cmd_type == CMD_READ ? DS_PLAY : DS_PAUSE;
 		break;
