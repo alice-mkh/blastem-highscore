@@ -2581,7 +2581,7 @@ void m68k_breakpoint_patch(m68k_context *context, uint32_t address, m68k_debug_h
 	mov_ir(&native, address, opts->gen.scratch1, SZ_D);
 
 
-	call(&native, opts->bp_stub);
+	call_noalign(&native, opts->bp_stub);
 }
 
 void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components, int_ack_fun int_ack)
@@ -3277,10 +3277,10 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 	opts->prologue_start = *opts->bp_stub;
 	//Calculate length of patch
 	mov_ir(code, 0x1234, opts->gen.scratch1, SZ_D);
-	call(code, opts->bp_stub);
+	call_noalign(code, opts->bp_stub);
 	int patch_size = code->cur - opts->bp_stub;
 	code->cur = opts->bp_stub;
-	code->stack_off = tmp_stack_off;
+	code->stack_off = tmp_stack_off + sizeof(void*);
 
 	//Save context and call breakpoint handler
 	call(code, opts->gen.save_context);
