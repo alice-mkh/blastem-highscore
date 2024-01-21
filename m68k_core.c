@@ -839,7 +839,7 @@ static m68k_watchpoint *m68k_find_watchpoint(uint32_t address, m68k_context *con
 {
 	for (uint32_t i = 0; i < context->num_watchpoints; i++)
 	{
-		if (address >= context->watchpoints[i].start && address < context->watchpoints[i].end) {
+		if (address >= context->watchpoints[i].start && address <= context->watchpoints[i].end) {
 			return context->watchpoints + i;
 		}
 	}
