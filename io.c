@@ -89,7 +89,7 @@ static gp_button_def button_defs[NUM_GAMEPAD_BUTTONS] = {
 	[BUTTON_MODE] = {.states = {GAMEPAD_EXTRA, GAMEPAD_NONE}, .value = 0x8},
 };
 
-static io_port *find_gamepad(sega_io *io, uint8_t gamepad_num)
+io_port *find_gamepad(sega_io *io, uint8_t gamepad_num)
 {
 	for (int i = 0; i < 3; i++)
 	{

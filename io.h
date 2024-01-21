@@ -167,6 +167,7 @@ void io_mouse_motion_relative(sega_io *io, uint8_t mouse_num, int32_t x, int32_t
 void io_keyboard_down(sega_io *io, uint8_t scancode);
 void io_keyboard_up(sega_io *io, uint8_t scancode);
 uint8_t io_has_keyboard(sega_io *io);
+io_port *find_gamepad(sega_io *io, uint8_t gamepad_num);
 
 extern const char * device_type_names[];
 

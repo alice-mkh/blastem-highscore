@@ -2039,6 +2039,46 @@ debug_root *find_psg_root(psg_context *psg)
 	return root;
 }
 
+static debug_val debug_iopad_get(debug_array *array, uint32_t index)
+{
+	io_port *port = find_gamepad(array->base, index + 1);
+	uint32_t ret = 0;
+	if (port) {
+		ret |= port->input[1];
+		ret |= port->input[0] << 2 & 0xC0;
+		ret |= port->input[2] << 8 & 0xF00;
+	}
+	return debug_int(ret);
+}
+
+static void debug_iopad_set(debug_array *array, uint32_t index, debug_val val)
+{
+	uint32_t ival;
+	if (!debug_cast_int(val, &ival)) {
+		fprintf(stderr, "pad state can only be set to integers\n");
+		return;
+	}
+	io_port *port = find_gamepad(array->base, index + 1);
+	if (port) {
+		port->input[1] &= ~0x3F;
+		port->input[1] |= ival & 0x3F;
+		port->input[0] &= ~0x33;
+		port->input[0] |= ival & 0x3;
+		port->input[0] |= ival >> 2 & 0x30;
+		port->input[2] &= ~0xF;
+		port->input[2] |= ival >> 8 & 0xF;
+	}
+}
+
+debug_root *find_io_root(sega_io *io)
+{
+	debug_root *root = find_root(io);
+	
+	new_readonly_variable(root, "pads", new_fixed_array(io, debug_iopad_get, debug_iopad_set, MAX_JOYSTICKS));
+	
+	return root;
+}
+
 void ambiguous_iter(char *key, tern_val val, uint8_t valtype, void *data)
 {
 	char *prefix = data;
@@ -4797,6 +4837,7 @@ debug_root *find_m68k_root(m68k_context *context)
 				root->other_roots = tern_insert_ptr(root->other_roots, "vdp", find_vdp_root(gen->vdp));
 				root->other_roots = tern_insert_ptr(root->other_roots, "ym", find_ym2612_root(gen->ym));
 				root->other_roots = tern_insert_ptr(root->other_roots, "psg", find_psg_root(gen->psg));
+				root->other_roots = tern_insert_ptr(root->other_roots, "io", find_io_root(&gen->io));
 				add_commands(root, genesis_commands, NUM_GENESIS);
 				var = calloc(1, sizeof(debug_var));
 				var->get = debug_frame_get;
