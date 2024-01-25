@@ -3923,7 +3923,6 @@ static void *z80_watchpoint_check(uint32_t address, void *vcontext, uint8_t valu
 	context->wp_hit = 1;
 	context->target_cycle = context->sync_cycle = context->current_cycle;
 	system_header *system = context->system;
-	system->enter_debugger = 1;
 	return vcontext;
 }
 

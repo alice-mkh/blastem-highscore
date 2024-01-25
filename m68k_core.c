@@ -867,7 +867,6 @@ static void *m68k_watchpoint_check16(uint32_t address, void *vcontext, uint16_t 
 	context->wp_hit = 1;
 	context->target_cycle = context->sync_cycle = context->current_cycle;
 	system_header *system = context->system;
-	system->enter_debugger = 1;
 	return vcontext;
 }
 
@@ -892,7 +891,6 @@ static void *m68k_watchpoint_check8(uint32_t address, void *vcontext, uint8_t va
 	context->wp_hit = 1;
 	context->target_cycle = context->sync_cycle = context->current_cycle;
 	system_header *system = context->system;
-	system->enter_debugger = 1;
 	return vcontext;
 }
 

@@ -370,7 +370,7 @@ static void adjust_int_cycle(m68k_context * context, vdp_context * v_context)
 	}
 
 	context->target_cycle = context->int_cycle < context->sync_cycle ? context->int_cycle : context->sync_cycle;
-	if (context->should_return || gen->header.enter_debugger) {
+	if (context->should_return || gen->header.enter_debugger || context->wp_hit) {
 		context->target_cycle = context->current_cycle;
 	} else if (context->target_cycle < context->current_cycle) {
 		//Changes to SR can result in an interrupt cycle that's in the past
@@ -611,8 +611,10 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 		context->target_cycle = gen->reset_cycle;
 	}
 	if (address) {
-		if (gen->header.enter_debugger) {
-			gen->header.enter_debugger = 0;
+		if (gen->header.enter_debugger || context->wp_hit) {
+			if (!context->wp_hit) {
+				gen->header.enter_debugger = 0;
+			}
 #ifndef IS_LIB
 			if (gen->header.debugger_type == DEBUGGER_NATIVE) {
 				debugger(context, address);

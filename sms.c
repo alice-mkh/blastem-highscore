@@ -478,8 +478,10 @@ static void run_sms(system_header *system)
 				}
 			}
 		}
-		if (system->enter_debugger && sms->z80->pc) {
-			system->enter_debugger = 0;
+		if ((system->enter_debugger || sms->z80->wp_hit) && sms->z80->pc) {
+			if (!sms->z80->wp_hit) {
+				system->enter_debugger = 0;
+			}
 #ifndef IS_LIB
 			zdebugger(sms->z80, sms->z80->pc);
 #endif
@@ -495,7 +497,7 @@ static void run_sms(system_header *system)
 			}
 		}
 
-		if (system->enter_debugger) {
+		if (system->enter_debugger || sms->z80->wp_hit) {
 			target_cycle = sms->z80->Z80_CYCLE + 1;
 		}
 		z80_run(sms->z80, target_cycle);
