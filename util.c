@@ -1016,21 +1016,29 @@ char const *get_userdata_dir()
 #else
 
 #ifndef IS_LIB
-char *read_bundled_file(char *name, uint32_t *sizeret)
+char *bundled_file_path(char *name)
 {
 #ifdef DATA_PATH
 	char *data_dir = DATA_PATH;
 #else
 	char *data_dir = get_exe_dir();
 	if (!data_dir) {
+		return NULL;
+	}
+#endif
+	char const *pieces[] = {data_dir, PATH_SEP, name};
+	return alloc_concat_m(3, pieces);
+}
+
+char *read_bundled_file(char *name, uint32_t *sizeret)
+{
+	char *path = bundled_file_path(name);
+	if (!path) {
 		if (sizeret) {
 			*sizeret = -1;
 		}
 		return NULL;
 	}
-#endif
-	char const *pieces[] = {data_dir, PATH_SEP, name};
-	char *path = alloc_concat_m(3, pieces);
 	FILE *f = fopen(path, "rb");
 	free(path);
 	if (!f) {
