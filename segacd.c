@@ -856,8 +856,6 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		}
 		cd->gate_array[GA_CDC_DMA_ADDR] = 0;
 		cd->cdc_dst_low = 0;
-		//TODO: Confirm if DSR is cleared here on hardware
-		cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
 		break;
 	}
 	case GA_CDC_REG_DATA:
