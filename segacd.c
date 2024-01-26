@@ -856,11 +856,18 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		}
 		cd->gate_array[GA_CDC_DMA_ADDR] = 0;
 		cd->cdc_dst_low = 0;
+		//TODO: Confirm if DSR is cleared here on hardware
+		cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
 		break;
 	}
 	case GA_CDC_REG_DATA:
 		cdd_run(cd, m68k->current_cycle);
 		printf("CDC write %X: %X @ %u\n", cd->cdc.ar, value, m68k->current_cycle);
+		if (cd->cdc.ar == 6) {
+			cd->cdc_dst_low = 0;
+			//TODO: Confirm if DSR is cleared here on hardware
+			cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
+		}
 		lc8951_reg_write(&cd->cdc, value);
 		calculate_target_cycle(m68k);
 		break;
@@ -872,6 +879,8 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cdd_run(cd, m68k->current_cycle);
 		cd->gate_array[reg] = value;
 		cd->cdc_dst_low = 0;
+		//TODO: Confirm if DSR is cleared here on hardware
+		cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
 		break;
 	case GA_STOP_WATCH:
 		//docs say you should only write zero to reset
