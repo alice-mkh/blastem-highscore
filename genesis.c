@@ -59,18 +59,22 @@ void genesis_serialize(genesis_context *gen, serialize_buffer *buf, uint32_t m68
 		m68k_serialize(gen->m68k, m68k_pc, buf);
 		end_section(buf);
 
-		start_section(buf, SECTION_Z80);
-		z80_serialize(gen->z80, buf);
-		end_section(buf);
+		if (gen->header.type == SYSTEM_GENESIS) {
+			start_section(buf, SECTION_Z80);
+			z80_serialize(gen->z80, buf);
+			end_section(buf);
+		}
 	}
 
 	start_section(buf, SECTION_VDP);
 	vdp_serialize(gen->vdp, buf);
 	end_section(buf);
 
-	start_section(buf, SECTION_YM2612);
-	ym_serialize(gen->ym, buf);
-	end_section(buf);
+	if (gen->header.type != SYSTEM_PICO) {
+		start_section(buf, SECTION_YM2612);
+		ym_serialize(gen->ym, buf);
+		end_section(buf);
+	}
 
 	start_section(buf, SECTION_PSG);
 	psg_serialize(gen->psg, buf);
@@ -86,36 +90,40 @@ void genesis_serialize(genesis_context *gen, serialize_buffer *buf, uint32_t m68
 		save_int32(buf, gen->refresh_counter);
 		end_section(buf);
 
-		start_section(buf, SECTION_SEGA_IO_1);
-		io_serialize(gen->io.ports, buf);
-		end_section(buf);
+		if (gen->header.type == SYSTEM_GENESIS) {
+			start_section(buf, SECTION_SEGA_IO_1);
+			io_serialize(gen->io.ports, buf);
+			end_section(buf);
 
-		start_section(buf, SECTION_SEGA_IO_2);
-		io_serialize(gen->io.ports + 1, buf);
-		end_section(buf);
+			start_section(buf, SECTION_SEGA_IO_2);
+			io_serialize(gen->io.ports + 1, buf);
+			end_section(buf);
 
-		start_section(buf, SECTION_SEGA_IO_EXT);
-		io_serialize(gen->io.ports + 2, buf);
-		end_section(buf);
+			start_section(buf, SECTION_SEGA_IO_EXT);
+			io_serialize(gen->io.ports + 2, buf);
+			end_section(buf);
+		}
 
 		start_section(buf, SECTION_MAIN_RAM);
 		save_int8(buf, RAM_WORDS * 2 / 1024);
 		save_buffer16(buf, gen->work_ram, RAM_WORDS);
 		end_section(buf);
 
-		start_section(buf, SECTION_SOUND_RAM);
-		save_int8(buf, Z80_RAM_BYTES / 1024);
-		save_buffer8(buf, gen->zram, Z80_RAM_BYTES);
-		end_section(buf);
-
-		if (gen->version_reg & 0xF) {
-			//only save TMSS info if it's present
-			//that will allow a state saved on a model lacking TMSS
-			//to be loaded on a model that has it
-			start_section(buf, SECTION_TMSS);
-			save_int8(buf, gen->tmss);
-			save_buffer16(buf, gen->tmss_lock, 2);
+		if (gen->header.type == SYSTEM_GENESIS) {
+			start_section(buf, SECTION_SOUND_RAM);
+			save_int8(buf, Z80_RAM_BYTES / 1024);
+			save_buffer8(buf, gen->zram, Z80_RAM_BYTES);
 			end_section(buf);
+
+			if (gen->version_reg & 0xF) {
+				//only save TMSS info if it's present
+				//that will allow a state saved on a model lacking TMSS
+				//to be loaded on a model that has it
+				start_section(buf, SECTION_TMSS);
+				save_int8(buf, gen->tmss);
+				save_buffer16(buf, gen->tmss_lock, 2);
+				end_section(buf);
+			}
 		}
 
 		cart_serialize(&gen->header, buf);
@@ -214,18 +222,22 @@ static void toggle_tmss_rom(genesis_context *gen);
 void genesis_deserialize(deserialize_buffer *buf, genesis_context *gen)
 {
 	register_section_handler(buf, (section_handler){.fun = m68k_deserialize, .data = gen->m68k}, SECTION_68000);
-	register_section_handler(buf, (section_handler){.fun = z80_deserialize, .data = gen->z80}, SECTION_Z80);
 	register_section_handler(buf, (section_handler){.fun = vdp_deserialize, .data = gen->vdp}, SECTION_VDP);
-	register_section_handler(buf, (section_handler){.fun = ym_deserialize, .data = gen->ym}, SECTION_YM2612);
 	register_section_handler(buf, (section_handler){.fun = psg_deserialize, .data = gen->psg}, SECTION_PSG);
 	register_section_handler(buf, (section_handler){.fun = bus_arbiter_deserialize, .data = gen}, SECTION_GEN_BUS_ARBITER);
-	register_section_handler(buf, (section_handler){.fun = io_deserialize, .data = gen->io.ports}, SECTION_SEGA_IO_1);
-	register_section_handler(buf, (section_handler){.fun = io_deserialize, .data = gen->io.ports + 1}, SECTION_SEGA_IO_2);
-	register_section_handler(buf, (section_handler){.fun = io_deserialize, .data = gen->io.ports + 2}, SECTION_SEGA_IO_EXT);
 	register_section_handler(buf, (section_handler){.fun = ram_deserialize, .data = gen}, SECTION_MAIN_RAM);
-	register_section_handler(buf, (section_handler){.fun = zram_deserialize, .data = gen}, SECTION_SOUND_RAM);
 	register_section_handler(buf, (section_handler){.fun = cart_deserialize, .data = gen}, SECTION_MAPPER);
-	register_section_handler(buf, (section_handler){.fun = tmss_deserialize, .data = gen}, SECTION_TMSS);
+	if (gen->header.type == SYSTEM_GENESIS) {
+		register_section_handler(buf, (section_handler){.fun = z80_deserialize, .data = gen->z80}, SECTION_Z80);
+		register_section_handler(buf, (section_handler){.fun = io_deserialize, .data = gen->io.ports}, SECTION_SEGA_IO_1);
+		register_section_handler(buf, (section_handler){.fun = io_deserialize, .data = gen->io.ports + 1}, SECTION_SEGA_IO_2);
+		register_section_handler(buf, (section_handler){.fun = io_deserialize, .data = gen->io.ports + 2}, SECTION_SEGA_IO_EXT);
+		register_section_handler(buf, (section_handler){.fun = zram_deserialize, .data = gen}, SECTION_SOUND_RAM);
+		register_section_handler(buf, (section_handler){.fun = tmss_deserialize, .data = gen}, SECTION_TMSS);
+	}
+	if (gen->header.type != SYSTEM_PICO) {
+		register_section_handler(buf, (section_handler){.fun = ym_deserialize, .data = gen->ym}, SECTION_YM2612);
+	}
 	if (gen->expansion) {
 		segacd_context *cd = gen->expansion;
 		segacd_register_section_handlers(cd, buf);
@@ -236,7 +248,7 @@ void genesis_deserialize(deserialize_buffer *buf, genesis_context *gen)
 	{
 		load_section(buf);
 	}
-	if (gen->version_reg & 0xF) {
+	if (gen->header.type == SYSTEM_GENESIS && (gen->version_reg & 0xF)) {
 		if (gen->tmss == 0xFF) {
 			//state lacked a TMSS section, assume that the game ROM is mapped in
 			//and that the VDP is unlocked
@@ -339,7 +351,7 @@ static void adjust_int_cycle(m68k_context * context, vdp_context * v_context)
 
 				}
 			}
-			if (mask < 2 && (v_context->regs[REG_MODE_3] & BIT_EINT_EN)) {
+			if (mask < 2 && (v_context->regs[REG_MODE_3] & BIT_EINT_EN) && gen->header.type == SYSTEM_GENESIS) {
 				uint32_t next_eint_port0 = io_next_interrupt(gen->io.ports, context->current_cycle);
 				uint32_t next_eint_port1 = io_next_interrupt(gen->io.ports + 1, context->current_cycle);
 				uint32_t next_eint_port2 = io_next_interrupt(gen->io.ports + 2, context->current_cycle);
@@ -669,6 +681,131 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 	return context;
 }
 
+static m68k_context* sync_components_pico(m68k_context * context, uint32_t address)
+{
+	genesis_context * gen = context->system;
+	vdp_context * v_context = gen->vdp;
+	if (gen->bus_busy) {
+		gen_update_refresh_no_wait(context);
+	} else {
+		gen_update_refresh(context);
+	}
+
+	uint32_t mclks = context->current_cycle;
+	psg_run(gen->psg, mclks);
+	vdp_run_context(v_context, mclks);
+	if (mclks >= gen->reset_cycle) {
+		gen->reset_requested = 1;
+		context->should_return = 1;
+		gen->reset_cycle = CYCLE_NEVER;
+	}
+	if (v_context->frame != gen->last_frame) {
+#ifndef IS_LIB
+		if (gen->psg->scope) {
+			scope_render(gen->psg->scope);
+		}
+#endif
+		//printf("reached frame end %d | MCLK Cycles: %d, Target: %d, VDP cycles: %d, vcounter: %d, hslot: %d\n", gen->last_frame, mclks, gen->frame_end, v_context->cycles, v_context->vcounter, v_context->hslot);
+		uint32_t elapsed = v_context->frame - gen->last_frame;
+		gen->last_frame = v_context->frame;
+		event_flush(mclks);
+		gen->last_flush_cycle = mclks;
+		if (gen->header.enter_debugger_frames) {
+			if (elapsed >= gen->header.enter_debugger_frames) {
+				gen->header.enter_debugger_frames = 0;
+				gen->header.enter_debugger = 1;
+			} else {
+				gen->header.enter_debugger_frames -= elapsed;
+			}
+		}
+
+		if(exit_after){
+			if (elapsed >= exit_after) {
+				exit(0);
+			} else {
+				exit_after -= elapsed;
+			}
+		}
+		if (context->current_cycle > MAX_NO_ADJUST) {
+			uint32_t deduction = mclks - ADJUST_BUFFER;
+			vdp_adjust_cycles(v_context, deduction);
+			if (gen->mapper_type == MAPPER_JCART) {
+				jcart_adjust_cycles(gen, deduction);
+			}
+			context->current_cycle -= deduction;
+			if (gen->psg->vgm) {
+				vgm_adjust_cycles(gen->psg->vgm, deduction);
+			}
+			gen->psg->cycles -= deduction;
+			if (gen->reset_cycle != CYCLE_NEVER) {
+				gen->reset_cycle -= deduction;
+			}
+			event_cycle_adjust(mclks, deduction);
+			if (gen->expansion) {
+				scd_adjust_cycle(gen->expansion, deduction);
+			}
+			gen->last_flush_cycle -= deduction;
+		}
+	} else if (mclks - gen->last_flush_cycle > gen->soft_flush_cycles) {
+		event_soft_flush(mclks);
+		gen->last_flush_cycle = mclks;
+	}
+	gen->frame_end = vdp_cycles_to_frame_end(v_context);
+	context->sync_cycle = gen->frame_end;
+	//printf("Set sync cycle to: %d @ %d, vcounter: %d, hslot: %d\n", context->sync_cycle, context->current_cycle, v_context->vcounter, v_context->hslot);
+	if (!address && (gen->header.enter_debugger || gen->header.save_state)) {
+		context->sync_cycle = context->current_cycle + 1;
+	}
+	adjust_int_cycle(context, v_context);
+	if (gen->reset_cycle < context->target_cycle) {
+		context->target_cycle = gen->reset_cycle;
+	}
+	if (address) {
+		if (gen->header.enter_debugger || context->wp_hit) {
+			if (!context->wp_hit) {
+				gen->header.enter_debugger = 0;
+			}
+#ifndef IS_LIB
+			if (gen->header.debugger_type == DEBUGGER_NATIVE) {
+				debugger(context, address);
+			} else {
+				gdb_debug_enter(context, address);
+			}
+#endif
+		}
+		if (gen->header.save_state) {
+			uint8_t slot = gen->header.save_state - 1;
+			gen->header.save_state = 0;
+			char *save_path = slot >= SERIALIZE_SLOT ? NULL : get_slot_name(&gen->header, slot, use_native_states ? "state" : "gst");
+			if (use_native_states || slot >= SERIALIZE_SLOT) {
+				serialize_buffer state;
+				init_serialize(&state);
+				genesis_serialize(gen, &state, address, slot != EVENTLOG_SLOT);
+				if (slot == SERIALIZE_SLOT) {
+					gen->serialize_tmp = state.data;
+					gen->serialize_size = state.size;
+					context->sync_cycle = context->current_cycle;
+					context->should_return = 1;
+				} else if (slot == EVENTLOG_SLOT) {
+					event_state(context->current_cycle, &state);
+				} else {
+					save_to_file(&state, save_path);
+					free(state.data);
+				}
+			} else {
+				save_gst(gen, save_path, address);
+			}
+			if (slot != SERIALIZE_SLOT) {
+				debug_message("Saved state to %s\n", save_path);
+			}
+			free(save_path);
+		} else if(gen->header.save_state) {
+			context->sync_cycle = context->current_cycle + 1;
+		}
+	}
+	return context;
+}
+
 static m68k_context *int_ack(m68k_context *context)
 {
 	genesis_context * gen = context->system;
@@ -704,7 +841,11 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 	//do refresh check here so we can avoid adding a penalty for a refresh that happens during a VDP access
 	gen_update_refresh_free_access(context);
 
-	sync_components(context, 0);
+	if (gen->header.type == SYSTEM_PICO) {
+		sync_components_pico(context, 0);
+	} else {
+		sync_components(context, 0);
+	}
 	vdp_context *v_context = gen->vdp;
 	uint32_t before_cycle = v_context->cycles;
 	uint8_t did_dma = 0;
@@ -723,7 +864,11 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 						}
 						context->current_cycle += m68k_cycle_diff;
 						gen->bus_busy = 1;
-						sync_components(context, 0);
+						if (gen->header.type == SYSTEM_PICO) {
+							sync_components_pico(context, 0);
+						} else {
+							sync_components(context, 0);
+						}
 						gen->bus_busy = 0;
 					}
 				}
@@ -746,7 +891,11 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 							}
 							context->current_cycle += m68k_cycle_diff;
 							gen->bus_busy = 1;
-							sync_components(context, 0);
+							if (gen->header.type == SYSTEM_PICO) {
+								sync_components_pico(context, 0);
+							} else {
+								sync_components(context, 0);
+							}
 							gen->bus_busy = 0;
 						}
 					}
@@ -773,10 +922,12 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 				m68k_cycle_diff += MCLKS_PER_68K;
 			}
 			context->current_cycle += m68k_cycle_diff;
-			//Lock the Z80 out of the bus until the VDP access is complete
-			gen->bus_busy = 1;
-			sync_z80(gen, v_context->cycles);
-			gen->bus_busy = 0;
+			if (gen->header.type == SYSTEM_GENESIS) {
+				//Lock the Z80 out of the bus until the VDP access is complete
+				gen->bus_busy = 1;
+				sync_z80(gen, v_context->cycles);
+				gen->bus_busy = 0;
+			}
 		}
 	} else if (vdp_port < 0x18) {
 		psg_write(gen->psg, value);
@@ -843,7 +994,11 @@ static uint16_t vdp_port_read(uint32_t vdp_port, m68k_context * context)
 	//do refresh check here so we can avoid adding a penalty for a refresh that happens during a VDP access
 	gen_update_refresh_free_access(context);
 
-	sync_components(context, 0);
+	if (gen->header.type == SYSTEM_PICO) {
+		sync_components_pico(context, 0);
+	} else {
+		sync_components(context, 0);
+	}
 	vdp_context * v_context = gen->vdp;
 	uint32_t before_cycle = context->current_cycle;
 	if (vdp_port < 0x10) {
@@ -864,9 +1019,11 @@ static uint16_t vdp_port_read(uint32_t vdp_port, m68k_context * context)
 		//printf("68K paused for %d (%d) cycles at cycle %d (%d) for read\n", v_context->cycles - context->current_cycle, v_context->cycles - before_cycle, context->current_cycle, before_cycle);
 		//Lock the Z80 out of the bus until the VDP access is complete
 		genesis_context *gen = context->system;
-		gen->bus_busy = 1;
-		sync_z80(gen, context->current_cycle);
-		gen->bus_busy = 0;
+		if (gen->header.type == SYSTEM_GENESIS) {
+			gen->bus_busy = 1;
+			sync_z80(gen, context->current_cycle);
+			gen->bus_busy = 0;
+		}
 	}
 
 	//refresh may have happened while we were waiting on the VDP,
@@ -1074,6 +1231,18 @@ static m68k_context * io_write_w(uint32_t location, m68k_context * context, uint
 	}
 }
 
+static void* pico_io_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	printf("Pico IO write.b %X - %X\n", location, value);
+	return vcontext;
+}
+
+static void* pico_io_write_w(uint32_t location, void *vcontext, uint16_t value)
+{
+	printf("Pico IO write.w %X - %X\n", location, value);
+	return vcontext;
+}
+
 #define FOREIGN 0x80
 #define HZ50 0x40
 #define USA FOREIGN
@@ -1201,6 +1370,46 @@ static uint16_t io_read_w(uint32_t location, m68k_context * context)
 		value |= get_open_bus_value(&gen->header) & 0xFF;
 	}
 	return value;
+}
+
+static uint8_t pico_io_read(uint32_t location, void *vcontext)
+{
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	switch(location >> 1 & 0x7F)
+	{
+	case 0:
+		return gen->version_reg;
+	case 1:
+		return gen->pico_button_state;
+	case 2:
+		return gen->pico_pen_x >> 8;
+	case 3:
+		return gen->pico_pen_x;
+	case 4:
+		return gen->pico_pen_y >> 8;
+	case 5:
+		return gen->pico_pen_y;
+	case 6:
+		return gen->pico_page;
+	case 8:
+		printf("uPD7759 data read @ %u\n", m68k->current_cycle);
+		return 0xFF;
+	case 9:
+		printf("uPD7759 contro/status read @ %u\n", m68k->current_cycle);
+		return 0;
+	default:
+		printf("Unknown Pico IO read %X @ %u\n", location, m68k->current_cycle);
+		return 0xFF;
+	}
+}
+
+static uint16_t pico_io_read_w(uint32_t location, void *vcontext)
+{
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	uint16_t value = pico_io_read(location, vcontext);
+	return value | (value << 8);
 }
 
 static void * z80_write_ym(uint32_t location, void * vcontext, uint8_t value)
@@ -1446,20 +1655,33 @@ void set_region(genesis_context *gen, rom_info *info, uint8_t region)
 			region = info->regions;
 		}
 	}
-	if (region & REGION_E) {
-		gen->version_reg = NO_DISK | EUR;
-	} else if (region & REGION_J) {
-		gen->version_reg = NO_DISK | JAP;
+	uint8_t is_50hz = 0;
+	if (gen->header.type == SYSTEM_PICO) {
+		if (region & REGION_E) {
+			is_50hz = 1;
+			gen->version_reg = 0x20;
+		} else if (region & REGION_J) {
+			gen->version_reg = 0;
+		} else {
+			gen->version_reg = 0x40;
+		}
 	} else {
-		gen->version_reg = NO_DISK | USA;
+		if (region & REGION_E) {
+			gen->version_reg = NO_DISK | EUR;
+			is_50hz = 1; 
+		} else if (region & REGION_J) {
+			gen->version_reg = NO_DISK | JAP;
+		} else {
+			gen->version_reg = NO_DISK | USA;
+		}
 	}
 
-	if (region & HZ50) {
+	if (is_50hz) {
 		gen->normal_clock = MCLKS_PAL;
-		gen->soft_flush_cycles = MCLKS_LINE * 262 / 3 + 2;
+		gen->soft_flush_cycles = MCLKS_LINE * 313 / 3 + 2;
 	} else {
 		gen->normal_clock = MCLKS_NTSC;
-		gen->soft_flush_cycles = MCLKS_LINE * 313 / 3 + 2;
+		gen->soft_flush_cycles = MCLKS_LINE * 262 / 3 + 2;
 	}
 	gen->master_clock = gen->normal_clock;
 }
@@ -1505,9 +1727,13 @@ static void handle_reset_requests(genesis_context *gen)
 		if (gen->reset_requested) {
 			gen->reset_requested = 0;
 			gen->m68k->should_return = 0;
-			z80_assert_reset(gen->z80, gen->m68k->current_cycle);
-			z80_clear_busreq(gen->z80, gen->m68k->current_cycle);
-			ym_reset(gen->ym);
+			if (gen->header.type == SYSTEM_GENESIS) {
+				z80_assert_reset(gen->z80, gen->m68k->current_cycle);
+				z80_clear_busreq(gen->z80, gen->m68k->current_cycle);
+			}
+			if (gen->header.type != SYSTEM_PICO) {
+				ym_reset(gen->ym);
+			}
 			//Is there any sort of VDP reset?
 			m68k_reset(gen->m68k);
 		}
@@ -1520,7 +1746,9 @@ static void handle_reset_requests(genesis_context *gen)
 	if (gen->header.force_release || render_should_release_on_exit()) {
 		bindings_release_capture();
 		vdp_release_framebuffer(gen->vdp);
-		render_pause_source(gen->ym->audio);
+		if (gen->header.type != SYSTEM_PICO) {
+			render_pause_source(gen->ym->audio);
+		}
 		render_pause_source(gen->psg->audio);
 	}
 }
@@ -1572,10 +1800,16 @@ static void resume_genesis(system_header *system)
 	genesis_context *gen = (genesis_context *)system;
 	if (gen->header.force_release || render_should_release_on_exit()) {
 		gen->header.force_release = 0;
-		render_set_video_standard((gen->version_reg & HZ50) ? VID_PAL : VID_NTSC);
+		if (gen->header.type == SYSTEM_PICO) {
+			render_set_video_standard((gen->version_reg & 0x60) == 0x20 ? VID_PAL : VID_NTSC);
+		} else {
+			render_set_video_standard((gen->version_reg & HZ50) ? VID_PAL : VID_NTSC);
+		}
 		bindings_reacquire_capture();
 		vdp_reacquire_framebuffer(gen->vdp);
-		render_resume_source(gen->ym->audio);
+		if (gen->header.type != SYSTEM_PICO) {
+			render_resume_source(gen->ym->audio);
+		}
 		render_resume_source(gen->psg->audio);
 	}
 	resume_68k(gen->m68k);
@@ -1722,10 +1956,14 @@ static void free_genesis(system_header *system)
 	free(gen->cart);
 	free(gen->m68k);
 	free(gen->work_ram);
-	z80_options_free(gen->z80->Z80_OPTS);
-	free(gen->z80);
-	free(gen->zram);
-	ym_free(gen->ym);
+	if (gen->header.type == SYSTEM_GENESIS) {
+		z80_options_free(gen->z80->Z80_OPTS);
+		free(gen->z80);
+		free(gen->zram);
+	}
+	if (gen->header.type != SYSTEM_PICO) {
+		ym_free(gen->ym);
+	}
 	psg_free(gen->psg);
 	free(gen->header.save_dir);
 	free_rom_info(&gen->header.info);
@@ -1755,6 +1993,36 @@ static void gamepad_up(system_header *system, uint8_t gamepad_num, uint8_t butto
 	}
 }
 
+static void gamepad_down_pico(system_header *system, uint8_t gamepad_num, uint8_t button)
+{
+	genesis_context *gen = (genesis_context *)system;
+	if (gamepad_num != 1) {
+		return;
+	}
+	//TODO: storyware display
+	if (button == BUTTON_C) {
+		gen->pico_page <<= 1;
+		gen->pico_page |= 1;
+		gen->pico_page &= 0x3F;
+	} else if (button == BUTTON_Z) {
+		gen->pico_page >>= 1;
+	} else if (button < BUTTON_B) {
+		gen->pico_button_state &= ~(1 << (button - 1));
+	}
+}
+
+static void gamepad_up_pico(system_header *system, uint8_t gamepad_num, uint8_t button)
+{
+	genesis_context *gen = (genesis_context *)system;
+	if (gamepad_num != 1) {
+		return;
+	}
+	if (button < BUTTON_B) {
+		gen->pico_button_state |= 1 << (button - 1);
+	}
+	return;
+}
+
 static void mouse_down(system_header *system, uint8_t mouse_num, uint8_t button)
 {
 	genesis_context *gen = (genesis_context *)system;
@@ -1765,6 +2033,22 @@ static void mouse_up(system_header *system, uint8_t mouse_num, uint8_t button)
 {
 	genesis_context *gen = (genesis_context *)system;
 	io_mouse_up(&gen->io, mouse_num, button);
+}
+
+static void mouse_down_pico(system_header *system, uint8_t mouse_num, uint8_t button)
+{
+	genesis_context *gen = (genesis_context *)system;
+	if (button == MOUSE_LEFT) {
+		gen->pico_button_state &= ~0x80;
+	}
+}
+
+static void mouse_up_pico(system_header *system, uint8_t mouse_num, uint8_t button)
+{
+	genesis_context *gen = (genesis_context *)system;
+	if (button == MOUSE_LEFT) {
+		gen->pico_button_state |= 0x80;
+	}
 }
 
 static void mouse_motion_absolute(system_header *system, uint8_t mouse_num, uint16_t x, uint16_t y)
@@ -1779,6 +2063,24 @@ static void mouse_motion_relative(system_header *system, uint8_t mouse_num, int3
 	io_mouse_motion_relative(&gen->io, mouse_num, x, y);
 }
 
+static void mouse_motion_absolute_pico(system_header *system, uint8_t mouse_num, uint16_t x, uint16_t y)
+{
+	genesis_context *gen = (genesis_context *)system;
+	//TODO: scale properly
+	//TODO: limit to mouse motion on emulated storyware/drawing area
+	gen->pico_pen_x = (x >> 1) + 0x3C;
+	gen->pico_pen_y = y + 0x1FC;
+}
+
+static void mouse_motion_relative_pico(system_header *system, uint8_t mouse_num, int32_t x, int32_t y)
+{
+	genesis_context *gen = (genesis_context *)system;
+	//TODO: scale properly
+	//TODO: limit to mouse motion on emulated storyware/drawing area
+	gen->pico_pen_x += x;
+	gen->pico_pen_y += y;
+}
+
 static void keyboard_down(system_header *system, uint8_t scancode)
 {
 	genesis_context *gen = (genesis_context *)system;
@@ -1791,16 +2093,30 @@ static void keyboard_up(system_header *system, uint8_t scancode)
 	io_keyboard_up(&gen->io, scancode);
 }
 
+static void keyboard_down_pico(system_header *system, uint8_t scancode)
+{
+	genesis_context *gen = (genesis_context *)system;
+	//TODO: Keyboard Pico emulation
+}
+
+static void keyboard_up_pico(system_header *system, uint8_t scancode)
+{
+	genesis_context *gen = (genesis_context *)system;
+	//TODO: Keyboard Pico emulation
+}
+
 static void set_audio_config(genesis_context *gen)
 {
 	char *config_gain;
 	config_gain = tern_find_path(config, "audio\0psg_gain\0", TVAL_PTR).ptrval;
 	render_audio_source_gaindb(gen->psg->audio, config_gain ? atof(config_gain) : 0.0f);
-	config_gain = tern_find_path(config, "audio\0fm_gain\0", TVAL_PTR).ptrval;
-	render_audio_source_gaindb(gen->ym->audio, config_gain ? atof(config_gain) : 0.0f);
+	if (gen->header.type != SYSTEM_PICO) {
+		config_gain = tern_find_path(config, "audio\0fm_gain\0", TVAL_PTR).ptrval;
+		render_audio_source_gaindb(gen->ym->audio, config_gain ? atof(config_gain) : 0.0f);
 
-	char *config_dac = tern_find_path_default(config, "audio\0fm_dac\0", (tern_val){.ptrval="zero_offset"}, TVAL_PTR).ptrval;
-	ym_enable_zero_offset(gen->ym, !strcmp(config_dac, "zero_offset"));
+		char *config_dac = tern_find_path_default(config, "audio\0fm_dac\0", (tern_val){.ptrval="zero_offset"}, TVAL_PTR).ptrval;
+		ym_enable_zero_offset(gen->ym, !strcmp(config_dac, "zero_offset"));
+	}
 
 	if (gen->expansion) {
 		segacd_context *cd = gen->expansion;
@@ -1814,10 +2130,14 @@ static void set_audio_config(genesis_context *gen)
 static void config_updated(system_header *system)
 {
 	genesis_context *gen = (genesis_context *)system;
-	setup_io_devices(config, &system->info, &gen->io);
+	if (gen->header.type == SYSTEM_GENESIS) {
+		setup_io_devices(config, &system->info, &gen->io);
+	}
 	set_audio_config(gen);
 	//sample rate may have changed
-	ym_adjust_master_clock(gen->ym, gen->master_clock);
+	if (gen->header.type != SYSTEM_PICO) {
+		ym_adjust_master_clock(gen->ym, gen->master_clock);
+	}
 	psg_adjust_master_clock(gen->psg, gen->master_clock);
 	if (gen->expansion) {
 		segacd_config_updated(gen->expansion);
@@ -1831,7 +2151,9 @@ static void start_vgm_log(system_header *system, char *filename)
 	if (vgm) {
 		printf("Started logging VGM to %s\n", filename);
 		sync_sound(gen, vgm->last_cycle);
-		ym_vgm_log(gen->ym, gen->normal_clock, vgm);
+		if (gen->header.type != SYSTEM_PICO) {
+			ym_vgm_log(gen->ym, gen->normal_clock, vgm);
+		}
 		psg_vgm_log(gen->psg, gen->normal_clock, vgm);
 		gen->header.vgm_logging = 1;
 	} else {
@@ -1844,7 +2166,10 @@ static void stop_vgm_log(system_header *system)
 	puts("Stopped VGM log");
 	genesis_context *gen = (genesis_context *)system;
 	vgm_close(gen->ym->vgm);
-	gen->ym->vgm = gen->psg->vgm = NULL;
+	if (gen->header.type != SYSTEM_PICO) {
+		gen->ym->vgm = NULL;
+	}
+	gen->psg->vgm = NULL;
 	gen->header.vgm_logging = 0;
 }
 
@@ -1855,9 +2180,11 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 	if (debug_view < DEBUG_OSCILLOSCOPE) {
 		vdp_toggle_debug_view(gen->vdp, debug_view);
 	} else if (debug_view == DEBUG_OSCILLOSCOPE) {
-		if (gen->ym->scope) {
-			oscilloscope *scope = gen->ym->scope;
-			gen->ym->scope = NULL;
+		if (gen->psg->scope) {
+			oscilloscope *scope = gen->psg->scope;
+			if (gen->header.type != SYSTEM_PICO) {
+				gen->ym->scope = NULL;
+			}
 			gen->psg->scope = NULL;
 			if (gen->expansion) {
 				segacd_context *cd = gen->expansion;
@@ -1866,7 +2193,9 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 			scope_close(scope);
 		} else {
 			oscilloscope *scope = create_oscilloscope();
-			ym_enable_scope(gen->ym, scope, gen->normal_clock);
+			if (gen->header.type != SYSTEM_PICO) {
+				ym_enable_scope(gen->ym, scope, gen->normal_clock);
+			}
 			psg_enable_scope(gen->psg, scope, gen->normal_clock);
 			if (gen->expansion) {
 				segacd_context *cd = gen->expansion;
@@ -2464,5 +2793,171 @@ genesis_context *alloc_config_genesis_cdboot(system_media *media, uint32_t syste
 	gen->header.type = SYSTEM_SEGACD;
 
 	set_audio_config(gen);
+	return gen;
+}
+
+static memmap_chunk pico_base_map[] = {
+	{0xE00000, 0x1000000, 0xFFFF, .flags = MMAP_READ | MMAP_WRITE | MMAP_CODE},
+	{0xC00000, 0xE00000,  0x1FFFFF, .read_16 = (read_16_fun)vdp_port_read,  .write_16 =(write_16_fun)vdp_port_write,
+			   .read_8 = (read_8_fun)vdp_port_read_b, .write_8 = (write_8_fun)vdp_port_write_b},
+	{0x800000, 0x900000,  0xFFFFFF,  .read_16 = pico_io_read_w, .write_16 = pico_io_write_w,
+			   .read_8 = pico_io_read, .write_8 = pico_io_write}
+};
+const size_t pico_base_chunks = sizeof(pico_base_map)/sizeof(*pico_base_map);
+
+genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, uint32_t lock_on_size, uint32_t ym_opts, uint8_t force_region)
+{
+	tern_node *rom_db = get_rom_db();
+	rom_info info = configure_rom(rom_db, rom, rom_size, lock_on, lock_on_size, pico_base_map, pico_base_chunks);
+	rom = info.rom;
+	rom_size = info.rom_size;
+#ifndef BLASTEM_BIG_ENDIAN
+	byteswap_rom(nearest_pow2(rom_size), rom);
+	if (lock_on) {
+		byteswap_rom(nearest_pow2(lock_on_size), lock_on);
+	}
+#endif
+	char *m68k_divider = tern_find_path(config, "clocks\0m68k_divider\0", TVAL_PTR).ptrval;
+	if (!m68k_divider) {
+		m68k_divider = "7";
+	}
+	MCLKS_PER_68K = atoi(m68k_divider);
+	if (!MCLKS_PER_68K) {
+		MCLKS_PER_68K = 7;
+	}
+	genesis_context *gen = calloc(1, sizeof(genesis_context));
+	gen->header.set_speed_percent = set_speed_percent;
+	gen->header.start_context = start_genesis;
+	gen->header.resume_context = resume_genesis;
+	gen->header.load_save = load_save;
+	gen->header.persist_save = persist_save;
+	gen->header.load_state = load_state;
+	gen->header.soft_reset = soft_reset;
+	gen->header.free_context = free_genesis;
+	gen->header.get_open_bus_value = get_open_bus_value;
+	gen->header.request_exit = request_exit;
+	gen->header.inc_debug_mode = inc_debug_mode;
+	gen->header.gamepad_down = gamepad_down_pico;
+	gen->header.gamepad_up = gamepad_up_pico;
+	gen->header.mouse_down = mouse_down_pico;
+	gen->header.mouse_up = mouse_up_pico;
+	gen->header.mouse_motion_absolute = mouse_motion_absolute_pico;
+	gen->header.mouse_motion_relative = mouse_motion_relative_pico;
+	gen->header.keyboard_down = keyboard_down_pico;
+	gen->header.keyboard_up = keyboard_up_pico;
+	gen->header.config_updated = config_updated;
+	gen->header.serialize = serialize;
+	gen->header.deserialize = deserialize;
+	gen->header.start_vgm_log = start_vgm_log;
+	gen->header.stop_vgm_log = stop_vgm_log;
+	gen->header.toggle_debug_view = toggle_debug_view;
+	gen->header.type = SYSTEM_PICO;
+	gen->header.info = info;
+	set_region(gen, rom, force_region);
+	gen->vdp_unlocked = 1;
+	gen->pico_button_state = 0xFF;
+	
+	gen->vdp = init_vdp_context((gen->version_reg & 0x60) == 0x20, 40, VDP_GENESIS);
+	gen->vdp->system = &gen->header;
+	gen->frame_end = vdp_cycles_to_frame_end(gen->vdp);
+	char * config_cycles = tern_find_path(config, "clocks\0max_cycles\0", TVAL_PTR).ptrval;
+	gen->max_cycles = config_cycles ? atoi(config_cycles) : DEFAULT_SYNC_INTERVAL;
+	gen->int_latency_prev1 = MCLKS_PER_68K * 32;
+	gen->int_latency_prev2 = MCLKS_PER_68K * 16;
+	
+	render_set_video_standard((gen->version_reg & 0x60) == 0x20 ? VID_PAL : VID_NTSC);
+	
+	gen->psg = calloc(1, sizeof(psg_context));
+	psg_init(gen->psg, gen->master_clock, MCLKS_PER_PSG);
+	gen->work_ram = calloc(2, RAM_WORDS);
+	if (!strcmp("random", tern_find_path_default(config, "system\0ram_init\0", (tern_val){.ptrval = "zero"}, TVAL_PTR).ptrval))
+	{
+		srand(time(NULL));
+		for (int i = 0; i < RAM_WORDS; i++)
+		{
+			gen->work_ram[i] = rand();
+		}
+		for (int i = 0; i < VRAM_SIZE; i++)
+		{
+			gen->vdp->vdpmem[i] = rand();
+		}
+		for (int i = 0; i < SAT_CACHE_SIZE; i++)
+		{
+			gen->vdp->sat_cache[i] = rand();
+		}
+		for (int i = 0; i < CRAM_SIZE; i++)
+		{
+			write_cram_internal(gen->vdp, i, rand());
+		}
+		for (int i = 0; i < gen->vdp->vsram_size; i++)
+		{
+			gen->vdp->vsram[i] = rand();
+		}
+	}
+	gen->cart = rom;
+	gen->lock_on = lock_on;
+	gen->header.has_keyboard = 0; //TODO: Keyboard Pico emulation
+	gen->mapper_type = info.mapper_type;
+	gen->save_type = info.save_type;
+	if (gen->save_type != SAVE_NONE) {
+		gen->save_ram_mask = info.save_mask;
+		gen->save_size = info.save_size;
+		gen->save_storage = info.save_buffer;
+		gen->header.info.save_buffer = info.save_buffer = NULL;
+		gen->eeprom_map = info.eeprom_map;
+		gen->num_eeprom = info.num_eeprom;
+		if (gen->save_type == SAVE_I2C) {
+			eeprom_init(&gen->eeprom, gen->save_storage, gen->save_size);
+		} else if (gen->save_type == SAVE_NOR) {
+			memcpy(&gen->nor, info.nor, sizeof(gen->nor));
+			//nor_flash_init(&gen->nor, gen->save_storage, gen->save_size, info.save_page_size, info.save_product_id, info.save_bus);
+		}
+	} else {
+		gen->save_storage = NULL;
+	}
+	
+	gen->mapper_start_index = info.mapper_start_index;
+	//This must happen before we generate memory access functions in init_m68k_opts
+	for (int i = 0; i < info.map_chunks; i++)
+	{
+		if (info.map[i].start == 0xE00000) {
+			info.map[i].buffer = gen->work_ram;
+			break;
+		}
+	}
+	
+	memmap_chunk* map = info.map;
+	uint32_t map_chunks = info.map_chunks;
+	info.map = gen->header.info.map = NULL;
+	
+	m68k_options *opts = malloc(sizeof(m68k_options));
+	init_m68k_opts(opts, map, map_chunks, MCLKS_PER_68K, sync_components_pico, int_ack);
+	//TODO: Pico model selection
+	//if (!strcmp(tern_find_ptr_default(model, "tas", "broken"), "broken")) {
+		opts->gen.flags |= M68K_OPT_BROKEN_READ_MODIFY;
+	//}
+	gen->m68k = init_68k_context(opts, NULL);
+	gen->m68k->system = gen;
+	opts->address_log = (ym_opts & OPT_ADDRESS_LOG) ? fopen("address.log", "w") : NULL;
+	
+	//This must happen after the 68K context has been allocated
+	for (int i = 0; i < map_chunks; i++)
+	{
+		if (map[i].flags & MMAP_PTR_IDX) {
+			gen->m68k->mem_pointers[map[i].ptr_index] = map[i].buffer;
+		}
+	}
+
+	if (gen->mapper_type == MAPPER_SEGA) {
+		//initialize bank registers
+		for (int i = 1; i < sizeof(gen->bank_regs); i++)
+		{
+			gen->bank_regs[i] = i;
+		}
+	}
+	gen->reset_cycle = CYCLE_NEVER;
+
+	set_audio_config(gen);
+	bindings_set_mouse_mode(MOUSE_ABSOLUTE);
 	return gen;
 }

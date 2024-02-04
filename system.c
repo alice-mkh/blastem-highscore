@@ -14,6 +14,16 @@ uint8_t safe_cmp(char *str, long offset, uint8_t *buffer, long filesize)
 
 system_type detect_system_type(system_media *media)
 {
+	static char *pico_names[] = {
+		"SEGA PICO", "SEGATOYS PICO", "SEGA TOYS PICO", "SAMSUNG PICO",
+		"SEGA IAC", "IMA IKUNOUJYUKU", "IMA IKUNOJYUKU"
+	};
+	static const int num_pico = sizeof(pico_names)/sizeof(*pico_names);
+	for (int i = 0; i < num_pico; i++) {
+		if (safe_cmp(pico_names[i], 0x100, media->buffer, media->size)) {
+			return SYSTEM_PICO;
+		}
+	}
 	if (safe_cmp("SEGA", 0x100, media->buffer, media->size)) {
 		//TODO: support other bootable identifiers
 		if (safe_cmp("SEGADISCSYSTEM", 0, media->buffer, media->size)) {
@@ -105,6 +115,8 @@ system_header *alloc_config_system(system_type stype, system_media *media, uint3
 #endif
 	case SYSTEM_MEDIA_PLAYER:
 		return &(alloc_media_player(media, opts))->header;
+	case SYSTEM_PICO:
+		return &(alloc_config_pico(media->buffer, media->size, lock_on, lock_on_size, opts, force_region))->header;
 	default:
 		return NULL;
 	}
