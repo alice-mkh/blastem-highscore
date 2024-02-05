@@ -1393,10 +1393,10 @@ static uint8_t pico_io_read(uint32_t location, void *vcontext)
 	case 6:
 		return gen->pico_page;
 	case 8:
-		printf("uPD7759 data read @ %u\n", m68k->current_cycle);
+		//printf("uPD7759 data read @ %u\n", m68k->current_cycle);
 		return 0xFF;
 	case 9:
-		printf("uPD7759 contro/status read @ %u\n", m68k->current_cycle);
+		//printf("uPD7759 contro/status read @ %u\n", m68k->current_cycle);
 		return 0;
 	default:
 		printf("Unknown Pico IO read %X @ %u\n", location, m68k->current_cycle);
@@ -1993,6 +1993,41 @@ static void gamepad_up(system_header *system, uint8_t gamepad_num, uint8_t butto
 	}
 }
 
+static void pico_update_page(genesis_context *gen)
+{
+#ifndef IS_LIB
+	uint8_t page_num = 0;
+	uint8_t page = gen->pico_page;
+	while (page)
+	{
+		page_num++;
+		page >>= 1;
+	}
+	render_clear_window(gen->pico_story_window, 236, 205, 27);
+	int x, width;
+	if (page_num) {
+		x = 0;
+		width = 640;
+	} else {
+		render_fill_rect(gen->pico_story_window, 50, 29, 96, 0, 0, 320, 320);
+		x = 320;
+		width = 320;
+	}
+	if (gen->pico_story_pages[page_num] == 0xFF && page_num == 6 && gen->pico_story_pages[page_num - 1]) {
+		//repeat last page if storybook doesn't have a full 6 pages
+		//hack to deal with storybooks that skip page 5
+		page_num--;
+	}
+	if (gen->pico_story_pages[page_num] != 0xFF) {
+		render_draw_image(gen->pico_story_window, gen->pico_story_pages[page_num], x, 0, width, 320);
+	} else {
+		uint8_t grey = page * (255 / 5);
+		render_fill_rect(gen->pico_story_window, grey, grey, grey, x, 0, width, 320);
+	}
+	render_window_refresh(gen->pico_story_window);
+#endif
+}
+
 static void gamepad_down_pico(system_header *system, uint8_t gamepad_num, uint8_t button)
 {
 	genesis_context *gen = (genesis_context *)system;
@@ -2004,8 +2039,10 @@ static void gamepad_down_pico(system_header *system, uint8_t gamepad_num, uint8_
 		gen->pico_page <<= 1;
 		gen->pico_page |= 1;
 		gen->pico_page &= 0x3F;
+		pico_update_page(gen);
 	} else if (button == BUTTON_Z) {
 		gen->pico_page >>= 1;
+		pico_update_page(gen);
 	} else if (button < BUTTON_B) {
 		gen->pico_button_state &= ~(1 << (button - 1));
 	}
@@ -2066,10 +2103,17 @@ static void mouse_motion_relative(system_header *system, uint8_t mouse_num, int3
 static void mouse_motion_absolute_pico(system_header *system, uint8_t mouse_num, uint16_t x, uint16_t y)
 {
 	genesis_context *gen = (genesis_context *)system;
-	//TODO: scale properly
+	//FIXME: coordinate translation feels a little off for storybook area
 	//TODO: limit to mouse motion on emulated storyware/drawing area
-	gen->pico_pen_x = (x >> 1) + 0x3C;
-	gen->pico_pen_y = y + 0x1FC;
+	if (y < 24) {
+		y = 24;
+	}
+	gen->pico_pen_x = x * (0x17D - 0x3C) / 640 + 0x3C;
+	if (y < 320) {
+		gen->pico_pen_y = (y-24) * (0x3F4-0x2F8) / (320-24) + 0x2F8;
+	} else {
+		gen->pico_pen_y = (y - 320) * (0x2f8-0x1FC) / 320 + 0x1FC;
+	}
 }
 
 static void mouse_motion_relative_pico(system_header *system, uint8_t mouse_num, int32_t x, int32_t y)
@@ -2959,5 +3003,48 @@ genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, 
 
 	set_audio_config(gen);
 	bindings_set_mouse_mode(MOUSE_ABSOLUTE);
+	memset(gen->pico_story_pages, 0xFF, sizeof(gen->pico_story_pages));
+#ifndef IS_LIB
+	gen->pico_story_window = render_create_window("Pico Storybook & Pad", 640, 640, NULL);
+	const char *parts[] = {current_media()->dir, PATH_SEP, current_media()->name, ".manifest"};
+	char *manifest_path = alloc_concat_m(sizeof(parts)/sizeof(*parts), parts);
+	tern_node *manifest = parse_config_file(manifest_path);
+	if (!manifest) {
+		printf("Manifest not found at %s\n", manifest_path);
+	}
+	if (manifest) {
+		tern_node *pages = tern_find_node(manifest, "pages");
+		if (pages) {
+			char numkey[13];
+			for (int i = 0; i < 7; i++) {
+				sprintf(numkey, "%d", i);
+				char *page_path = tern_find_ptr(pages, numkey);
+				if (page_path) {
+					printf("page %d: %s\n", i, page_path);
+				} else {
+					continue;
+				}
+				char *img_path;
+				if (is_absolute_path(current_media()->dir)) {
+					const char *img_parts[] = {current_media()->dir, PATH_SEP, page_path};
+					img_path = alloc_concat_m(sizeof(img_parts)/sizeof(*img_parts), img_parts);
+				} else {
+					const char *img_parts[] = {path_current_dir(), PATH_SEP, current_media()->dir, PATH_SEP, page_path};
+					img_path = alloc_concat_m(sizeof(img_parts)/sizeof(*img_parts), img_parts);
+				}
+				gen->pico_story_pages[i] = render_static_image(gen->pico_story_window, img_path);
+				if (gen->pico_story_pages[i] == 0xFF) {
+					printf("Failed to load page %d from %s\n", i, img_path);
+				}
+				free(img_path);
+			}
+		} else {
+			printf("No pages key in %s\n", manifest_path);
+		}
+		tern_free(manifest);
+	}
+	free(manifest_path);
+	pico_update_page(gen);
+#endif
 	return gen;
 }

@@ -1528,6 +1528,93 @@ void render_destroy_window(uint8_t which)
 	extra_windows[win_idx] = NULL;
 }
 
+SDL_Texture **static_images;
+uint8_t num_static;
+uint8_t render_static_image(uint8_t window, char *path)
+{
+	uint32_t fsize;
+	uint8_t *buffer;
+	if (is_absolute_path(path)) {
+		FILE *f = fopen(path, "rb");
+		if (!f) {
+			return 0xFF;
+		}
+		fsize = file_size(f);
+		buffer = calloc(1, fsize);
+		if (fread(buffer, 1, fsize, f) != fsize) {
+			free(buffer);
+			fclose(f);
+			return 0xFF;
+		}
+		fclose(f);
+	} else {
+		buffer = (uint8_t *)read_bundled_file(path, &fsize);
+	}
+	if (!buffer) {
+		return 0xFF;
+	}
+	
+	uint32_t width, height;
+	uint32_t *pixels = load_png(buffer, fsize, &width, &height);
+	free(buffer);
+	if (!pixels) {
+		return 0xFF;
+	}
+	uint8_t img_index = 0;
+	if (!num_static) {
+		num_static = 8;
+		static_images = calloc(num_static, sizeof(SDL_Texture*));
+	}
+	for (; img_index < num_static; img_index++)
+	{
+		if (!static_images[img_index]) {
+			break;
+		}
+	}
+	if (img_index == num_static) {
+		num_static *= 2;
+		static_images = realloc(static_images, num_static * sizeof(SDL_Texture*));
+	}
+	static_images[img_index] = SDL_CreateTexture(extra_renderers[window - FRAMEBUFFER_USER_START], SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, width, height);
+	SDL_UpdateTexture(static_images[img_index], NULL, pixels, sizeof(uint32_t) * width);
+	free(pixels);
+	return img_index;
+}
+
+void render_draw_image(uint8_t window, uint8_t image, int x, int y, int width, int height)
+{
+	SDL_Rect dst = {
+		.x = x,
+		.y = y,
+		.w = width,
+		.h = height
+	};
+	SDL_RenderCopy(extra_renderers[window - FRAMEBUFFER_USER_START], static_images[image], NULL, &dst);
+}
+
+void render_clear_window(uint8_t window, uint8_t r, uint8_t g, uint8_t b)
+{
+	SDL_SetRenderDrawColor(extra_renderers[window - FRAMEBUFFER_USER_START], r, g, b, 255);
+	SDL_RenderClear(extra_renderers[window - FRAMEBUFFER_USER_START]);
+}
+
+void render_fill_rect(uint8_t window, uint8_t r, uint8_t g, uint8_t b, int x, int y, int width, int height)
+{
+	SDL_SetRenderDrawColor(extra_renderers[window - FRAMEBUFFER_USER_START], r, g, b, 255);
+	SDL_Rect dst = {
+		.x = x,
+		.y = y,
+		.w = width,
+		.h = height
+	};
+	SDL_RenderFillRect(extra_renderers[window - FRAMEBUFFER_USER_START], &dst);
+}
+
+void render_window_refresh(uint8_t window)
+{
+	SDL_RenderPresent(extra_renderers[window - FRAMEBUFFER_USER_START]);
+}
+
 uint32_t *locked_pixels;
 uint32_t locked_pitch;
 uint32_t *render_get_framebuffer(uint8_t which, int *pitch)

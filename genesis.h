@@ -81,6 +81,8 @@ struct genesis_context {
 	uint8_t         tmss;
 	uint8_t         vdp_unlocked;
 	uint8_t         enter_z80_debugger;
+	uint8_t         pico_story_window;
+	uint8_t         pico_story_pages[7];
 	eeprom_state    eeprom;
 	nor_state       nor;
 };

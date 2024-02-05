@@ -151,6 +151,11 @@ int render_ui_to_pixels_x(int ui);
 int render_ui_to_pixels_y(int ui);
 #ifndef IS_LIB
 uint8_t render_create_thread(render_thread *thread, const char *name, render_thread_fun fun, void *data);
+uint8_t render_static_image(uint8_t window, char *path);
+void render_draw_image(uint8_t window, uint8_t image, int x, int y, int width, int height);
+void render_clear_window(uint8_t window, uint8_t r, uint8_t g, uint8_t b);
+void render_fill_rect(uint8_t window, uint8_t r, uint8_t g, uint8_t b, int x, int y, int width, int height);
+void render_window_refresh(uint8_t window);
 #endif
 
 #endif //RENDER_H_
