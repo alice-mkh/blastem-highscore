@@ -389,6 +389,7 @@ void apply_updated_config(void)
 	}
 }
 
+static system_media cart, lock_on;
 static void on_drag_drop(char *filename)
 {
 	if (current_system) {
@@ -404,6 +405,7 @@ static void on_drag_drop(char *filename)
 				menu->external_game_load = 1;
 			}
 		}
+		cart.chain = NULL;
 	} else {
 		init_system_with_media(filename, SYSTEM_UNKNOWN);
 	}
@@ -414,7 +416,6 @@ static void on_drag_drop(char *filename)
 #endif
 }
 
-static system_media cart, lock_on;
 const system_media *current_media(void)
 {
 	return &cart;
