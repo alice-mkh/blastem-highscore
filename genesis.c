@@ -681,6 +681,102 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 	return context;
 }
 
+static void sync_sound_pico(genesis_context * gen, uint32_t target)
+{
+	while (target > gen->psg->cycles && target - gen->psg->cycles > MAX_SOUND_CYCLES)
+	{
+		uint32_t cur_target = gen->psg->cycles + MAX_SOUND_CYCLES;
+		psg_run(gen->psg, cur_target);
+		pico_pcm_run(gen->adpcm, cur_target);
+	}
+	psg_run(gen->psg, target);
+	pico_pcm_run(gen->adpcm, target);
+}
+
+static void adjust_int_cycle_pico(m68k_context *context, vdp_context *v_context)
+{
+	genesis_context *gen = context->system;
+	if (context->sync_cycle - context->current_cycle > gen->max_cycles) {
+		context->sync_cycle = context->current_cycle + gen->max_cycles;
+	}
+	context->int_cycle = CYCLE_NEVER;
+	uint8_t mask = context->status & 0x7;
+	if (mask < 6) {
+		uint32_t next_vint = vdp_next_vint(v_context);
+		if (next_vint != CYCLE_NEVER) {
+			context->int_cycle = next_vint;
+			context->int_num = 6;
+		}
+		if (mask < 5) {
+			uint32_t next_hint = vdp_next_hint(v_context);
+			if (next_hint != CYCLE_NEVER) {
+				next_hint = next_hint < context->current_cycle ? context->current_cycle : next_hint;
+				if (next_hint < context->int_cycle) {
+					context->int_cycle = next_hint;
+					context->int_num = 5;
+
+				}
+			}
+			if (mask < 3) {
+				uint32_t next_pcm_int = pico_pcm_next_int(gen->adpcm);
+				if (next_pcm_int != CYCLE_NEVER && next_pcm_int < context->int_cycle) {
+					context->int_cycle = next_pcm_int;
+					context->int_num = 3;
+				}
+				if (mask < 2 && (v_context->regs[REG_MODE_3] & BIT_EINT_EN) && gen->header.type == SYSTEM_GENESIS) {
+					uint32_t next_eint_port0 = io_next_interrupt(gen->io.ports, context->current_cycle);
+					uint32_t next_eint_port1 = io_next_interrupt(gen->io.ports + 1, context->current_cycle);
+					uint32_t next_eint_port2 = io_next_interrupt(gen->io.ports + 2, context->current_cycle);
+					uint32_t next_eint = next_eint_port0 < next_eint_port1
+						? (next_eint_port0 < next_eint_port2 ? next_eint_port0 : next_eint_port2)
+						: (next_eint_port1 < next_eint_port2 ? next_eint_port1 : next_eint_port2);
+					if (next_eint != CYCLE_NEVER) {
+						next_eint = next_eint < context->current_cycle ? context->current_cycle : next_eint;
+						if (next_eint < context->int_cycle) {
+							context->int_cycle = next_eint;
+							context->int_num = 2;
+						}
+					}
+				}
+			}
+		}
+	}
+	if (context->int_cycle > context->current_cycle && context->int_pending == INT_PENDING_SR_CHANGE) {
+		context->int_pending = INT_PENDING_NONE;
+	}
+	/*if (context->int_cycle != old_int_cycle) {
+		printf("int cycle changed to: %d, level: %d @ %d(%d), frame: %d, vcounter: %d, hslot: %d, mask: %d, hint_counter: %d\n", context->int_cycle, context->int_num, v_context->cycles, context->current_cycle, v_context->frame, v_context->vcounter, v_context->hslot, context->status & 0x7, v_context->hint_counter);
+		old_int_cycle = context->int_cycle;
+	}*/
+
+	if (context->status & M68K_STATUS_TRACE || context->trace_pending) {
+		context->target_cycle = context->current_cycle;
+		return;
+	}
+
+	context->target_cycle = context->int_cycle < context->sync_cycle ? context->int_cycle : context->sync_cycle;
+	if (context->should_return || gen->header.enter_debugger || context->wp_hit) {
+		context->target_cycle = context->current_cycle;
+	} else if (context->target_cycle < context->current_cycle) {
+		//Changes to SR can result in an interrupt cycle that's in the past
+		//This can cause issues with the implementation of STOP though
+		context->target_cycle = context->current_cycle;
+	}
+	if (context->target_cycle == context->int_cycle) {
+		//Currently delays from Z80 access and refresh are applied only when we sync
+		//this can cause extra latency when it comes to interrupts
+		//to prevent this code forces some extra synchronization in the period immediately before an interrupt
+		if ((context->target_cycle - context->current_cycle) > gen->int_latency_prev1) {
+			context->target_cycle = context->sync_cycle = context->int_cycle - gen->int_latency_prev1;
+		} else if ((context->target_cycle - context->current_cycle) > gen->int_latency_prev2) {
+			context->target_cycle = context->sync_cycle = context->int_cycle - gen->int_latency_prev2;
+		} else {
+			context->target_cycle = context->sync_cycle = context->current_cycle;
+		}
+
+	}
+}
+
 static m68k_context* sync_components_pico(m68k_context * context, uint32_t address)
 {
 	genesis_context * gen = context->system;
@@ -692,7 +788,7 @@ static m68k_context* sync_components_pico(m68k_context * context, uint32_t addre
 	}
 
 	uint32_t mclks = context->current_cycle;
-	psg_run(gen->psg, mclks);
+	sync_sound_pico(gen, mclks);
 	vdp_run_context(v_context, mclks);
 	if (mclks >= gen->reset_cycle) {
 		gen->reset_requested = 1;
@@ -737,6 +833,7 @@ static m68k_context* sync_components_pico(m68k_context * context, uint32_t addre
 				vgm_adjust_cycles(gen->psg->vgm, deduction);
 			}
 			gen->psg->cycles -= deduction;
+			gen->adpcm->cycle -= deduction;
 			if (gen->reset_cycle != CYCLE_NEVER) {
 				gen->reset_cycle -= deduction;
 			}
@@ -756,7 +853,7 @@ static m68k_context* sync_components_pico(m68k_context * context, uint32_t addre
 	if (!address && (gen->header.enter_debugger || gen->header.save_state)) {
 		context->sync_cycle = context->current_cycle + 1;
 	}
-	adjust_int_cycle(context, v_context);
+	adjust_int_cycle_pico(context, v_context);
 	if (gen->reset_cycle < context->target_cycle) {
 		context->target_cycle = gen->reset_cycle;
 	}
@@ -809,10 +906,12 @@ static m68k_context* sync_components_pico(m68k_context * context, uint32_t addre
 static m68k_context *int_ack(m68k_context *context)
 {
 	genesis_context * gen = context->system;
-	vdp_context * v_context = gen->vdp;
-	//printf("acknowledging %d @ %d:%d, vcounter: %d, hslot: %d\n", context->int_ack, context->current_cycle, v_context->cycles, v_context->vcounter, v_context->hslot);
-	vdp_run_context(v_context, context->current_cycle);
-	vdp_int_ack(v_context);
+	if (gen->header.type != SYSTEM_PICO || context->int_num > 4 || context->int_num < 3) {
+		vdp_context * v_context = gen->vdp;
+		//printf("acknowledging %d @ %d:%d, vcounter: %d, hslot: %d\n", context->int_ack, context->current_cycle, v_context->cycles, v_context->vcounter, v_context->hslot);
+		vdp_run_context(v_context, context->current_cycle);
+		vdp_int_ack(v_context);
+	}
 
 	//the Genesis responds to these exclusively with !VPA which means its a slow
 	//6800 operation. documentation says these can take between 10 and 19 cycles.
@@ -909,7 +1008,11 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 			} else {
 				context->sync_cycle = gen->frame_end = vdp_cycles_to_frame_end(v_context);
 				//printf("Set sync cycle to: %d @ %d, vcounter: %d, hslot: %d\n", context->sync_cycle, context->current_cycle, v_context->vcounter, v_context->hslot);
-				adjust_int_cycle(context, v_context);
+				if (gen->header.type == SYSTEM_PICO) {
+					adjust_int_cycle_pico(context, v_context);
+				} else {
+					adjust_int_cycle(context, v_context);
+				}
 			}
 		} else {
 			fatal_error("Illegal write to HV Counter port %X\n", vdp_port);
@@ -1239,7 +1342,24 @@ static void* pico_io_write(uint32_t location, void *vcontext, uint8_t value)
 
 static void* pico_io_write_w(uint32_t location, void *vcontext, uint16_t value)
 {
-	printf("Pico IO write.w %X - %X\n", location, value);
+	uint32_t port = location & 0xFE;
+	m68k_context *context = vcontext;
+	genesis_context *gen = context->system;
+	if (port == 0x10) {
+		sync_sound_pico(gen, context->current_cycle);
+		pico_pcm_data_write(gen->adpcm, value);
+		printf("PICO ADPCM Data: %04X\n", value);
+		if (context->int_num == 3) {
+			adjust_int_cycle_pico(context, gen->vdp);
+		}
+	} else if (port == 0x12) {
+		sync_sound_pico(gen, context->current_cycle);
+		printf("PICO ADPCM Control: %04X\n", value);
+		pico_pcm_ctrl_write(gen->adpcm, value);
+		adjust_int_cycle_pico(context, gen->vdp);
+	} else {
+		return pico_io_write(location, vcontext, value);
+	}
 	return vcontext;
 }
 
@@ -1376,6 +1496,7 @@ static uint8_t pico_io_read(uint32_t location, void *vcontext)
 {
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
+	uint16_t tmp;
 	switch(location >> 1 & 0x7F)
 	{
 	case 0:
@@ -1394,9 +1515,14 @@ static uint8_t pico_io_read(uint32_t location, void *vcontext)
 		return gen->pico_page;
 	case 8:
 		//printf("uPD7759 data read @ %u\n", m68k->current_cycle);
-		return 0xFF;
+		sync_sound_pico(gen, m68k->current_cycle);
+		tmp = pico_pcm_data_read(gen->adpcm);
+		return (location & 1) ? tmp >> 8 : tmp;
 	case 9:
 		//printf("uPD7759 contro/status read @ %u\n", m68k->current_cycle);
+		sync_sound_pico(gen, m68k->current_cycle);
+		tmp = pico_pcm_ctrl_read(gen->adpcm);
+		return (location & 1) ? tmp >> 8 : tmp;
 		return 0;
 	default:
 		printf("Unknown Pico IO read %X @ %u\n", location, m68k->current_cycle);
@@ -1408,6 +1534,14 @@ static uint16_t pico_io_read_w(uint32_t location, void *vcontext)
 {
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
+	uint32_t port = location & 0xFE;
+	if (port == 0x10) {
+		sync_sound_pico(gen, m68k->current_cycle);
+		return pico_pcm_data_read(gen->adpcm);
+	} else if (port == 0x12) {
+		sync_sound_pico(gen, m68k->current_cycle);
+		return pico_pcm_ctrl_read(gen->adpcm);
+	}
 	uint16_t value = pico_io_read(location, vcontext);
 	return value | (value << 8);
 }
@@ -1778,7 +1912,11 @@ static void start_genesis(system_header *system, char *statefile)
 			insert_breakpoint(gen->m68k, pc, gen->header.debugger_type == DEBUGGER_NATIVE ? debugger : gdb_debug_enter);
 #endif
 		}
-		adjust_int_cycle(gen->m68k, gen->vdp);
+		if (gen->header.type == SYSTEM_PICO) {
+			adjust_int_cycle_pico(gen->m68k, gen->vdp);
+		} else {
+			adjust_int_cycle(gen->m68k, gen->vdp);
+		}
 		start_68k_context(gen->m68k, pc);
 	} else {
 		if (gen->header.enter_debugger) {
@@ -1961,7 +2099,10 @@ static void free_genesis(system_header *system)
 		free(gen->z80);
 		free(gen->zram);
 	}
-	if (gen->header.type != SYSTEM_PICO) {
+	if (gen->header.type == SYSTEM_PICO) {
+		pico_pcm_free(gen->adpcm);
+		free(gen->adpcm);
+	} else {
 		ym_free(gen->ym);
 	}
 	psg_free(gen->psg);
@@ -2226,7 +2367,9 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 	} else if (debug_view == DEBUG_OSCILLOSCOPE) {
 		if (gen->psg->scope) {
 			oscilloscope *scope = gen->psg->scope;
-			if (gen->header.type != SYSTEM_PICO) {
+			if (gen->header.type == SYSTEM_PICO) {
+				gen->adpcm->scope = NULL;
+			} else {
 				gen->ym->scope = NULL;
 			}
 			gen->psg->scope = NULL;
@@ -2237,7 +2380,9 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 			scope_close(scope);
 		} else {
 			oscilloscope *scope = create_oscilloscope();
-			if (gen->header.type != SYSTEM_PICO) {
+			if (gen->header.type == SYSTEM_PICO) {
+				pico_pcm_enable_scope(gen->adpcm, scope, gen->normal_clock);
+			} else {
 				ym_enable_scope(gen->ym, scope, gen->normal_clock);
 			}
 			psg_enable_scope(gen->psg, scope, gen->normal_clock);
@@ -2913,6 +3058,10 @@ genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, 
 	
 	gen->psg = calloc(1, sizeof(psg_context));
 	psg_init(gen->psg, gen->master_clock, MCLKS_PER_PSG);
+	
+	gen->adpcm = calloc(1, sizeof(pico_pcm));
+	pico_pcm_init(gen->adpcm, gen->master_clock, 42);
+	
 	gen->work_ram = calloc(2, RAM_WORDS);
 	if (!strcmp("random", tern_find_path_default(config, "system\0ram_init\0", (tern_val){.ptrval = "zero"}, TVAL_PTR).ptrval))
 	{
