@@ -78,7 +78,7 @@ int16_t upd7755_calc_sample(uint8_t sample, uint8_t *state)
 	};
 	static const int state_delta[16] = {-1, -1, 0, 0, 1, 2, 2, 3, -1, -1, 0, 0, 1, 2, 2, 3};
 	int16_t ret = sample_delta[(*state << 4) + sample];
-	int diff = state_delta[*state];
+	int diff = state_delta[sample];
 	if (diff >= 0 || *state > 0) {
 		*state += diff;
 		if (*state > 15) {
@@ -97,10 +97,10 @@ void pico_pcm_run(pico_pcm *pcm, uint32_t cycle)
 		int16_t shift = pcm->ctrl & PCM_VOLUME;
 #ifndef IS_LIB
 		if (pcm->scope) {
-			scope_add_sample(pcm->scope, pcm->scope_channel, (pcm->output >> shift) * 128, 0);
+			scope_add_sample(pcm->scope, pcm->scope_channel, (pcm->output >> shift) * 32, 0);
 		}
 #endif
-		render_put_mono_sample(pcm->audio, (pcm->output >> shift) * 128);
+		render_put_mono_sample(pcm->audio, (pcm->output >> shift) * 32);
 		if (!(pcm->ctrl & PCM_ENABLED)) {
 			continue;
 		}
