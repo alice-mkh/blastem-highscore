@@ -101,9 +101,23 @@ void pico_pcm_run(pico_pcm *pcm, uint32_t cycle)
 		}
 #endif
 		render_put_mono_sample(pcm->audio, (pcm->output >> shift) * 32);
+		if (pcm->ctrl & PCM_RESET) {
+			//Anpanman Pico: Waku Waku Pan Koujou seems to expect the BUSY/RESET flag
+			//to be set for a while after reset
+			if (pcm->counter) {
+				pcm->counter--;
+				continue;
+			} else {
+				pcm->ctrl &= ~PCM_RESET;
+			}
+		}
+		/*
+		Unclear what this bit is actually supposed to do
+		But some games expect ADPCM to work with it cleared
+		Anpanman Pico: Waku Waku Pan Koujou sets the ctrl reg to $6040
 		if (!(pcm->ctrl & PCM_ENABLED)) {
 			continue;
-		}
+		}*/
 		if (pcm->counter) {
 			pcm->counter--;
 		} else if (pcm->samples) {
@@ -172,9 +186,9 @@ void pico_pcm_ctrl_write(pico_pcm *pcm, uint16_t value)
 {
 	if (value & PCM_RESET) {
 		pico_pcm_reset(pcm);
+		pcm->counter = 2;
 	}
-	pcm->ctrl &= 0x8000;
-	pcm->ctrl |= value & ~PCM_RESET;
+	pcm->ctrl = value;
 	//TODO: update low-pass filter
 }
 
