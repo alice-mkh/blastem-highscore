@@ -1517,12 +1517,12 @@ static uint8_t pico_io_read(uint32_t location, void *vcontext)
 		//printf("uPD7759 data read @ %u\n", m68k->current_cycle);
 		sync_sound_pico(gen, m68k->current_cycle);
 		tmp = pico_pcm_data_read(gen->adpcm);
-		return (location & 1) ? tmp >> 8 : tmp;
+		return (location & 1) ? tmp : tmp >> 8;
 	case 9:
 		//printf("uPD7759 contro/status read @ %u\n", m68k->current_cycle);
 		sync_sound_pico(gen, m68k->current_cycle);
 		tmp = pico_pcm_ctrl_read(gen->adpcm);
-		return (location & 1) ? tmp >> 8 : tmp;
+		return (location & 1) ? tmp : tmp >> 8;
 		return 0;
 	default:
 		printf("Unknown Pico IO read %X @ %u\n", location, m68k->current_cycle);
