@@ -157,11 +157,13 @@ void pico_pcm_run(pico_pcm *pcm, uint32_t cycle)
 			case 0x40:
 				pcm->rate = (cmd & 0x3F);
 				pcm->samples = 256;
+				pcm->nibble_store = 0;
 				break;
 			case 0x80:
 				pcm->rate = (cmd & 0x3F);
 				//FIXME: this probably does not happen instantly
 				pcm->samples = pcm_fifo_read(pcm) + 1;
+				pcm->nibble_store = 0;
 				break;
 			case 0xC0:
 				//FIXME: this probably does not happen instantly
@@ -170,6 +172,7 @@ void pico_pcm_run(pico_pcm *pcm, uint32_t cycle)
 				//      Is this correct behavior if it does work?
 				pcm->counter = pcm->rate = pcm_fifo_read(pcm) & 0x3F;
 				pcm->samples = (pcm_fifo_read(pcm) + 1) * ((cmd & 7) + 1);
+				pcm->nibble_store = 0;
 				break;
 			}
 		}
@@ -194,11 +197,17 @@ void pico_pcm_ctrl_write(pico_pcm *pcm, uint16_t value)
 
 void pico_pcm_data_write(pico_pcm *pcm, uint16_t value)
 {
+	if (pcm->fifo_read == pcm->fifo_write) {
+		puts("ADPCM fifo overflow");
+	}
 	if (pcm->fifo_read == sizeof(pcm->fifo)) {
 		pcm->fifo_read = pcm->fifo_write;
 	}
 	pcm->fifo[pcm->fifo_write++] = value >> 8;
 	pcm->fifo_write &= sizeof(pcm->fifo)-1;
+	if (pcm->fifo_read == pcm->fifo_write) {
+		puts("ADPCM fifo overflow");
+	}
 	pcm->fifo[pcm->fifo_write++] = value;
 	pcm->fifo_write &= sizeof(pcm->fifo)-1;
 }
