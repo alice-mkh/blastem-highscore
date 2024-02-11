@@ -10,6 +10,7 @@
 
 tern_node *parse_config_file(char *config_path);
 tern_node *parse_bundled_config(char *config_name);
+tern_node *parse_config(char * config_data);
 tern_node *load_overrideable_config(char *name, char *bundled_name, uint8_t *used_config_dir);
 tern_node *load_config();
 char *serialize_config(tern_node *config, uint32_t *size_out);

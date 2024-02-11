@@ -173,7 +173,7 @@ uint32_t load_media_zip(const char *filename, system_media *dst)
 					}
 					dst->name = basename_no_extension(filename);
 					dst->size = out_size;
-					zip_close(z);
+					dst->zip = z;
 					return out_size;
 				}
 			}
@@ -187,6 +187,9 @@ uint32_t load_media_zip(const char *filename, system_media *dst)
 uint32_t load_media(char * filename, system_media *dst, system_type *stype)
 {
 	uint8_t header[10];
+	if (dst->zip) {
+		zip_close(dst->zip);
+	}
 	dst->orig_path = filename;
 	char *ext = path_extension(filename);
 	if (ext && !strcasecmp(ext, "zip")) {

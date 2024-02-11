@@ -3155,44 +3155,67 @@ genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, 
 	memset(gen->pico_story_pages, 0xFF, sizeof(gen->pico_story_pages));
 #ifndef IS_LIB
 	gen->pico_story_window = render_create_window("Pico Storybook & Pad", 640, 640, NULL);
-	const char *parts[] = {current_media()->dir, PATH_SEP, current_media()->name, ".manifest"};
-	char *manifest_path = alloc_concat_m(sizeof(parts)/sizeof(*parts), parts);
-	tern_node *manifest = parse_config_file(manifest_path);
-	if (!manifest) {
-		printf("Manifest not found at %s\n", manifest_path);
+	char *manifest_name = alloc_concat(current_media()->name, ".manifest");
+	char *manifest_str = load_media_subfile(current_media(), manifest_name, NULL);
+	tern_node *manifest = NULL;
+	if (manifest_str) {
+		manifest = parse_config(manifest_str);
+		if (!manifest) {
+			printf("Failed to parse manifest %s\n", manifest_name);
+		}
+	} else {
+		printf("Manifest file %s not found\n", manifest_name);
 	}
-	if (manifest) {
-		tern_node *pages = tern_find_node(manifest, "pages");
+	
+	tern_node *pages = tern_find_node(manifest, "pages");
+	if (!pages && manifest) {
+		printf("No pages key in %s\n", manifest_name);
+	}
+	char numkey[18];
+	for (int i = 0; i < 7; i++) {
+		uint8_t *img_data;
+		uint32_t img_size;
 		if (pages) {
-			char numkey[13];
-			for (int i = 0; i < 7; i++) {
-				sprintf(numkey, "%d", i);
-				char *page_path = tern_find_ptr(pages, numkey);
-				if (page_path) {
-					printf("page %d: %s\n", i, page_path);
-				} else {
-					continue;
-				}
-				char *img_path;
-				if (is_absolute_path(current_media()->dir)) {
-					const char *img_parts[] = {current_media()->dir, PATH_SEP, page_path};
-					img_path = alloc_concat_m(sizeof(img_parts)/sizeof(*img_parts), img_parts);
-				} else {
-					const char *img_parts[] = {path_current_dir(), PATH_SEP, current_media()->dir, PATH_SEP, page_path};
-					img_path = alloc_concat_m(sizeof(img_parts)/sizeof(*img_parts), img_parts);
-				}
-				gen->pico_story_pages[i] = render_static_image(gen->pico_story_window, img_path);
-				if (gen->pico_story_pages[i] == 0xFF) {
-					printf("Failed to load page %d from %s\n", i, img_path);
-				}
-				free(img_path);
+			sprintf(numkey, "%d", i);
+			char *page_path = tern_find_ptr(pages, numkey);
+			if (page_path) {
+				printf("page %d: %s\n", i, page_path);
+			} else {
+				continue;
+			}
+			img_data = load_media_subfile(current_media(), page_path, &img_size);
+			if (!img_data) {
+				printf("Failed to load image file for page %d from %s\n", i, page_path);
+				continue;
 			}
 		} else {
-			printf("No pages key in %s\n", manifest_path);
+			sprintf(numkey, "_%d.png", i);
+			char *img_path = alloc_concat(current_media()->name, numkey);
+			img_data = load_media_subfile(current_media(), img_path, &img_size);
+			if (!img_data) {
+				sprintf(numkey, "_%d.PNG", i);
+				char *img_path_loud = alloc_concat(current_media()->name, numkey);
+				img_data = load_media_subfile(current_media(), img_path_loud, &img_size);
+				if (!img_data) {
+					printf("Failed to load image file for page %d from %s or %s\n", i, img_path, img_path_loud);
+					free(img_path);
+					free(img_path_loud);
+					continue;
+				}
+				free(img_path_loud);
+			}
+			free(img_path);
 		}
-		tern_free(manifest);
+		
+		gen->pico_story_pages[i] = render_static_image(gen->pico_story_window, img_data, img_size);
+		if (gen->pico_story_pages[i] == 0xFF) {
+			printf("Failed to decode image for page %d\n", i);
+		}
+		free(img_data);
 	}
-	free(manifest_path);
+	
+	free(manifest_name);
+	tern_free(manifest);
 	pico_update_page(gen);
 #endif
 	return gen;

@@ -1530,33 +1530,11 @@ void render_destroy_window(uint8_t which)
 
 SDL_Texture **static_images;
 uint8_t num_static;
-uint8_t render_static_image(uint8_t window, char *path)
+uint8_t render_static_image(uint8_t window, uint8_t *buffer, uint32_t size)
 {
-	uint32_t fsize;
-	uint8_t *buffer;
-	if (is_absolute_path(path)) {
-		FILE *f = fopen(path, "rb");
-		if (!f) {
-			return 0xFF;
-		}
-		fsize = file_size(f);
-		buffer = calloc(1, fsize);
-		if (fread(buffer, 1, fsize, f) != fsize) {
-			free(buffer);
-			fclose(f);
-			return 0xFF;
-		}
-		fclose(f);
-	} else {
-		buffer = (uint8_t *)read_bundled_file(path, &fsize);
-	}
-	if (!buffer) {
-		return 0xFF;
-	}
 	
 	uint32_t width, height;
-	uint32_t *pixels = load_png(buffer, fsize, &width, &height);
-	free(buffer);
+	uint32_t *pixels = load_png(buffer, size, &width, &height);
 	if (!pixels) {
 		return 0xFF;
 	}

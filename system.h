@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include "flac.h"
+#include "zip.h"
 
 typedef struct system_header system_header;
 typedef struct system_media system_media;
@@ -138,6 +139,7 @@ struct system_media {
 	system_media *chain;
 	track_info   *tracks;
 	uint8_t      *tmp_buffer;
+	zip_file     *zip;
 	seek_fun     seek;
 	read_fun     read;
 	read_fun     read_subcodes;
@@ -157,5 +159,6 @@ system_type detect_system_type(system_media *media);
 system_header *alloc_config_system(system_type stype, system_media *media, uint32_t opts, uint8_t force_region);
 system_header *alloc_config_player(system_type stype, event_reader *reader);
 void system_request_exit(system_header *system, uint8_t force_release);
+void* load_media_subfile(const system_media *media, char *path, uint32_t *sizeout);
 
 #endif //SYSTEM_H_

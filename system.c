@@ -5,6 +5,8 @@
 #include "sms.h"
 #include "mediaplayer.h"
 #include "coleco.h"
+#include "paths.h"
+#include "util.h"
 
 uint8_t safe_cmp(char *str, long offset, uint8_t *buffer, long filesize)
 {
@@ -136,4 +138,47 @@ void system_request_exit(system_header *system, uint8_t force_release)
 {
 	system->force_release = force_release;
 	system->request_exit(system);
+}
+
+void* load_media_subfile(const system_media *media, char *path, uint32_t *sizeout)
+{
+	char *to_free = NULL;
+	void *buffer = NULL;
+	uint32_t size = 0;
+	if (media->zip) {
+		uint32_t i;
+		for (i = 0; i < media->zip->num_entries; i++)
+		{
+			if (!strcasecmp(media->zip->entries[i].name, path)) {
+				break;
+			}
+		}
+		if (i < media->zip->num_entries) {
+			size_t zsize = media->zip->entries[i].size + 1;
+			buffer = zip_read(media->zip, i, &zsize);
+			size = zsize;
+			if (buffer) {
+				((uint8_t *)buffer)[size] = 0;
+			}
+			goto end;
+		}
+	}
+	if (!is_absolute_path(path)) {
+		to_free = path = path_append(media->dir, path);
+	}
+	FILE *f = fopen(path, "rb");
+	if (!f) {
+		goto end;
+	}
+	size = file_size(f);
+	buffer = calloc(1, size + 1);
+	size = fread(buffer, 1, size, f);
+	fclose(f);
+	
+end:
+	if (sizeout) {
+		*sizeout = size;
+	}
+	free(to_free);
+	return buffer;
 }
