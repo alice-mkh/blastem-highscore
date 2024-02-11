@@ -71,7 +71,7 @@ void *exit_write(uint32_t address, void *context, uint8_t value)
 #ifdef NEW_CORE
 	total_cycles += z80->cycles;
 #else
-	total_cycles += context->current_cycle;
+	total_cycles += z80->current_cycle;
 #endif
 	printf("Effective clock speed: %f MHz\n", ((double)total_cycles) / (1000000.0 * duration));
 	exit(0);
@@ -79,13 +79,13 @@ void *exit_write(uint32_t address, void *context, uint8_t value)
 }
 
 const memmap_chunk z80_map[] = {
-	{ 0x0000, 0x10000,  0xFFFF, 0, 0, MMAP_READ | MMAP_WRITE | MMAP_CODE, ram, NULL, NULL, NULL, NULL},
+	{ 0x0000, 0x10000,  0xFFFF, .flags = MMAP_READ | MMAP_WRITE | MMAP_CODE, .buffer = ram},
 };
 
 memmap_chunk io_map[] = {
-	{ 0x0, 0x1, 0xFFFF, 0, 0, 0, NULL, NULL, NULL, console_read, console_write},
-	{ 0x1, 0x2, 0xFFFF, 0, 0, 0, NULL, NULL, NULL, console_status_read, console_flush_write},
-	{ 0x2, 0x3, 0xFFFF, 0, 0, 0, NULL, NULL, NULL, NULL, exit_write},
+	{ 0x0, 0x1, 0xFFFF, .read_8 = console_read, .write_8 = console_write},
+	{ 0x1, 0x2, 0xFFFF, .read_8 = console_status_read, .write_8 = console_flush_write},
+	{ 0x2, 0x3, 0xFFFF, .write_8 = exit_write},
 };
 
 int main(int argc, char **argv)
