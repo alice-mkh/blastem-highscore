@@ -2,6 +2,7 @@
 #include "backend.h"
 
 #define PCM_RESET   0x8000
+#define PCM_BUSY    PCM_RESET
 #define PCM_INT_EN  0x4000
 #define PCM_ENABLED 0x0800
 #define PCM_FILTER  0x00C0
@@ -17,7 +18,7 @@ void pico_pcm_reset(pico_pcm *pcm)
 	pcm->counter = 0;
 	pcm->samples = 0;
 	pcm->rate = 0;
-	pcm->ctrl &= 0x7FFF;
+	pcm->ctrl |= PCM_BUSY;
 }
 
 void pico_pcm_init(pico_pcm *pcm, uint32_t master_clock, uint32_t divider)
@@ -101,16 +102,6 @@ void pico_pcm_run(pico_pcm *pcm, uint32_t cycle)
 		}
 #endif
 		render_put_mono_sample(pcm->audio, (pcm->output >> shift) * 32);
-		if (pcm->ctrl & PCM_RESET) {
-			//Anpanman Pico: Waku Waku Pan Koujou seems to expect the BUSY/RESET flag
-			//to be set for a while after reset
-			if (pcm->counter) {
-				pcm->counter--;
-				continue;
-			} else {
-				pcm->ctrl &= ~PCM_RESET;
-			}
-		}
 		/*
 		Unclear what this bit is actually supposed to do
 		But some games expect ADPCM to work with it cleared
@@ -143,9 +134,9 @@ void pico_pcm_run(pico_pcm *pcm, uint32_t cycle)
 		} else {
 			uint8_t cmd = pcm_fifo_read(pcm);
 			if (cmd) {
-				pcm->ctrl |= 0x8000;
+				pcm->ctrl &= ~PCM_BUSY;
 			} else {
-				pcm->ctrl &= 0x7FFF;
+				pcm->ctrl |= PCM_BUSY;
 			}
 			switch (cmd & 0xC0)
 			{
@@ -189,9 +180,9 @@ void pico_pcm_ctrl_write(pico_pcm *pcm, uint16_t value)
 {
 	if (value & PCM_RESET) {
 		pico_pcm_reset(pcm);
-		pcm->counter = 2;
 	}
-	pcm->ctrl = value;
+	pcm->ctrl &= PCM_BUSY;
+	pcm->ctrl |= value & ~(PCM_BUSY);
 	//TODO: update low-pass filter
 }
 
