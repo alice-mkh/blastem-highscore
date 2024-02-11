@@ -1684,3 +1684,8 @@ b620c2bebd5bab39bc9258a925169b4c93614599 {
 		}
 	}
 }
+MK-49037-18 {
+	name Der Koenig der Loewen - Abenteuer
+	#German version of this game has 8G in the region field
+	regions E
+}

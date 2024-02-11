@@ -3042,7 +3042,7 @@ genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, 
 	gen->header.toggle_debug_view = toggle_debug_view;
 	gen->header.type = SYSTEM_PICO;
 	gen->header.info = info;
-	set_region(gen, rom, force_region);
+	set_region(gen, &info, force_region);
 	gen->vdp_unlocked = 1;
 	gen->pico_button_state = 0xFF;
 	
