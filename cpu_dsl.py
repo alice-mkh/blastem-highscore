@@ -10,6 +10,15 @@ assignmentOps = {
 	'|=': 'or',
 	'^=': 'xor'
 }
+binaryOps = {
+	'+': 'add',
+	'-': 'sub',
+	'<<': 'lsl',
+	'>>': 'lsr',
+	'&': 'and',
+	'|': 'or',
+	'^': 'xor'
+}
 class Block:
 	def addOp(self, op):
 		pass
@@ -30,7 +39,12 @@ class Block:
 				dst = parts[0]
 				op = parts[1]
 				parts = [assignmentOps[op]] + parts[2:]
-				if op != '=':
+				if op == '=':
+					if len(parts) > 2 and parts[2] in binaryOps:
+						op = parts[2]
+						parts[0] = binaryOps[op]
+						del parts[2]
+				else:
 					if op == '<<=' or op == '>>=':
 						parts.insert(1, dst)
 					else:
