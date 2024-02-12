@@ -78,10 +78,10 @@ flags
 	
 z80_op_fetch
 	cycles 1
-	add 1 r r
-	mov pc scratch1
+	r += 1
+	scratch1 = pc
 	ocall read_8
-	add 1 pc pc
+	pc += 1
 	
 z80_run_op
 	#printf "Z80: %X @ %d\n" pc cycles
@@ -93,41 +93,41 @@ z80_interrupt
 	cmp int_cycle cycles
 	if >=U
 	
-	mov 0 iff1
-	mov 0 iff2
-	cycles 6
-	update_sync
-	
-	switch imode
-	case 0
-	dispatch int_value
-	
-	case 1
-	dispatch 0xFF
-	
-	case 2
-	lsl i 8 pc
-	or int_value pc pc
-	#CD is call
-	dispatch 0xCD
-	end
-	
+		iff1 = 0
+		iff2 = 0
+		cycles 6
+		update_sync
+		
+		switch imode
+		case 0
+			dispatch int_value
+		
+		case 1
+			dispatch 0xFF
+		
+		case 2
+			lsl i 8 pc
+			pc |= int_value
+			#CD is call
+			dispatch 0xCD
+		end
+		
 	else
 	
-	cmp nmi_cycle cycles
-	if >=U
-	
-	mov 0xFFFFFFFF nmi_cycle
-	mov 0 iff1
-	local pch 8
-	lsr pc 8 pch
-	meta high pch
-	meta low pc
-	z80_push
-	mov 0x66 pc
-	update_sync
-	
-	end
+		cmp nmi_cycle cycles
+		if >=U
+		
+		nmi_cycle = 0xFFFFFFFF
+		iff1 = 0
+		local pch 8
+		lsr pc 8 pch
+		meta high pch
+		meta low pc
+		z80_push
+		pc = 0x66
+		update_sync
+		
+		end
 	end
 	
 	
@@ -150,17 +150,17 @@ z80_interrupt
 dd 11001011 ddcb_prefix
 	z80_calc_index ix
 	cycles 2
-	mov pc scratch1
+	scratch1 = pc
 	ocall read_8
-	add 1 pc pc
+	pc += 1
 	dispatch scratch1 ddcb
 	
 fd 11001011 fdcb_prefix
 	z80_calc_index iy
 	cycles 2
-	mov pc scratch1
+	scratch1 = pc
 	ocall read_8
-	add 1 pc pc
+	pc += 1
 	dispatch scratch1 fdcb
 	
 z80_check_cond
@@ -168,92 +168,91 @@ z80_check_cond
 	local invert 8
 	switch cond
 	case 0
-	meta istrue invert
-	lnot zflag invert
+		meta istrue invert
+		lnot zflag invert
 	
 	case 1
-	meta istrue zflag
+		meta istrue zflag
 	
 	case 2
-	meta istrue invert
-	not chflags invert
-	and 0x80 invert invert
+		meta istrue invert
+		not chflags invert
+		invert &= 0x80
 	
 	case 3
-	meta istrue invert
-	and 0x80 chflags invert
+		meta istrue invert
+		and 0x80 chflags invert
 	
 	case 4
-	meta istrue invert
-	lnot pvflag invert
+		meta istrue invert
+		lnot pvflag invert
 	
 	case 5
-	meta istrue pvflag
+		meta istrue pvflag
 	
 	case 6
-	meta istrue invert
-	not last_flag_result invert
-	and 0x80 invert invert
+		meta istrue invert
+		not last_flag_result invert
+		invert &= 0x80
 	
 	case 7
-	meta istrue invert
-	and 0x80 last_flag_result invert
-	
+		meta istrue invert
+		and 0x80 last_flag_result invert	
 	end
 	
 z80_fetch_hl
 	lsl h 8 scratch1
-	or l scratch1 scratch1
+	scratch1 |= l
 	ocall read_8
 	
 z80_store_hl
 	lsl h 8 scratch2
-	or l scratch2 scratch2
+	scratch2 |= l
 	ocall write_8
 
 z80_fetch_immed
-	mov pc scratch1
+	scratch1 = pc
 	ocall read_8
-	add 1 pc pc
+	pc += 1
 	
 z80_fetch_immed16
-	mov pc scratch1
+	scratch1 = pc
 	ocall read_8
-	mov scratch1 wz
-	add 1 pc pc
-	mov pc scratch1
+	wz = scratch1
+	pc += 1
+	scratch1 = pc
 	ocall read_8
-	add 1 pc pc
-	lsl scratch1 8 scratch1
-	or scratch1 wz wz
+	pc += 1
+	scratch1 <<= 8
+	wz |= scratch1
 
 z80_fetch_immed_reg16
-	mov pc scratch1
+	scratch1 = pc
 	ocall read_8
-	mov scratch1 low
-	add 1 pc pc
-	mov pc scratch1
+	low = scratch1
+	pc += 1
+	scratch1 = pc
 	ocall read_8
-	mov scratch1 high
-	add 1 pc pc
+	high = scratch1
+	pc += 1
 	
 z80_fetch_immed_to_reg16
-	mov pc scratch1
+	scratch1 = pc
 	ocall read_8
-	mov scratch1 reg
-	add 1 pc pc
-	mov pc scratch1
+	reg = scratch1
+	pc += 1
+	scratch1 = pc
 	ocall read_8
-	add 1 pc pc
-	lsl scratch1 8 scratch1
-	or scratch1 reg reg
+	pc += 1
+	scratch1 <<= 8
+	reg |= scratch1
 
 01RRR110 ld_from_hl
 	z80_fetch_hl
-	mov scratch1 main.R
+	main.R = scratch1
 
 01DDDSSS ld_from_reg
-	mov main.S main.D
+	main.D = main.S
 	
 dd 01DDD100 ld_from_ixh
 	invalid D 6
@@ -262,32 +261,32 @@ dd 01DDD100 ld_from_ixh
 dd 01100SSS ld_to_ixh
 	invalid S 6
 	local tmp 16
-	and 0xFF ix ix
+	ix &= 0xFF
 	lsl main.S 8 tmp
-	or tmp ix ix
+	ix |= tmp
 	
 dd 0110D10S ld_ixb_to_ixb
 
 dd 01DDD101 ld_from_ixl
 	invalid D 6
-	mov ix main.D
+	main.D = ix
 	
 dd 01101SSS ld_to_ixl
 	invalid S 6
-	and 0xFF00 ix ix
-	or main.S ix ix
+	ix &= 0xFF00
+	ix |= main.S
 	
 dd 01100101 ld_ixl_to_ixh
 	local tmp 16
 	lsl ix 8 tmp
-	and 0xFF ix ix
-	or tmp ix ix
+	ix &= 0xFF
+	ix |= tmp
 	
 dd 01101100 ld_ixh_to_ixl
 	local tmp 16
 	lsr ix 8 tmp
-	and 0xFF00 ix ix
-	or tmp ix ix
+	ix &= 0xFF00
+	ix |= tmp
 	
 fd 01DDD100 ld_from_iyh
 	invalid D 6
@@ -296,100 +295,100 @@ fd 01DDD100 ld_from_iyh
 fd 01100SSS ld_to_iyh
 	invalid S 6
 	local tmp 16
-	and 0xFF iy iy
+	iy &= 0xFF
 	lsl main.S 8 tmp
-	or tmp iy iy
+	iy |= tmp
 	
 fd 0110D10S ld_iyb_to_iyb
 
 fd 01DDD101 ld_from_iyl
 	invalid D 6
-	mov iy main.D
+	main.D = iy
 	
 fd 01101SSS ld_to_iyl
 	invalid S 6
-	and 0xFF00 iy iy
-	or main.S iy iy
+	iy &= 0xFF00
+	iy |= main.S
 	
 fd 01100101 ld_iyl_to_iyh
 	local tmp 16
 	lsl iy 8 tmp
-	and 0xFF iy iy
-	or tmp iy iy
+	iy &= 0xFF
+	iy |= tmp
 	
 fd 01101100 ld_iyh_to_iyl
 	local tmp 16
 	lsr iy 8 tmp
-	and 0xFF00 iy iy
-	or tmp iy iy
+	iy &= 0xFF00
+	iy |= tmp
 	
 z80_calc_index
 	arg index 16
-	mov index wz
+	wz = index
 	z80_fetch_immed
 	sext 16 scratch1 scratch1
-	add scratch1 wz wz
+	wz += scratch1
 
 z80_fetch_index
 	arg index 16
 	z80_calc_index index
-	mov wz scratch1
+	scratch1 = wz
 	cycles 5
 	ocall read_8
 	
 z80_store_index
-	mov wz scratch2
+	scratch2 = wz
 	ocall write_8
 	
 dd 01RRR110 ld_from_ix
 	z80_fetch_index ix
-	mov scratch1 main.R
+	main.R = scratch1
 
 fd 01RRR110 ld_from_iy
 	z80_fetch_index iy
-	mov scratch1 main.R
+	main.R = scratch1
 
 00RRR110 ld_immed
 	z80_fetch_immed
-	mov scratch1 main.R
+	main.R = scratch1
 	
 dd 00100110 ld_immed_ixh
 	z80_fetch_immed
-	lsl scratch1 8 scratch1
-	and 0xFF ix ix
-	or scratch1 ix ix
+	scratch1 <<= 8
+	ix &= 0xFF
+	ix |= scratch1
 	
 dd 00101110 ld_immed_ixl
 	z80_fetch_immed
-	and 0xFF00 ix ix
-	or scratch1 ix ix
+	ix &= 0xFF00
+	ix |= scratch1
 	
 fd 00100110 ld_immed_iyh
 	z80_fetch_immed
-	lsl scratch1 8 scratch1
-	and 0xFF iy iy
-	or scratch1 iy iy
+	scratch1 <<= 8
+	iy &= 0xFF
+	iy |= scratch1
 	
 fd 00101110 ld_immed_iyl
 	z80_fetch_immed
-	and 0xFF00 iy iy
-	or scratch1 iy iy
+	iy &= 0xFF00
+	iy |= scratch1
 
 01110RRR ld_to_hl
-	mov main.R scratch1
+	scratch1 = main.R
 	z80_store_hl
 
 dd 01110RRR ld_to_ix
 	z80_calc_index ix
-	mov wz scratch2
-	mov main.R scratch1
+	scratch2 = wz
+	scratch1 = main.R
 	cycles 5
 	ocall write_8
 
 fd 01110RRR ld_to_iy
 	z80_calc_index iy
-	mov wz scratch2
-	mov main.R scratch1
+	scratch2 = wz
+	scratch1 = main.R
 	cycles 5
 	ocall write_8
 
@@ -401,91 +400,91 @@ dd 00110110 ld_to_ixd_immed
 	z80_calc_index ix
 	z80_fetch_immed
 	cycles 2
-	mov wz scratch2
+	scratch2 = wz
 	ocall write_8
 	
 fd 00110110 ld_to_iyd_immed
 	z80_calc_index iy
 	z80_fetch_immed
 	cycles 2
-	mov wz scratch2
+	scratch2 = wz
 	ocall write_8
 
 00001010 ld_a_from_bc
 	lsl b 8 wz
-	or c wz wz
-	mov wz scratch1
-	add 1 wz wz
+	wz |= c
+	scratch1 = wz
+	wz += 1
 	ocall read_8
-	mov scratch1 a
+	a = scratch1
 
 00011010 ld_a_from_de
 	lsl d 8 wz
-	or e wz wz
-	mov wz scratch1
-	add 1 wz wz
+	wz |= e
+	scratch1 = wz
+	wz += 1
 	ocall read_8
-	mov scratch1 a
+	a = scratch1
 
 00111010 ld_a_from_immed
 	z80_fetch_immed16
-	mov wz scratch1
-	add 1 wz wz
+	scratch1 = wz
+	wz += 1
 	ocall read_8
-	mov scratch1 a
+	a = scratch1
 	
 00000010 ld_a_to_bc
 	local tmp 8
 	lsl b 8 scratch2
-	or c scratch2 scratch2
-	mov a scratch1
+	scratch2 |= c
+	scratch1 = a
 	add c 1 tmp
 	lsl a 8 wz
-	or tmp wz wz
+	wz |= tmp
 	ocall write_8
 	
 00010010 ld_a_to_de
 	local tmp 8
 	lsl d 8 scratch2
-	or e scratch2 scratch2
-	mov a scratch1
+	scratch2 |= e
+	scratch1 = a
 	add e 1 tmp
 	lsl a 8 wz
-	or tmp wz wz
+	wz |= tmp
 	ocall write_8
 
 00110010 ld_a_to_immed
 	local tmp 16
 	z80_fetch_immed16
-	mov wz scratch2
-	mov a scratch1
-	add 1 wz wz
+	scratch2 = wz
+	scratch1 = a
+	wz += 1
 	ocall write_8
-	and 0xFF wz wz
+	wz &= 0xFF
 	lsl a 8 tmp
-	or tmp wz wz
+	wz |= tmp
 
 ed 01000111 ld_i_a
-	mov a i
+	i = a
 	cycles 1
 
 ed 01001111 ld_r_a
-	mov a r
+	r = a
 	and 0x80 a rhigh
 	cycles 1
 
 ed 01011111 ld_a_r
 	cycles 1
 	and 0x7F r a
-	or rhigh a a
+	a |= rhigh
 	update_flags SZYH0XN0
-	mov iff2 pvflag
+	pvflag = iff2
 	
 ed 01010111 ld_a_i
 	cycles 1
-	mov i a
+	a = i
 	update_flags SZYH0XN0
-	mov iff2 pvflag
+	pvflag = iff2
 
 00000001 ld_bc_immed
 	meta high b
@@ -516,14 +515,14 @@ fd 00100001 ld_iy_immed
 	
 z80_fetch16_from_immed
 	z80_fetch_immed16
-	mov wz scratch1
+	scratch1 = wz
 	ocall read_8
-	mov scratch1 low
-	add 1 wz wz
-	mov wz scratch1
+	low = scratch1
+	wz += 1
+	scratch1 = wz
 	ocall read_8
-	mov scratch1 high
-	add 1 wz wz
+	high = scratch1
+	wz += 1
 
 00101010 ld_hl_from_immed
 	meta low l
@@ -547,15 +546,15 @@ ed 01101011 ld_hl_from_immed_slow
 	
 z80_fetch_reg16_from_immed
 	z80_fetch_immed16
-	mov wz scratch1
+	scratch1 = wz
 	ocall read_8
-	mov scratch1 reg
-	add 1 wz wz
-	mov wz scratch1
+	reg = scratch1
+	wz += 1
+	scratch1 = wz
 	ocall read_8
-	lsl scratch1 8 scratch1
-	or scratch1 reg reg
-	add 1 wz wz
+	scratch1 <<= 8
+	reg |= scratch1
+	wz += 1
 
 ed 01111011 ld_sp_from_immed
 	meta reg sp
@@ -571,47 +570,47 @@ fd 00101010 ld_iy_from_immed
 
 00100010 ld_hl_to_immed
 	z80_fetch_immed16
-	mov wz scratch2
-	mov l scratch1
+	scratch2 = wz
+	scratch1 = l
 	ocall write_8
-	add 1 wz wz
-	mov wz scratch2
-	mov h scratch1
+	wz += 1
+	scratch2 = wz
+	scratch1 = h
 	ocall write_8
-	add 1 wz wz
+	wz += 1
 	
 dd 00100010 ld_ix_to_immed
 	z80_fetch_immed16
-	mov wz scratch2
-	mov ix scratch1
+	scratch2 = wz
+	scratch1 = ix
 	ocall write_8
-	add 1 wz wz
-	mov wz scratch2
+	wz += 1
+	scratch2 = wz
 	lsr ix 8 scratch1
 	ocall write_8
-	add 1 wz wz
+	wz += 1
 	
 fd 00100010 ld_iy_to_immed
 	z80_fetch_immed16
-	mov wz scratch2
-	mov iy scratch1
+	scratch2 = wz
+	scratch1 = iy
 	ocall write_8
-	add 1 wz wz
-	mov wz scratch2
+	wz += 1
+	scratch2 = wz
 	lsr iy 8 scratch1
 	ocall write_8
-	add 1 wz wz
+	wz += 1
 	
 z80_regpair_to_immed
 	z80_fetch_immed16
-	mov wz scratch2
-	mov low scratch1
+	scratch2 = wz
+	scratch1 = low
 	ocall write_8
-	add 1 wz wz
-	mov high scratch1
-	mov wz scratch2
+	wz += 1
+	scratch1 = high
+	scratch2 = wz
 	ocall write_8
-	add 1 wz wz
+	wz += 1
 	
 ed 01000011 ld_bc_to_immed
 	meta low c
@@ -638,25 +637,25 @@ ed 01110011 ld_sp_to_immed
 11111001 ld_sp_hl
 	cycles 2
 	lsl h 8 sp
-	or l sp sp
+	sp |= l
 	
 dd 11111001 ld_sp_ix
 	cycles 2
-	mov ix sp
+	sp = ix
 
 fd 11111001 ld_sp_iy
 	cycles 2
-	mov iy sp
+	sp = iy
 
 z80_push
 	cycles 1
-	sub 1 sp sp
-	mov sp scratch2
-	mov high scratch1
+	sp -= 1
+	scratch2 = sp
+	scratch1 = high
 	ocall write_8
-	sub 1 sp sp
-	mov sp scratch2
-	mov low scratch1
+	sp -= 1
+	scratch2 = sp
+	scratch1 = low
 	ocall write_8
 
 11000101 push_bc
@@ -696,12 +695,12 @@ fd 11100101 push_iy
 z80_pop
 	mov sp scratch1
 	ocall read_8
-	add 1 sp sp
-	mov scratch1 low
-	mov sp scratch1
+	sp += 1
+	low = scratch1
+	scratch1 = sp
 	ocall read_8
-	add 1 sp sp
-	mov scratch1 high
+	sp += 1
+	high = scratch1
 
 11000001 pop_bc
 	meta high b
@@ -736,8 +735,8 @@ fd 11100001 pop_iy
 	meta high iyh
 	meta low iy
 	z80_pop
-	lsl iyh 8 iyh
-	or iyh iy iy
+	iyh <<= 8
+	iy |= iyh
 
 11101011 ex_de_hl
 	xchg e l
@@ -756,11 +755,11 @@ fd 11100001 pop_iy
 	xchg l l'
 
 11100011 ex_sp_hl
-	mov sp scratch1
+	scratch1 = sp
 	ocall read_8
 	xchg l scratch1
 	cycles 1
-	mov sp scratch2
+	scratch2 = sp
 	ocall write_8
 	add 1 sp scratch1
 	ocall read_8
@@ -769,43 +768,43 @@ fd 11100001 pop_iy
 	add 1 sp scratch2
 	ocall write_8
 	lsl h 8 wz
-	or l wz wz
+	wz |= l
 	
 dd 11100011 ex_sp_ix
-	mov sp scratch1
+	scratch1 = sp
 	ocall read_8
-	mov scratch1 wz
-	mov ix scratch1
+	wz = scratch1
+	scratch1 = ix
 	cycles 1
-	mov sp scratch2
+	scratch2 = sp
 	ocall write_8
 	add 1 sp scratch1
 	ocall read_8
-	lsl scratch1 8 scratch1
-	or scratch1 wz wz
+	scratch1 <<= 8
+	wz |= scratch1
 	lsr ix 8 scratch1
 	cycles 2
 	add 1 sp scratch2
 	ocall write_8
-	mov wz ix
+	ix = wz
 	
 fd 11100011 ex_sp_iy
-	mov sp scratch1
+	scratch1 = sp
 	ocall read_8
-	mov scratch1 wz
-	mov iy scratch1
+	wz = scratch1
+	scratch1 = iy
 	cycles 1
-	mov sp scratch2
+	scratch2 = sp
 	ocall write_8
 	add 1 sp scratch1
 	ocall read_8
-	lsl scratch1 8 scratch1
-	or scratch1 wz wz
+	scratch1 <<= 8
+	wz |= scratch1
 	lsr iy 8 scratch1
 	cycles 2
 	add 1 sp scratch2
 	ocall write_8
-	mov wz iy
+	iy = wz
 
 10000RRR add_reg
 	add a main.R a

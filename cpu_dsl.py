@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 
-
+assignmentOps = {
+	'=': 'mov',
+	'+=': 'add',
+	'-=': 'sub',
+	'<<=': 'lsl',
+	'>>=': 'lsr',
+	'&=': 'and',
+	'|=': 'or',
+	'^=': 'xor'
+}
 class Block:
 	def addOp(self, op):
 		pass
@@ -17,6 +26,16 @@ class Block:
 		elif parts[0] == 'end':
 			raise Exception('end is only allowed inside a switch or if block')
 		else:
+			if len(parts) > 1 and parts[1] in assignmentOps:
+				dst = parts[0]
+				op = parts[1]
+				parts = [assignmentOps[op]] + parts[2:]
+				if op != '=':
+					if op == '<<=' or op == '>>=':
+						parts.insert(1, dst)
+					else:
+						parts.append(dst)
+				parts.append(dst)
 			self.addOp(NormalOp(parts))
 		return self
 		
@@ -1766,7 +1785,7 @@ def parse(args):
 					before,sep,after = line.partition('"')
 					before = before.strip()
 					if before:
-						parts += [el.strip() for el in before.split(' ')]
+						parts += [el.strip() for el in before.split(' ') if el.strip()]
 					if sep:
 						#TODO: deal with escaped quotes
 						inside,sep,after = after.partition('"')
