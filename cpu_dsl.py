@@ -19,6 +19,7 @@ binaryOps = {
 	'|': 'or',
 	'^': 'xor'
 }
+compareOps = {'>=U', '=', '!='}
 class Block:
 	def addOp(self, op):
 		pass
@@ -29,7 +30,12 @@ class Block:
 			self.addOp(o)
 			return o
 		elif parts[0] == 'if':
-			o = If(self, parts[1])
+			if len(parts) == 4 and parts[2] in compareOps:
+				self.addOp(NormalOp(['cmp', parts[3], parts[1]]))
+				cond = parts[2]
+			else:
+				cond = parts[1]
+			o = If(self, cond)
 			self.addOp(o)
 			return o
 		elif parts[0] == 'end':

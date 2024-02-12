@@ -90,8 +90,7 @@ z80_run_op
 	dispatch scratch1
 
 z80_interrupt
-	cmp int_cycle cycles
-	if >=U
+	if cycles >=U int_cycle
 	
 		iff1 = 0
 		iff2 = 0
@@ -106,26 +105,24 @@ z80_interrupt
 			dispatch 0xFF
 		
 		case 2
-			lsl i 8 pc
+			pc = i << 8
 			pc |= int_value
 			#CD is call
 			dispatch 0xCD
 		end
 		
 	else
-	
-		cmp nmi_cycle cycles
-		if >=U
+		if cycles >=U nmi_cycle
 		
-		nmi_cycle = 0xFFFFFFFF
-		iff1 = 0
-		local pch 8
-		lsr pc 8 pch
-		meta high pch
-		meta low pc
-		z80_push
-		pc = 0x66
-		update_sync
+			nmi_cycle = 0xFFFFFFFF
+			iff1 = 0
+			local pch 8
+			pch = pc >> 8
+			meta high pch
+			meta low pc
+			z80_push
+			pc = 0x66
+			update_sync
 		
 		end
 	end
@@ -1551,36 +1548,33 @@ ed 01DDD100 neg
 
 01110110 halt
 	cmp nmi_cycle cycles
-	if >=U
+	if cycles >=U nmi_cycle
 	
 	else
-	cmp int_cycle cycles
-	if >=U
-	
-	if iff1
-	else
-	sub 1 pc pc
-	end
-	
-	else
-	sub 1 pc pc
-	end
+		if cycles >=U int_cycle
+		
+			if iff1
+			else
+				pc -= 1
+			end
+		
+		else
+			pc -= 1
+		end
 	end
 
 11110011 di
-	mov 0 iff1
-	mov 0 iff2
+	iff1 = 0
+	iff2 = 0
 	update_sync
 
 11111011 ei
-	mov 1 iff1
-	mov 1 iff2
+	iff1 = 1
+	iff2 = 1
 	update_sync
-	cmp int_cycle cycles
-	if >=U
 	
-	add 1 cycles int_cycle
-	
+	if cycles >=U int_cycle
+		int_cycle = cycles + 1
 	end
 
 ed 01D00110 im0
@@ -1615,9 +1609,7 @@ fd 11101001 jp_iy
 	z80_check_cond C
 	z80_fetch_immed16
 	if istrue
-	
-	mov wz pc
-	
+		pc = wz
 	end
 	
 00011000 jr
@@ -1632,24 +1624,20 @@ fd 11101001 jp_iy
 	z80_fetch_immed
 	
 	if istrue
-	
-	sext 16 scratch1 scratch1
-	add scratch1 pc pc
-	cycles 5
-	
+		sext 16 scratch1 scratch1
+		pc += scratch1
+		cycles 5
 	end
 	
 00010000 djnz
 	cycles 1
 	z80_fetch_immed
-	sub 1 b b
+	b -= 1
 	
 	if b
-	
-	sext 16 scratch1 scratch1
-	add scratch1 pc pc
-	cycles 5
-	
+		sext 16 scratch1 scratch1
+		pc += scratch1
+		cycles 5
 	end
 	
 
@@ -1668,13 +1656,11 @@ fd 11101001 jp_iy
 	z80_check_cond C
 	
 	if istrue
-	
-	lsr pc 8 pch
-	meta high pch
-	meta low pc
-	z80_push
-	mov wz pc
-	
+		pch = pc >> 8
+		meta high pch
+		meta low pc
+		z80_push
+		pc = wz
 	end
 	
 11TTT111 rst
@@ -1718,13 +1704,11 @@ ed 01NN1101 retn
 	cycles 1
 	z80_check_cond C
 	if istrue
-	
-	meta high pch
-	meta low pc
-	z80_pop
-	lsl pch 8 pch
-	or pch pc pc
-	
+		meta high pch
+		meta low pc
+		z80_pop
+		pch = pch << 8
+		pc |= pch
 	end
 
 11011011 in_abs
@@ -1781,8 +1765,8 @@ ed 10110010 inir
 	z80_ini_ind 1
 	if zflag
 	else
-	sub 2 pc pc
-	cycles 5
+		pc -= 2
+		cycles 5
 	end
 	
 ed 10101010 ind
@@ -1792,8 +1776,8 @@ ed 10111010 indr
 	z80_ini_ind -1
 	if zflag
 	else
-	sub 2 pc pc
-	cycles 5
+		pc -= 2
+		cycles 5
 	end
 	
 11010011 out_abs
@@ -1849,8 +1833,8 @@ ed 10110011 otir
 	z80_outi_outd 1
 	if zflag
 	else
-	sub 2 pc pc
-	cycles 5
+		pc -= 2
+		cycles 5
 	end
 	
 ed 10101011 outd
@@ -1860,8 +1844,8 @@ ed 10111011 otdr
 	z80_outi_outd -1
 	if zflag
 	else
-	sub 2 pc pc
-	cycles 5
+		pc -= 2
+		cycles 5
 	end
 	
 00000111 rlca
@@ -2360,21 +2344,17 @@ ed 10101000 ldd
 ed 10110000 ldir
 	z80_ldd_ldi 1
 	if pvflag
-	
-	add 1 pc wz
-	sub 2 pc pc
-	cycles 5
-	
+		wz = pc + 1
+		pc -= 2
+		cycles 5
 	end
 
 ed 10111000 lddr
 	z80_ldd_ldi -1
 	if pvflag
-	
-	add 1 pc wz
-	sub 2 pc pc
-	cycles 5
-	
+		wz = pc + 1
+		pc -= 2
+		cycles 5
 	end
 	
 z80_cpd_cpi
@@ -2418,81 +2398,60 @@ ed 10101001 cpd
 ed 10110001 cpir
 	z80_cpd_cpi 1
 	if pvflag
-	
-	if zflag
-	
-	else
-	
-	add 1 pc wz
-	sub 2 pc pc
-	cycles 5
-	
-	end
+		if zflag		
+		else
+			wz = pc + 1
+			pc -= 2
+			cycles 5
+		end
 	end
 	
 ed 10111001 cpdr
 	z80_cpd_cpi -1
 	if pvflag
-	
-	if zflag
-	
-	else
-	
-	add 1 pc wz
-	sub 2 pc pc
-	cycles 5
-	
-	end
+		if zflag
+		else
+			wz = pc + 1
+			pc -= 2
+			cycles 5
+		end
 	end
 
 00100111 daa
 	local diff 8
 	local tmp 8
 	local low 8
-	and 0xF a low
-	and 0x8 chflags tmp
+	low = a & 0xF
+	tmp = chflags & 8
 	if tmp
-	
-	mov 6 diff
-	
+		diff = 6
 	else
-	
-	cmp 0xA low
-	if >=U
-	mov 6 diff
-	else
-	mov 0 diff
+		if low >=U 0xA
+			diff = 6
+		else
+			diff = 0
+		end
 	end
 	
-	end
-	
-	and 0x80 chflags tmp
+	tmp = chflags & 0x80
 	if tmp
-	
-	or 0x60 diff diff
-	update_flags C1
-	
-	else
-	
-	cmp 0x9A a
-	if >=U
-	or 0x60 diff diff
-	update_flags C1
-	else
-	update_flags C0
-	end
+		diff |= 0x60
+		update_flags C1
+	else	
+		if a >=U 0x9A
+			diff |= 0x60
+			update_flags C1
+		else
+			update_flags C0
+		end
 	end
 	
 	if nflag
-	
-	sub diff a a
-	update_flags SZYHPX
-	
+		a -= diff
+		update_flags SZYHPX
 	else
-	
-	add diff a a
-	update_flags SZYHPX
-	
+		a += diff
+		update_flags SZYHPX
 	end
 	
 dd OOOOOOOO dd_normal
