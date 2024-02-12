@@ -19,6 +19,11 @@ binaryOps = {
 	'|': 'or',
 	'^': 'xor'
 }
+unaryOps = {
+	'~': 'not',
+	'!': 'lnot',
+	'-': 'neg'
+}
 compareOps = {'>=U', '=', '!='}
 class Block:
 	def addOp(self, op):
@@ -50,6 +55,14 @@ class Block:
 						op = parts[2]
 						parts[0] = binaryOps[op]
 						del parts[2]
+					elif len(parts) > 1 and parts[1][0] in unaryOps:
+						rest = parts[1][1:]
+						op = parts[1][0]
+						if rest:
+							parts[1] = rest
+						else:
+							del parts[1]
+						parts[0] = unaryOps[op]
 				else:
 					if op == '<<=' or op == '>>=':
 						parts.insert(1, dst)

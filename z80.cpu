@@ -166,30 +166,30 @@ z80_check_cond
 	switch cond
 	case 0
 		meta istrue invert
-		lnot zflag invert
+		invert = !zflag
 	
 	case 1
 		meta istrue zflag
 	
 	case 2
 		meta istrue invert
-		not chflags invert
+		invert = ~chflags
 		invert &= 0x80
 	
 	case 3
 		meta istrue invert
-		and 0x80 chflags invert
+		invert = chflags & 0x80
 	
 	case 4
 		meta istrue invert
-		lnot pvflag invert
+		invert = !pvflag
 	
 	case 5
 		meta istrue pvflag
 	
 	case 6
 		meta istrue invert
-		not last_flag_result invert
+		invert = ~last_flag_result
 		invert &= 0x80
 	
 	case 7
@@ -1519,11 +1519,11 @@ fd 00101011 dec_iy
 	sub 1 iy iy
 
 00101111 cpl
-	not a a
+	a = ~a
 	update_flags YH1XN1
 
 ed 01DDD100 neg
-	neg a a
+	a = -a
 	update_flags SZYHVXN1C
 
 00111111 ccf
@@ -2214,29 +2214,29 @@ fdcb 01BBBRRR bit_iyd
 	
 cb 10BBBRRR res_reg
 	local tmp 8
-	lsl 1 B tmp
-	not tmp tmp
-	and main.R tmp main.R
+	tmp = 1 << B
+	tmp = ~tmp
+	main.R &= tmp
 	
 cb 10BBB110 res_hl
 	z80_fetch_hl
 	cycles 1
 	local tmp 8
-	lsl 1 B tmp
-	not tmp tmp
-	and scratch1 tmp scratch1
+	tmp = 1 << B
+	tmp = ~tmp
+	scratch1 &= tmp
 	z80_store_hl
 	
 z80_res_index
 	arg bit 8
 	arg tmp 8
-	lsl 1 bit tmp
-	not tmp tmp
-	mov wz scratch1
+	tmp = 1 << bit
+	tmp = ~tmp
+	scratch1 = wz
 	ocall read_8
 	cycles 1
-	and scratch1 tmp tmp
-	mov tmp scratch1
+	tmp &= scratch1
+	scratch1 = tmp
 	z80_store_index
 	
 ddcb 10BBB110 res_ixd
