@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 from glob import glob
 import subprocess
 from sys import exit
@@ -14,9 +14,9 @@ for path in glob('generated_tests/*/*.bin'):
 for path in sources:
 	binpath = path.replace('.s68', '.bin')
 	if not binpath in bins:
-		print binpath
+		print(binpath)
 		res = subprocess.call(['vasmm68k_mot', '-Fbin', '-m68000', '-no-opt', '-spaces', '-o', binpath, path])
 		if res != 0:
-			print 'vasmm68k_mot returned non-zero status code', res
+			print('vasmm68k_mot returned non-zero status code', res)
 			exit(1)
 

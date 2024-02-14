@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 def split_fields(line):
 	parts = []
@@ -25,7 +25,7 @@ class Program(object):
 		outfile.write('\tdc.l $0, start\n')
 		needdivzero = self.inst.name.startswith('div')
 		needchk = self.inst.name.startswith('chk')
-		for i in xrange(0x8, 0x100, 0x4):
+		for i in range(0x8, 0x100, 0x4):
 			if needdivzero and i == 0x14:
 				outfile.write('\tdc.l div_zero_handler\n')
 			elif needchk and i == 0x18:
@@ -109,7 +109,7 @@ def valid_ram_address(address, size='b'):
 	return address >= 0xE00000 and address <= 0xFFFFFFFC and (address & 0xE00000) == 0xE00000 and (size == 'b' or not address & 1)
 
 def random_ram_address(mina=0xE00000, maxa=0xFFFFFFFC):
-	return randint(mina/2, maxa/2)*2 | 0xE00000
+	return randint(mina//2, maxa//2)*2 | 0xE00000
 
 class Indexed(object):
 	def __init__(self, base, index, index_size, disp):
@@ -151,7 +151,7 @@ class Indexed(object):
 					else:
 						base = index = already[str(self.base)]
 				else:
-					base = index = already[str(self.base)] = random_ram_address()/2
+					base = index = already[str(self.base)] = random_ram_address()//2
 					outfile.write('\tmove.l #' + str(base) + ', ' + str(self.base) + '\n')
 			else:
 				if str(self.base) in already:
@@ -375,16 +375,16 @@ def all_disp():
 	return [Displacement(base, randint(-32768, 32767)) for base in all_aregs]
 
 def rand_pc_disp():
-	return [Displacement(Register('pc', 0), randint(-32768, -1024)) for x in xrange(0, 8)]
+	return [Displacement(Register('pc', 0), randint(-32768, -1024)) for x in range(0, 8)]
 
 def all_pc_indexed():
 	return [Indexed(Register('pc', 0), index, index_size, randint(-128, 127)) for index in all_dregs + all_aregs for index_size in ('w','l')]
 
 def rand_abs_short():
-	return [Absolute(random_ram_address(0xFFFF8000), 'w') for x in xrange(0, 8)]
+	return [Absolute(random_ram_address(0xFFFF8000), 'w') for x in range(0, 8)]
 
 def rand_abs_long():
-	return [Absolute(random_ram_address(), 'l') for x in xrange(0, 8)]
+	return [Absolute(random_ram_address(), 'l') for x in range(0, 8)]
 
 def get_size_range(size):
 	if size == 'b':
@@ -397,7 +397,7 @@ def get_size_range(size):
 def rand_immediate(size):
 	minv,maxv = get_size_range(size)
 	
-	return [Immediate(randint(minv, maxv)) for x in xrange(0,8)]
+	return [Immediate(randint(minv, maxv)) for x in range(0,8)]
 
 def get_variations(mode, size):
 	mapping = {
@@ -429,7 +429,7 @@ def get_variations(mode, size):
 		else:
 			return [Immediate(num) for num in range(start, end+1)]
 	else:
-		print "Don't know what to do with source type", mode
+		print("Don't know what to do with source type", mode)
 		return None
 		
 class Inst2Op(object):
