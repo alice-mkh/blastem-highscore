@@ -23,9 +23,14 @@ void render_infobox(char * title, char * buf)
 {
 }
 
-#ifndef NEW_CORE
+m68k_context *int_ack(m68k_context *context)
+{
+	return context;
+}
+
 m68k_context * sync_components(m68k_context * context, uint32_t address)
 {
+#ifndef NEW_CORE
 	if (context->current_cycle >= context->target_cycle) {
 		puts("hit cycle limit");
 		exit(0);
@@ -34,8 +39,8 @@ m68k_context * sync_components(m68k_context * context, uint32_t address)
 		context->target_cycle = context->current_cycle;
 	}
 	return context;
-}
 #endif
+}
 
 m68k_context *reset_handler(m68k_context *context)
 {
@@ -82,7 +87,7 @@ int main(int argc, char ** argv)
 	memmap[1].flags = MMAP_READ | MMAP_WRITE | MMAP_CODE;
 	memmap[1].buffer = malloc(64 * 1024);
 	memset(memmap[1].buffer, 0, 64 * 1024);
-	init_m68k_opts(&opts, memmap, 2, 1);
+	init_m68k_opts(&opts, memmap, 2, 1, sync_components, int_ack);
 	m68k_context * context = init_68k_context(&opts, reset_handler);
 	context->mem_pointers[0] = memmap[0].buffer;
 	context->mem_pointers[1] = memmap[1].buffer;
