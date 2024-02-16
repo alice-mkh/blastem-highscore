@@ -30,7 +30,7 @@ void m68k_sync_cycle(m68k_context *context, uint32_t target_cycle)
 	context->sync_cycle = target_cycle;
 }
 
-void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider)
+void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components, int_ack_fun int_ack)
 {
 	memset(opts, 0, sizeof(*opts));
 	opts->gen.memmap = memmap;
