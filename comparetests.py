@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 from glob import glob
 import subprocess
 from sys import exit,argv
@@ -14,7 +14,7 @@ for i in range(1, len(argv)):
 				if part.endswith('.bin'):
 					skip.add(part)
 		f.close()
-		print 'Skipping',len(skip),'entries from previous report.'
+		print('Skipping',len(skip),'entries from previous report.')
 	else:
 		prefixes.append(argv[i])
 
@@ -22,19 +22,19 @@ def print_mismatch(path, b, m):
 	blines = b.split('\n')
 	mlines = m.split('\n')
 	if len(blines) != len(mlines):
-		print '-----------------------------'
-		print 'Unknown mismatch in', path
-		print 'blastem output:'
-		print b
-		print 'musashi output:'
-		print m
-		print '-----------------------------'
+		print('-----------------------------')
+		print('Unknown mismatch in', path)
+		print('blastem output:')
+		print(b)
+		print('clean output:')
+		print(m)
+		print('-----------------------------')
 		return
 	prevline = ''
 	differences = []
 	flagmismatch = False
 	regmismatch = False
-	for i in xrange(0, len(blines)):
+	for i in range(0, len(blines)):
 		if blines[i] != mlines[i]:
 			if prevline == 'XNZVC':
 				differences.append((prevline, prevline))
@@ -51,13 +51,13 @@ def print_mismatch(path, b, m):
 		mtype = 'Register'
 	else:
 		mtype = 'Unknown'
-	print '-----------------------------'
-	print mtype, 'mismatch in', path
-	for i in xrange(0, 2):
-		print 'musashi' if i else 'blastem', 'output:'
+	print('-----------------------------')
+	print(mtype, 'mismatch in', path)
+	for i in range(0, 2):
+		print('clean' if i else 'blastem', 'output:')
 		for diff in differences:
-			print diff[i]
-	print '-----------------------------'
+			print(diff[i])
+	print('-----------------------------')
 
 
 
@@ -74,23 +74,23 @@ for path in glob('generated_tests/*/*.bin'):
 		if not good:
 			continue
 	try:
-		b = subprocess.check_output(['./trans', path])
+		b = subprocess.check_output(['./trans', path]).decode('utf-8')
 		try:
-			m = subprocess.check_output(['musashi/mustrans', path])
+			m = subprocess.check_output(['../blastem_clean/trans', path]).decode('utf-8')
 			#_,_,b = b.partition('\n')
 			if b != m:
 				print_mismatch(path, b, m)
 
 			else:
-				print path, 'passed'
+				print(path, 'passed')
 		except subprocess.CalledProcessError as e:
-			print '-----------------------------'
-			print 'musashi exited with code', e.returncode, 'for test', path
-			print 'blastem output:'
-			print b
-			print '-----------------------------'
+			print('-----------------------------')
+			print('clean exited with code', e.returncode, 'for test', path)
+			print('blastem output:')
+			print(b)
+			print('-----------------------------')
 	except subprocess.CalledProcessError as e:
-		print '-----------------------------'
-		print 'blastem exited with code', e.returncode, 'for test', path
-		print '-----------------------------'
+		print('-----------------------------')
+		print('blastem exited with code', e.returncode, 'for test', path)
+		print('-----------------------------')
 
