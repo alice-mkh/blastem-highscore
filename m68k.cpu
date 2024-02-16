@@ -8,8 +8,10 @@ info
 	sync_cycle m68k_sync_cycle
 	
 declare
+	typedef m68k_context *(*sync_fun)(m68k_context * context, uint32_t address);
+	typedef m68k_context *(*int_ack_fun)(m68k_context * context);
 	typedef m68k_context *(*m68k_reset_handler)(m68k_context *context);
-	void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider);
+	void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components, int_ack_fun int_ack);
 	m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler reset_handler);
 	void m68k_reset(m68k_context *context);
 	void m68k_print_regs(m68k_context *context);
@@ -304,6 +306,7 @@ m68k_fetch_op_ea
 	case 6
 	#indexed
 	m68k_index_word
+	cycles 2
 	add aregs.reg scratch1 scratch1
 	
 	m68k_mem_src scratch1 Z isdst
@@ -337,6 +340,7 @@ m68k_fetch_op_ea
 	case 3
 	#pc indexed
 	m68k_index_word
+	cycles 2
 	add pc scratch1 scratch1
 	sub 2 scratch1 scratch1
 	m68k_mem_src scratch1 Z isdst
@@ -485,6 +489,7 @@ m68k_save_dst
 	m68k_fetch_dst_ea M R Z
 	switch M
 	case 1
+		cycles 4
 		add src dst dst Z
 	default
 		add src dst dst Z
@@ -872,14 +877,15 @@ m68k_save_dst
 	end
 	lsr dregs.R shift dregs.R Z
 	update_flags XNZV0C
-	add shift shift shift
+	local cyc 32
+	cyc = shift + shift
 	switch Z
 	case 2
-		add 4 shift shift
+		cyc += 4
 	default
-		add 2 shift shift
+		cyc += 2
 	end
-	cycles shift
+	cycles cyc
 	#TODO: should this happen before or after the majority of the shift?
 	m68k_prefetch
 	
@@ -1125,6 +1131,7 @@ m68k_save_dst
 	invalid M 7 R 7
 	m68k_fetch_src_ea M R 1
 	mov scratch1 ccr
+	cycles 8
 	m68k_prefetch
 
 0100011011MMMRRR move_to_sr
@@ -1136,6 +1143,7 @@ m68k_save_dst
 	mov scratch1 ccr
 	lsr scratch1 8 status
 	update_sync
+	cycles 8
 	m68k_prefetch
 
 0100000011MMMRRR move_from_sr
@@ -1150,11 +1158,46 @@ m68k_save_dst
 	lsl status 8 scratch1
 	or ccr scratch1 scratch1
 	mov scratch1 dst
+	if M
+		cycles 4
+	else
+		cycles 2
+	end
 	m68k_save_dst 1
 	m68k_prefetch
 
+01000000ZZMMMRRR negx
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	m68k_fetch_dst_ea M R Z
+	sbc dst 0 dst Z
+	update_flags XNZVC
+	m68k_save_dst Z
+	m68k_prefetch
+
+01000010ZZMMMRRR clr
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	invalid Z 3
+	m68k_fetch_dst_ea M R Z
+	dst:Z = 0
+	update_flags N0Z1V0C0
+	m68k_save_dst Z
+	m68k_prefetch
+
 0100111001110000 reset
-	cycles 124
 	if reset_handler
 	pcall reset_handler m68k_reset_handler context
 	end
+	cycles 128
+	m68k_prefetch

@@ -48,6 +48,7 @@ class Block:
 		else:
 			if len(parts) > 1 and parts[1] in assignmentOps:
 				dst = parts[0]
+				dst,_,size = dst.partition(':')
 				op = parts[1]
 				parts = [assignmentOps[op]] + parts[2:]
 				if op == '=':
@@ -69,6 +70,8 @@ class Block:
 					else:
 						parts.append(dst)
 				parts.append(dst)
+				if size:
+					parts.append(size)
 			self.addOp(NormalOp(parts))
 		return self
 		
@@ -345,7 +348,7 @@ class Op:
 			if needsCarry or needsOflow or needsHalf or (flagUpdates and needsSizeAdjust):
 				if len(params) <= 3:
 					size = prog.paramSize(rawParams[2])
-				if needsCarry and op != 'lsr':
+				if needsCarry and op != '>>':
 					size *= 2
 				decl,name = prog.getTemp(size)
 				dst = prog.carryFlowDst = name
@@ -489,7 +492,11 @@ def _updateFlagsCImpl(prog, params, rawParams):
 				resultBit = prog.getLastSize() - 1
 			elif calc == 'carry':
 				if prog.lastOp.op in ('asr', 'lsr'):
-					resultBit = 0
+					if type(prog.lastB) is int:
+						resultBit = prog.lastB - 1
+					else:
+						#FIXME!!!!!
+						resultBit = 0
 					myRes = prog.lastA
 				else:
 					resultBit = prog.getLastSize()

@@ -38,8 +38,8 @@ m68k_context * sync_components(m68k_context * context, uint32_t address)
 	if (context->status & M68K_STATUS_TRACE || context->trace_pending) {
 		context->target_cycle = context->current_cycle;
 	}
-	return context;
 #endif
+	return context;
 }
 
 m68k_context *reset_handler(m68k_context *context)
@@ -92,7 +92,7 @@ int main(int argc, char ** argv)
 	context->mem_pointers[0] = memmap[0].buffer;
 	context->mem_pointers[1] = memmap[1].buffer;
 #ifdef NEW_CORE
-	context->cycles = 40;
+	context->cycles = 20;
 #else
 	context->current_cycle = 40;
 	context->target_cycle = context->sync_cycle = 8000;
