@@ -15,12 +15,12 @@ class Program(object):
 		self.avail_aregs = {0,1,2,3,4,5,6,7}
 		instruction.consume_regs(self)
 		self.inst = instruction
-	
+
 	def dirname(self):
 		return self.inst.name + '_' + self.inst.size
 	def name(self):
 		return str(self.inst).replace('.', '_').replace('#', '_').replace(',', '_').replace(' ', '_').replace('(', '[').replace(')', ']')
-	
+
 	def write_rom_test(self, outfile):
 		outfile.write('\tdc.l $0, start\n')
 		needdivzero = self.inst.name.startswith('div')
@@ -62,13 +62,13 @@ class Program(object):
 		outfile.write('\t'+str(self.inst)+'\n')
 		outfile.write('\t'+self.inst.save_result(self.get_dreg(), False) + '\n')
 		outfile.write('\treset\nforever:\n\tbra.s forever\n')
-	
+
 	def consume_dreg(self, num):
 		self.avail_dregs.discard(num)
-	
+
 	def consume_areg(self, num):
 		self.avail_aregs.discard(num)
-	
+
 	def get_dreg(self):
 		return Register('d', self.avail_dregs.pop())
 
@@ -86,19 +86,19 @@ class Register(object):
 	def __init__(self, kind, num):
 		self.kind = kind
 		self.num = num
-	
+
 	def __str__(self):
 		if self.kind == 'd' or self.kind == 'a':
 			return self.kind + str(self.num)
 		return self.kind
-	
+
 	def write_init(self, outfile, size, already):
 		if not str(self) in already:
 			minv,maxv = get_size_range(size)
 			val = randint(minv,maxv)
 			already[str(self)] = val
 			outfile.write('\tmove.'+size+' #'+str(val)+', ' + str(self) + '\n')
-	
+
 	def consume_regs(self, program):
 		if self.kind == 'd':
 			program.consume_dreg(self.num)
@@ -117,7 +117,7 @@ class Indexed(object):
 		self.index = index
 		self.index_size = index_size
 		self.disp = disp
-	
+
 	def write_init(self, outfile, size, already):
 		if self.base.kind == 'pc':
 			if str(self.index) in already:
@@ -151,7 +151,7 @@ class Indexed(object):
 					else:
 						base = index = already[str(self.base)]
 				else:
-					base = index = already[str(self.base)] = random_ram_address()//2
+					base = index = already[str(self.base)] = 2 * (random_ram_address()//4)
 					outfile.write('\tmove.l #' + str(base) + ', ' + str(self.base) + '\n')
 			else:
 				if str(self.base) in already:
@@ -172,10 +172,10 @@ class Indexed(object):
 						if index & 0x8000:
 							index -= 65536
 					if not valid_ram_address(base + index):
-						index = already[str(self.index)] = randint(-64, 63)
+						index = already[str(self.index)] = randint(-32, 31) * 2
 						outfile.write('\tmove.l #' + str(index) + ', ' + str(self.index) + '\n')
 				else:
-					index = already[str(self.index)] = randint(-64, 63)
+					index = already[str(self.index)] = randint(-32, 31) * 2
 					outfile.write('\tmove.l #' + str(index) + ', ' + str(self.index) + '\n')
 			address = base + index + self.disp
 			if (address & 0xFFFFFF) < 0xE00000:
@@ -200,10 +200,10 @@ class Indexed(object):
 				address = base + index + self.disp
 		minv,maxv = get_size_range(size)
 		outfile.write('\tmove.' + size + ' #' + str(randint(minv, maxv)) + ', (' + str(address) + ').l\n')
-	
+
 	def __str__(self):
 		return '(' + str(self.disp) + ', ' + str(self.base) + ', ' + str(self.index) + '.' + self.index_size + ')'
-	
+
 	def consume_regs(self, program):
 		self.base.consume_regs(program)
 		self.index.consume_regs(program)
@@ -213,8 +213,8 @@ class Displacement(object):
 		self.base = base
 		if disp & 1:
 			disp += 1
-		self.disp = disp 
-	
+		self.disp = disp
+
 	def write_init(self, outfile, size, already):
 		if self.base.kind == 'pc':
 			num = already.get('label', 0)+1
@@ -246,20 +246,20 @@ class Displacement(object):
 				address = base + self.disp
 		minv,maxv = get_size_range(size)
 		outfile.write('\tmove.' + size + ' #' + str(randint(minv, maxv)) + ', (' + str(address) + ').l\n')
-	
+
 	def __str__(self):
 		return '(' + str(self.disp) + ', ' + str(self.base) + ')'
-	
+
 	def consume_regs(self, program):
 		self.base.consume_regs(program)
-	
+
 class Indirect(object):
 	def __init__(self, reg):
 		self.reg = reg
-	
+
 	def __str__(self):
 		return '(' + str(self.reg) + ')'
-	
+
 	def write_init(self, outfile, size, already):
 		if str(self.reg) in already:
 			if not valid_ram_address(already[str(self.reg)], size):
@@ -276,17 +276,17 @@ class Indirect(object):
 			already[str(self.reg)] = address
 		minv,maxv = get_size_range(size)
 		outfile.write('\tmove.' + size + ' #' + str(randint(minv, maxv)) + ', (' + str(address) + ').l\n')
-	
+
 	def consume_regs(self, program):
 		self.reg.consume_regs(program)
 
 class Increment(object):
 	def __init__(self, reg):
 		self.reg = reg
-	
+
 	def __str__(self):
 		return '(' + str(self.reg) + ')+'
-	
+
 	def write_init(self, outfile, size, already):
 		if str(self.reg) in already:
 			if not valid_ram_address(already[str(self.reg)], size):
@@ -303,17 +303,17 @@ class Increment(object):
 			already[str(self.reg)] = address
 		minv,maxv = get_size_range(size)
 		outfile.write('\tmove.' + size + ' #' + str(randint(minv, maxv)) + ', (' + str(address) + ').l\n')
-	
+
 	def consume_regs(self, program):
 		self.reg.consume_regs(program)
 
 class Decrement(object):
 	def __init__(self, reg):
 		self.reg = reg
-	
+
 	def __str__(self):
 		return '-(' + str(self.reg) + ')'
-	
+
 	def write_init(self, outfile, size, already):
 		if str(self.reg) in already:
 			if not valid_ram_address(already[str(self.reg)]- 4 if size == 'l' else 2 if size == 'w' else 1, size):
@@ -330,7 +330,7 @@ class Decrement(object):
 			already[str(self.reg)] = address
 		minv,maxv = get_size_range(size)
 		outfile.write('\tmove.' + size + ' #' + str(randint(minv, maxv)) + ', (' + str(address) + ').l\n')
-	
+
 	def consume_regs(self, program):
 		self.reg.consume_regs(program)
 
@@ -338,30 +338,30 @@ class Absolute(object):
 	def __init__(self, address, size):
 		self.address = address
 		self.size = size
-	
+
 	def __str__(self):
 		return '(' + str(self.address) + ').' + self.size
-	
+
 	def write_init(self, outfile, size, already):
 		minv,maxv = get_size_range(size)
 		outfile.write('\tmove.' + size + ' #' + str(randint(minv, maxv)) + ', '+str(self)+'\n')
-	
+
 	def consume_regs(self, program):
 		pass
 
 class Immediate(object):
 	def __init__(self, value):
 		self.value = value
-	
+
 	def __str__(self):
 		return '#' + str(self.value)
-	
+
 	def write_init(self, outfile, size, already):
 		pass
-	
+
 	def consume_regs(self, program):
 		pass
-		
+
 all_dregs = [Register('d', i) for i in range(0, 8)]
 all_aregs = [Register('a', i) for i in range(0, 8)]
 all_indirect = [Indirect(reg) for reg in all_aregs]
@@ -396,7 +396,7 @@ def get_size_range(size):
 
 def rand_immediate(size):
 	minv,maxv = get_size_range(size)
-	
+
 	return [Immediate(randint(minv, maxv)) for x in range(0,8)]
 
 def get_variations(mode, size):
@@ -431,25 +431,25 @@ def get_variations(mode, size):
 	else:
 		print("Don't know what to do with source type", mode)
 		return None
-		
+
 class Inst2Op(object):
 	def __init__(self, name, size, src, dst):
 		self.name = name
 		self.size = size
 		self.src = src
 		self.dst = dst
-	
+
 	def __str__(self):
 		return self.name + '.' + self.size + ' ' + str(self.src) + ', ' + str(self.dst)
-	
+
 	def write_init(self, outfile, already):
 		self.src.write_init(outfile, self.size, already)
 		self.dst.write_init(outfile, self.size, already)
-	
+
 	def invalidate_dest(self, already):
 		if type(self.dst) == Register:
 			del already[str(self.dst)]
-	
+
 	def save_result(self, reg, always):
 		if always or type(self.dst) != Register:
 			if type(self.dst) == Decrement:
@@ -461,7 +461,7 @@ class Inst2Op(object):
 			return 'move.' + self.size + ' ' + str(src) + ', ' + str(reg)
 		else:
 			return ''
-	
+
 	def consume_regs(self, program):
 		self.src.consume_regs(program)
 		self.dst.consume_regs(program)
@@ -469,7 +469,7 @@ class Inst2Op(object):
 class Inst1Op(Inst2Op):
 	def __init__(self, name, size, dst):
 		super(Inst1Op, self).__init__(name, size, dummy_op, dst)
-	
+
 	def __str__(self):
 		return self.name + '.' + self.size + ' ' + str(self.dst)
 
@@ -494,7 +494,7 @@ class Entry(object):
 					else:
 						combos.append((size, None, source))
 		self.cases = combos
-		
+
 	def programs(self):
 		res = []
 		for (size, src, dst) in self.cases:
@@ -508,7 +508,7 @@ class Entry(object):
 				for dest in dests:
 					res.append(Program(Inst1Op(self.name, size, dest)))
 		return res
-		
+
 def process_entries(f):
 	entries = []
 	for line in f:
@@ -528,7 +528,7 @@ def main(args):
 			f = open('generated_tests/' + dname + '/' + program.name() + '.s68', 'w')
 			program.write_rom_test(f)
 			f.close()
-	
+
 if __name__ == '__main__':
 	import sys
 	main(sys.argv)
