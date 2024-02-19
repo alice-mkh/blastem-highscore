@@ -427,10 +427,29 @@ m68k_save_dst
 	invalid M 7 R 7
 	local size 16
 	local ext_src 32
+	#TODO: ensure "penalty" cycles are in the right place
 	if Z
-	mov 2 size
+		size = 2
+		switch M
+		case 0
+			#dreg src
+			cycles 4
+		case 1
+			#areg src
+			cycles 4
+		case 7
+			if R = 4
+				#immediate
+				cycles 4
+			else
+				cycles 2
+			end
+		default
+			cycles 2
+		end
 	else
-	mov 1 size
+		size = 1
+		cycles 4
 	end
 	m68k_fetch_src_ea M R size
 	switch size
@@ -459,6 +478,9 @@ m68k_save_dst
 		lsl prefetch 16 immed
 		m68k_prefetch
 		or prefetch immed immed
+		if M = 0
+			cycles 4
+		end
 	default
 		mov prefetch immed
 	end
@@ -504,21 +526,22 @@ m68k_save_dst
 	update_flags XNVC
 	switch Z
 	case 0
-	local tmp8 8
-	mov dregs.D tmp8
-	if tmp8
-		update_flags Z0
-	end
+		local tmp8 8
+		mov dregs.D tmp8
+		if tmp8
+			update_flags Z0
+		end
 	case 1
-	local tmp16 16
-	mov dregs.D tmp16
-	if tmp16
-		update_flags Z0
-	end
+		local tmp16 16
+		mov dregs.D tmp16
+		if tmp16
+			update_flags Z0
+		end
 	case 2
-	if dregs.D
-		update_flags Z0
-	end
+		cycles 4
+		if dregs.D
+			update_flags Z0
+		end
 	end
 	m68k_prefetch
 
@@ -534,6 +557,8 @@ m68k_save_dst
 			decsize Z aregs.S aregs.S
 		end
 	end
+	#predec penalty on src only
+	cycles 2
 	mov aregs.S scratch1
 	switch Z
 	case 0
@@ -633,6 +658,9 @@ m68k_save_dst
 		lsl prefetch 16 immed
 		m68k_prefetch
 		or prefetch immed immed
+		if M = 0
+			cycles 4
+		end
 	default
 		mov prefetch immed
 	end
@@ -660,7 +688,13 @@ m68k_save_dst
 	invalid M 7 R 7
 	invalid Z 3
 	m68k_fetch_dst_ea M R Z
-	
+
+	if Z = 2
+		if M = 0
+			cycles 4
+		end
+	end
+
 	xor dregs.D dst dst Z
 	update_flags NZV0C0
 	m68k_save_dst Z
@@ -683,6 +717,9 @@ m68k_save_dst
 		lsl prefetch 16 immed
 		m68k_prefetch
 		or prefetch immed immed
+		if M = 0
+			cycles 4
+		end
 	default
 		mov prefetch immed
 	end
@@ -707,7 +744,24 @@ m68k_save_dst
 	invalid M 7 R 7
 	invalid Z 3
 	m68k_fetch_src_ea M R Z
-	
+
+	if Z = 2
+		switch M
+		case 0
+			#dreg
+			cycles 4
+		case 7
+			if R = 4
+				#immediate
+				cycles 4
+			else
+				cycles 2
+			end
+		default
+			cycles 2
+		end
+	end
+
 	or src dregs.D dregs.D Z
 	update_flags NZV0C0
 	m68k_prefetch
@@ -746,6 +800,9 @@ m68k_save_dst
 		lsl prefetch 16 immed
 		m68k_prefetch
 		or prefetch immed immed
+		if M = 0
+			cycles 4
+		end
 	default
 		mov prefetch immed
 	end
@@ -798,9 +855,27 @@ m68k_save_dst
 	local size 16
 	local ext_src 32
 	if Z
-	mov 2 size
+		size = 2
+		switch M
+		case 0
+			#dreg src
+			cycles 4
+		case 1
+			#areg src
+			cycles 4
+		case 7
+			if R = 4
+				#immediate
+				cycles 4
+			else
+				cycles 2
+			end
+		default
+			cycles 2
+		end
 	else
-	mov 1 size
+		size = 1
+		cycles 4
 	end
 	m68k_fetch_src_ea M R size
 	switch size
@@ -829,6 +904,9 @@ m68k_save_dst
 		lsl prefetch 16 immed
 		m68k_prefetch
 		or prefetch immed immed
+		if M = 0
+			cycles 4
+		end
 	default
 		mov prefetch immed
 	end
@@ -932,14 +1010,15 @@ m68k_save_dst
 	end
 	lsl dregs.R shift dregs.R Z
 	update_flags XNZV0C
-	add shift shift shift
+	local cyc 32
+	cyc = shift + shift
 	switch Z
 	case 2
-		add 4 shift shift
+		cyc += 4
 	default
-		add 2 shift shift
+		cyc += 2
 	end
-	cycles shift
+	cycles cyc
 	#TODO: should this happen before or after the majority of the shift?
 	m68k_prefetch
 	
@@ -1190,6 +1269,12 @@ m68k_save_dst
 	invalid M 7 R 7
 	invalid Z 3
 	m68k_fetch_dst_ea M R Z
+	if Z = 2
+		if M = 0
+			#register clears have 2 cycle penalty for longword size
+			cycles 2
+		end
+	end
 	dst:Z = 0
 	update_flags N0Z1V0C0
 	m68k_save_dst Z
