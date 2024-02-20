@@ -1389,6 +1389,240 @@ m68k_save_dst
 	update_flags NZVC
 	m68k_prefetch
 
+0000100000MMMRRR btsti
+	invalid M 1
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+
+	local tmp 32
+	m68k_prefetch
+	if M
+		tmp = scratch1 & 7
+		meta size 0
+	else
+		cycles 2
+		tmp = scratch1 & 31
+		meta size 2
+	end
+	tmp = 1 << tmp
+	m68k_fetch_src_ea M R size
+	tmp &= src
+	update_flags Z
+	m68k_prefetch
+
+0000100001MMMRRR bchgi
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+
+	local tmp 32
+	local tmp2 32
+	m68k_prefetch
+	if M
+		tmp = scratch1 & 7
+		meta size 0
+	else
+		tmp = scratch1 & 31
+		meta size 2
+		if tmp >=U 16
+			cycles 4
+		else
+			cycles 2
+		end
+	end
+	tmp = 1 << tmp
+	m68k_fetch_dst_ea M R size
+	tmp2 = tmp & dst
+	update_flags Z
+	dst ^= tmp
+	m68k_save_dst size
+	m68k_prefetch
+
+0000100010MMMRRR bclri
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+
+	local tmp 32
+	local tmp2 32
+	m68k_prefetch
+	if M
+		tmp = scratch1 & 7
+		meta size 0
+	else
+		tmp = scratch1 & 31
+		meta size 2
+		if tmp >=U 16
+			cycles 6
+		else
+			cycles 4
+		end
+	end
+	tmp = 1 << tmp
+	m68k_fetch_dst_ea M R size
+	tmp2 = tmp & dst
+	update_flags Z
+	tmp = ~tmp
+	dst &= tmp
+	m68k_save_dst size
+	m68k_prefetch
+
+0000100011MMMRRR bseti
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+
+	local tmp 32
+	local tmp2 32
+	m68k_prefetch
+	if M
+		tmp = scratch1 & 7
+		meta size 0
+	else
+		tmp = scratch1 & 31
+		meta size 2
+		if tmp >=U 16
+			cycles 4
+		else
+			cycles 2
+		end
+	end
+	tmp = 1 << tmp
+	m68k_fetch_dst_ea M R size
+	tmp2 = tmp & dst
+	update_flags Z
+	dst |= tmp
+	m68k_save_dst size
+	m68k_prefetch
+
+0000SSS100MMMRRR btst_dn
+	invalid M 1
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+
+	local tmp 32
+	if M
+		tmp = dregs.S & 7
+		meta size 0
+	else
+		tmp = dregs.S & 31
+		meta size 2
+		cycles 2
+	end
+	tmp = 1 << tmp
+	m68k_fetch_src_ea M R size
+	tmp &= src
+	update_flags Z
+	m68k_prefetch
+
+0000SSS101MMMRRR bchg_dn
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+
+	local tmp 32
+	local tmp2 32
+	if M
+		tmp = dregs.S & 7
+		meta size 0
+	else
+		tmp = dregs.S & 31
+		meta size 2
+		if tmp >=U 16
+			cycles 4
+		else
+			cycles 2
+		end
+	end
+	tmp = 1 << tmp
+	m68k_fetch_dst_ea M R size
+	tmp2 = tmp & dst
+	update_flags Z
+	dst ^= tmp
+	m68k_save_dst size
+	m68k_prefetch
+
+0000SSS110MMMRRR bclr_dn
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+
+	local tmp 32
+	local tmp2 32
+	if M
+		tmp = dregs.S & 7
+		meta size 0
+	else
+		tmp = dregs.S & 31
+		meta size 2
+		if tmp >=U 16
+			cycles 6
+		else
+			cycles 4
+		end
+	end
+	tmp = 1 << tmp
+	m68k_fetch_dst_ea M R size
+	tmp2 = tmp & dst
+	update_flags Z
+	tmp = ~tmp
+	dst &= tmp
+	m68k_save_dst size
+	m68k_prefetch
+
+0000SSS111MMMRRR bset_dn
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+
+	local tmp 32
+	local tmp2 32
+	if M
+		tmp = dregs.S & 7
+		meta size 0
+	else
+		tmp = dregs.S & 31
+		meta size 2
+		if tmp >=U 16
+			cycles 4
+		else
+			cycles 2
+		end
+	end
+	tmp = 1 << tmp
+	m68k_fetch_dst_ea M R size
+	tmp2 = tmp & dst
+	update_flags Z
+	dst |= tmp
+	m68k_save_dst size
+	m68k_prefetch
+
 0100111001110000 reset
 	if reset_handler
 	pcall reset_handler m68k_reset_handler context
