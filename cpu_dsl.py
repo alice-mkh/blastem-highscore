@@ -621,7 +621,7 @@ def _updateFlagsCImpl(prog, params, rawParams):
 	return ''.join(output)
 	
 def _cmpCImpl(prog, params, rawParams, flagUpdates):
-	size = prog.paramSize(rawParams[1])
+	b_size = size = prog.paramSize(rawParams[1])
 	needsCarry = False
 	if flagUpdates:
 		for flag in flagUpdates:
@@ -629,6 +629,15 @@ def _cmpCImpl(prog, params, rawParams, flagUpdates):
 			if calc == 'carry':
 				needsCarry = True
 				break
+	if len(params) > 2:
+		size = params[2]
+		if size == 0:
+			size = 8
+		elif size == 1:
+			size = 16
+		else:
+			size = 32
+	prog.lastSize = size
 	if needsCarry:
 		size *= 2
 	tmpvar = 'cmp_tmp{sz}__'.format(sz=size)
@@ -641,18 +650,17 @@ def _cmpCImpl(prog, params, rawParams, flagUpdates):
 	if not scope.resolveLocal(tmpvar):
 		scope.addLocal(tmpvar, size)
 	prog.lastDst = rawParams[1]
-	if len(params) > 2:
-		size = params[2]
-		if size == 0:
-			size = 8
-		elif size == 1:
-			size = 16
-		else:
-			size = 32
-		prog.lastSize = size
-	else:
-		prog.lastSize = None
-	return '\n\t{var} = {b} - {a};'.format(var = tmpvar, a = params[0], b = params[1])
+	a = params[0]
+	b = params[1]
+	a_size = prog.paramSize(rawParams[0])
+	if prog.lastSize != a_size:
+		a = '(({a}) & {mask})'.format(a = a, mask = (1 << prog.lastSize) - 1)
+	if prog.lastSize != b_size:
+		b = '(({b}) & {mask})'.format(b = b, mask = (1 << prog.lastSize) - 1)
+	if size == 64:
+		a = '((uint64_t){a})'.format(a = a)
+		b = '((uint64_t){b})'.format(b = b)
+	return '\n\t{var} = {b} - {a};'.format(var = tmpvar, a = a, b = b)
 
 def _asrCImpl(prog, params, rawParams, flagUpdates):
 	needsCarry = False
