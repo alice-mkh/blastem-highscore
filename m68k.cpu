@@ -1280,6 +1280,115 @@ m68k_save_dst
 	m68k_save_dst Z
 	m68k_prefetch
 
+00001100ZZMMMRRR cmpi
+	local immed 32
+	invalid Z 3
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	#fetch immediate operand
+	m68k_prefetch
+	switch Z
+	case 2
+		immed = prefetch << 16
+		m68k_prefetch
+		immed |= prefetch
+		if M = 0
+			cycles 2
+		end
+	default
+		immed = prefetch
+	end
+	#fetch dst EA
+	m68k_fetch_dst_ea M R Z
+	
+	cmp immed dst Z
+	update_flags NZVC
+	m68k_prefetch
+
+1011DDD1ZZ001SSS cmpm
+	invalid Z 3
+	scratch1 = aregs.S 
+	switch Z
+	case 0
+		ocall read_8
+	case 1
+		ocall read_16
+	case 2
+		m68k_read32
+	end
+	scratch2 = scratch1
+	if Z
+		addsize Z aregs.S aregs.S
+	else
+		if S = 7
+			aregs.S += 2
+		else
+			aregs.S += 1
+		end
+	end
+	scratch1 = aregs.D
+	switch Z
+	case 0
+		ocall read_8
+	case 1
+		ocall read_16
+	case 2
+		m68k_read32
+	end
+	if Z
+		addsize Z aregs.D aregs.D
+	else
+		if D = 7
+			aregs.D += 2
+		else
+			aregs.D += 1
+		end
+	end
+	cmp scratch2 scratch1 Z
+	update_flags NZVC
+	m68k_prefetch
+
+1011DDD0ZZMMMRRR cmp
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	invalid Z 3
+	m68k_fetch_src_ea M R Z
+	
+	if Z = 2
+		cycles 2
+	end
+	
+	cmp src dregs.D Z
+	update_flags NZVC
+	m68k_prefetch
+
+1011DDDZ11MMMRRR cmpa
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	local size 16
+	local ext_src 32
+	if Z
+		size = 2
+	else
+		size = 1
+	end
+	m68k_fetch_src_ea M R size
+	cycles 2
+	if size = 1
+		sext 32 src ext_src
+		meta src ext_src
+	end
+	cmp src aregs.D
+	update_flags NZVC
+	m68k_prefetch
+
 0100111001110000 reset
 	if reset_handler
 	pcall reset_handler m68k_reset_handler context
