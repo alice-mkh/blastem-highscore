@@ -1622,7 +1622,7 @@ void translate_m68k_bit(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 	if (src_op->mode == MODE_IMMED) {
 		if (inst->extra.size == OPSIZE_BYTE) {
 			src_op->disp &= 0x7;
-		} else if (inst->op != M68K_BTST && src_op->disp > 15) {
+		} else if (inst->op != M68K_BTST && (src_op->disp & 31) > 15) {
 			//bit operations that need to save the result have a 2 cycle penalty when operating on the upper word
 			cycles(&opts->gen, 2);
 		}
@@ -1648,10 +1648,10 @@ void translate_m68k_bit(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 					mov_rdispr(code, src_op->base, src_op->disp, opts->gen.scratch1, SZ_B);
 				}
 				src_op->base = opts->gen.scratch1;
-				}
 			}
-			uint8_t size = inst->extra.size;
-		if (dst_op->mode == MODE_REG_DISPLACE8) {
+		}
+		uint8_t size = inst->extra.size;
+		if (dst_op->mode == MODE_REG_DISPLACE8 || (inst->op != M68K_BTST && inst->extra.size != OPSIZE_BYTE)) {
 			if (src_op->base != opts->gen.scratch1 && src_op->base != opts->gen.scratch2) {
 				if (src_op->mode == MODE_REG_DIRECT) {
 					mov_rr(code, src_op->base, opts->gen.scratch1, SZ_D);
@@ -1664,7 +1664,8 @@ void translate_m68k_bit(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 			//b### with register destination is modulo 32
 			//x86 with a memory destination isn't modulo anything
 			//so use an and here to force the value to be modulo 32
-			and_ir(code, 31, opts->gen.scratch1, SZ_D);
+			//we also need to do this for the 2 cycle penalty check below
+			and_ir(code, 31, src_op->base, SZ_D);
 		} else if(inst->dst.addr_mode != MODE_REG) {
 			//b### with memory destination is modulo 8
 			//x86-64 doesn't support 8-bit bit operations
