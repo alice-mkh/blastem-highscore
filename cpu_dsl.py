@@ -1151,6 +1151,11 @@ _ifCmpImpl = {
 		'!=': _neqCImpl
 	}
 }
+_ifCmpEval = {
+	'>=U': lambda a, b: a >= b,
+	'=': lambda a, b: a == b,
+	'!=': lambda a, b: a != b
+}
 #represents a DSL conditional construct
 class If(ChildBlock):
 	def __init__(self, parent, cond):
@@ -1214,6 +1219,13 @@ class If(ChildBlock):
 			self._genConstParam(prog.checkBool(self.cond), prog, fieldVals, output, otype)
 		else:
 			if self.cond in _ifCmpImpl[otype]:
+				if prog.lastOp.op == 'cmp':
+					params = [prog.resolveParam(p, parent, fieldVals) for p in prog.lastOp.params]
+					if type(params[0]) is int and type(params[1]) is int:
+						output.pop()
+						res = _ifCmpEval[self.cond](params[1], params[0])
+						self._genConstParam(res, prog, fieldVals, output, otype)
+						return
 				oldCond = prog.conditional
 				prog.conditional = True
 				#temp = prog.temp.copy()
