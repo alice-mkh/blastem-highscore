@@ -1623,6 +1623,46 @@ m68k_save_dst
 	m68k_save_dst size
 	m68k_prefetch
 
+0000DDD10Z001AAA movep_ay_dx
+	local address 32
+	m68k_prefetch
+	scratch1 += aregs.A
+	address = scratch1 + 2
+	ocall read_8
+	dregs.D:1 = scratch1 << 8
+	scratch1 = address
+	ocall read_8
+	dregs.D:0 = scratch1
+	if Z
+		address += 2
+		scratch1 = address
+		dregs.D <<= 16
+		ocall read_8
+		dregs.D:1 = scratch1 << 8
+		scratch1 = address + 2
+		ocall read_8
+		dregs.D:0 = scratch1
+	end
+	m68k_prefetch
+
+0000DDD11Z001AAA movep_dx_ay
+	m68k_prefetch
+	scratch2 = scratch1 + aregs.A
+	if Z
+		scratch1 = dregs.D >> 24
+		ocall write_8
+		scratch2 += 2
+		scratch1 = dregs.D >> 16
+		ocall write_8
+		scratch2 += 2
+	end
+	scratch1 = dregs.D >> 8
+	ocall write_8
+	scratch2 += 2
+	scratch1 = dregs.D
+	ocall write_8
+	m68k_prefetch
+
 0100111001110000 reset
 	if reset_handler
 	pcall reset_handler m68k_reset_handler context
