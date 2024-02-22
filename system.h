@@ -19,7 +19,8 @@ typedef enum {
 	SYSTEM_JAGUAR,
 	SYSTEM_MEDIA_PLAYER,
 	SYSTEM_COLECOVISION,
-	SYSTEM_PICO
+	SYSTEM_PICO,
+	SYSTEM_COPERA
 } system_type;
 
 typedef enum {

@@ -615,6 +615,8 @@ int main(int argc, char ** argv)
 					stype = force_stype = SYSTEM_GENESIS;
 				} else if (!strcmp("pico", argv[i])) {
 					stype = force_stype = SYSTEM_PICO;
+				} else if (!strcmp("copera", argv[i])) {
+					stype = force_stype = SYSTEM_COPERA;
 				} else if (!strcmp("jag", argv[i])) {
 					stype = force_stype = SYSTEM_JAGUAR;
 				} else if (!strcmp("media", argv[i])) {

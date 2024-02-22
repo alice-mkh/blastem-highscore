@@ -41,6 +41,21 @@ system_type detect_system_type(system_media *media)
 	) {
 		return SYSTEM_SMS;
 	}
+	if (media->size > 400) {
+		uint8_t *buffer = media->buffer;
+		if (!memcmp(buffer + 4, "\x00\x00\x04\x00", 4) && (buffer[0x80] == 0 || buffer[0x80] == 0xFF)) {
+			int i = 0x81;
+			for(; i < 0x400; i++)
+			{
+				if (buffer[i] != buffer[0x80]) {
+					break;
+				}
+			}
+			if (i == 0x400) {
+				return SYSTEM_COPERA;
+			}
+		}
+	}
 	if (safe_cmp("BLSTEL\x02", 0, media->buffer, media->size)) {
 		uint8_t *buffer = media->buffer;
 		if (media->size > 9 && buffer[7] == 0) {
@@ -119,7 +134,8 @@ system_header *alloc_config_system(system_type stype, system_media *media, uint3
 	case SYSTEM_MEDIA_PLAYER:
 		return &(alloc_media_player(media, opts))->header;
 	case SYSTEM_PICO:
-		return &(alloc_config_pico(media->buffer, media->size, lock_on, lock_on_size, opts, force_region))->header;
+	case SYSTEM_COPERA:
+		return &(alloc_config_pico(media->buffer, media->size, lock_on, lock_on_size, opts, force_region, stype))->header;
 	default:
 		return NULL;
 	}

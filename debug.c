@@ -4830,15 +4830,24 @@ debug_root *find_m68k_root(m68k_context *context)
 		{
 		case SYSTEM_GENESIS:
 		case SYSTEM_SEGACD:
+		case SYSTEM_PICO:
+		case SYSTEM_COPERA:
 			//check if this is the main CPU
 			if (context->system == current_system) {
 				genesis_context *gen = context->system;
-				root->other_roots = tern_insert_ptr(root->other_roots, "z80", find_z80_root(gen->z80));
+				if (current_system->type == SYSTEM_GENESIS || current_system->type == SYSTEM_SEGACD) {
+					root->other_roots = tern_insert_ptr(root->other_roots, "z80", find_z80_root(gen->z80));
+					root->other_roots = tern_insert_ptr(root->other_roots, "io", find_io_root(&gen->io));
+				}
 				root->other_roots = tern_insert_ptr(root->other_roots, "vdp", find_vdp_root(gen->vdp));
-				root->other_roots = tern_insert_ptr(root->other_roots, "ym", find_ym2612_root(gen->ym));
 				root->other_roots = tern_insert_ptr(root->other_roots, "psg", find_psg_root(gen->psg));
-				root->other_roots = tern_insert_ptr(root->other_roots, "io", find_io_root(&gen->io));
-				add_commands(root, genesis_commands, NUM_GENESIS);
+				uint32_t num_commands = NUM_GENESIS;
+				if (current_system->type == SYSTEM_PICO || current_system->type == SYSTEM_COPERA) {
+					num_commands -= 3;
+				} else {
+					root->other_roots = tern_insert_ptr(root->other_roots, "ym", find_ym2612_root(gen->ym));
+				}
+				add_commands(root, genesis_commands, num_commands);
 				var = calloc(1, sizeof(debug_var));
 				var->get = debug_frame_get;
 				var->ptr = gen->vdp;

@@ -70,7 +70,7 @@ void genesis_serialize(genesis_context *gen, serialize_buffer *buf, uint32_t m68
 	vdp_serialize(gen->vdp, buf);
 	end_section(buf);
 
-	if (gen->header.type != SYSTEM_PICO) {
+	if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 		start_section(buf, SECTION_YM2612);
 		ym_serialize(gen->ym, buf);
 		end_section(buf);
@@ -235,7 +235,7 @@ void genesis_deserialize(deserialize_buffer *buf, genesis_context *gen)
 		register_section_handler(buf, (section_handler){.fun = zram_deserialize, .data = gen}, SECTION_SOUND_RAM);
 		register_section_handler(buf, (section_handler){.fun = tmss_deserialize, .data = gen}, SECTION_TMSS);
 	}
-	if (gen->header.type != SYSTEM_PICO) {
+	if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 		register_section_handler(buf, (section_handler){.fun = ym_deserialize, .data = gen->ym}, SECTION_YM2612);
 	}
 	if (gen->expansion) {
@@ -906,7 +906,7 @@ static m68k_context* sync_components_pico(m68k_context * context, uint32_t addre
 static m68k_context *int_ack(m68k_context *context)
 {
 	genesis_context * gen = context->system;
-	if (gen->header.type != SYSTEM_PICO || context->int_num > 4 || context->int_num < 3) {
+	if ((gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) || context->int_num > 4 || context->int_num < 3) {
 		vdp_context * v_context = gen->vdp;
 		//printf("acknowledging %d @ %d:%d, vcounter: %d, hslot: %d\n", context->int_ack, context->current_cycle, v_context->cycles, v_context->vcounter, v_context->hslot);
 		vdp_run_context(v_context, context->current_cycle);
@@ -940,7 +940,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 	//do refresh check here so we can avoid adding a penalty for a refresh that happens during a VDP access
 	gen_update_refresh_free_access(context);
 
-	if (gen->header.type == SYSTEM_PICO) {
+	if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 		sync_components_pico(context, 0);
 	} else {
 		sync_components(context, 0);
@@ -963,7 +963,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 						}
 						context->current_cycle += m68k_cycle_diff;
 						gen->bus_busy = 1;
-						if (gen->header.type == SYSTEM_PICO) {
+						if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 							sync_components_pico(context, 0);
 						} else {
 							sync_components(context, 0);
@@ -990,7 +990,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 							}
 							context->current_cycle += m68k_cycle_diff;
 							gen->bus_busy = 1;
-							if (gen->header.type == SYSTEM_PICO) {
+							if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 								sync_components_pico(context, 0);
 							} else {
 								sync_components(context, 0);
@@ -1008,7 +1008,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 			} else {
 				context->sync_cycle = gen->frame_end = vdp_cycles_to_frame_end(v_context);
 				//printf("Set sync cycle to: %d @ %d, vcounter: %d, hslot: %d\n", context->sync_cycle, context->current_cycle, v_context->vcounter, v_context->hslot);
-				if (gen->header.type == SYSTEM_PICO) {
+				if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 					adjust_int_cycle_pico(context, v_context);
 				} else {
 					adjust_int_cycle(context, v_context);
@@ -1097,7 +1097,7 @@ static uint16_t vdp_port_read(uint32_t vdp_port, m68k_context * context)
 	//do refresh check here so we can avoid adding a penalty for a refresh that happens during a VDP access
 	gen_update_refresh_free_access(context);
 
-	if (gen->header.type == SYSTEM_PICO) {
+	if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 		sync_components_pico(context, 0);
 	} else {
 		sync_components(context, 0);
@@ -1513,6 +1513,13 @@ static uint8_t pico_io_read(uint32_t location, void *vcontext)
 		return gen->pico_pen_y;
 	case 6:
 		return gen->pico_page;
+	case 7:
+		//Copera titles seem to expect bit 0 to be 0 on a Copera and 1 on a Pico
+		if (gen->header.type == SYSTEM_PICO) {
+			return 1;
+		} else {
+			return 0;
+		}
 	case 8:
 		//printf("uPD7759 data read @ %u\n", m68k->current_cycle);
 		sync_sound_pico(gen, m68k->current_cycle);
@@ -1544,6 +1551,56 @@ static uint16_t pico_io_read_w(uint32_t location, void *vcontext)
 	}
 	uint16_t value = pico_io_read(location, vcontext);
 	return value | (value << 8);
+}
+
+static uint16_t copera_io_read_w(uint32_t location, void *vcontext)
+{
+	printf("Unhandled Copera 16-bit read %X\n", location);
+	return 0xFFFF;
+}
+
+static uint8_t copera_io_read(uint32_t location, void *vcontext)
+{
+	printf("Unhandled Copera 8-bit read %X\n", location);
+	return 0xFF;
+}
+
+static void* copera_io_write_w(uint32_t location, void *vcontext, uint16_t value)
+{
+	printf("Unhandled Copera 16-bit write %X: %X\n", location, value);
+	return vcontext;
+}
+
+static void* copera_io_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	switch (location & 0xFF)
+	{
+	case 1:
+	case 5:
+		printf("Copera YMZ263 Address write - %X: %X\n", location, value);
+		break;
+	case 3:
+	case 7:
+		printf("Copera YMZ263 Channel #%d Data write - %X: %X\n", ((location & 4) >> 2) + 1, location, value);
+		break;
+	case 0x24:
+	case 0x34:
+		printf("Copera YMF263 Address Part #%d write - %X: %X\n", ((location >> 4) & 1) + 1, location, value);
+		break;
+	case 0x28:
+		printf("Copera YMF263 Data write - %X: %X\n", location, value);
+		break;
+	case 0x40:
+		//Bit 4 = SCI
+		//Bit 5 = DIN
+		//Bit 6 = A0
+		//Possible Bit 0-3 are the same but for the other YM7128B
+		printf("Copera YM7128B Write - %X: %X\n", location, value);
+		break;
+	default:
+		printf("Unhandled Copera 8-bit write %X: %X\n", location, value);
+	}
+	return vcontext;
 }
 
 static void * z80_write_ym(uint32_t location, void * vcontext, uint8_t value)
@@ -1790,7 +1847,7 @@ void set_region(genesis_context *gen, rom_info *info, uint8_t region)
 		}
 	}
 	uint8_t is_50hz = 0;
-	if (gen->header.type == SYSTEM_PICO) {
+	if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 		if (region & REGION_E) {
 			is_50hz = 1;
 			gen->version_reg = 0x20;
@@ -1865,7 +1922,7 @@ static void handle_reset_requests(genesis_context *gen)
 				z80_assert_reset(gen->z80, gen->m68k->current_cycle);
 				z80_clear_busreq(gen->z80, gen->m68k->current_cycle);
 			}
-			if (gen->header.type != SYSTEM_PICO) {
+			if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 				ym_reset(gen->ym);
 			}
 			//Is there any sort of VDP reset?
@@ -1880,7 +1937,7 @@ static void handle_reset_requests(genesis_context *gen)
 	if (gen->header.force_release || render_should_release_on_exit()) {
 		bindings_release_capture();
 		vdp_release_framebuffer(gen->vdp);
-		if (gen->header.type != SYSTEM_PICO) {
+		if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 			render_pause_source(gen->ym->audio);
 		}
 		render_pause_source(gen->psg->audio);
@@ -1912,7 +1969,7 @@ static void start_genesis(system_header *system, char *statefile)
 			insert_breakpoint(gen->m68k, pc, gen->header.debugger_type == DEBUGGER_NATIVE ? debugger : gdb_debug_enter);
 #endif
 		}
-		if (gen->header.type == SYSTEM_PICO) {
+		if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 			adjust_int_cycle_pico(gen->m68k, gen->vdp);
 		} else {
 			adjust_int_cycle(gen->m68k, gen->vdp);
@@ -1938,14 +1995,14 @@ static void resume_genesis(system_header *system)
 	genesis_context *gen = (genesis_context *)system;
 	if (gen->header.force_release || render_should_release_on_exit()) {
 		gen->header.force_release = 0;
-		if (gen->header.type == SYSTEM_PICO) {
+		if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 			render_set_video_standard((gen->version_reg & 0x60) == 0x20 ? VID_PAL : VID_NTSC);
 		} else {
 			render_set_video_standard((gen->version_reg & HZ50) ? VID_PAL : VID_NTSC);
 		}
 		bindings_reacquire_capture();
 		vdp_reacquire_framebuffer(gen->vdp);
-		if (gen->header.type != SYSTEM_PICO) {
+		if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 			render_resume_source(gen->ym->audio);
 		}
 		render_resume_source(gen->psg->audio);
@@ -2099,7 +2156,7 @@ static void free_genesis(system_header *system)
 		free(gen->z80);
 		free(gen->zram);
 	}
-	if (gen->header.type == SYSTEM_PICO) {
+	if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 		pico_pcm_free(gen->adpcm);
 		free(gen->adpcm);
 	} else {
@@ -2295,7 +2352,7 @@ static void set_audio_config(genesis_context *gen)
 	char *config_gain;
 	config_gain = tern_find_path(config, "audio\0psg_gain\0", TVAL_PTR).ptrval;
 	render_audio_source_gaindb(gen->psg->audio, config_gain ? atof(config_gain) : 0.0f);
-	if (gen->header.type != SYSTEM_PICO) {
+	if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 		config_gain = tern_find_path(config, "audio\0fm_gain\0", TVAL_PTR).ptrval;
 		render_audio_source_gaindb(gen->ym->audio, config_gain ? atof(config_gain) : 0.0f);
 
@@ -2320,7 +2377,7 @@ static void config_updated(system_header *system)
 	}
 	set_audio_config(gen);
 	//sample rate may have changed
-	if (gen->header.type != SYSTEM_PICO) {
+	if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 		ym_adjust_master_clock(gen->ym, gen->master_clock);
 	}
 	psg_adjust_master_clock(gen->psg, gen->master_clock);
@@ -2336,7 +2393,7 @@ static void start_vgm_log(system_header *system, char *filename)
 	if (vgm) {
 		printf("Started logging VGM to %s\n", filename);
 		sync_sound(gen, vgm->last_cycle);
-		if (gen->header.type != SYSTEM_PICO) {
+		if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 			ym_vgm_log(gen->ym, gen->normal_clock, vgm);
 		}
 		psg_vgm_log(gen->psg, gen->normal_clock, vgm);
@@ -2351,7 +2408,7 @@ static void stop_vgm_log(system_header *system)
 	puts("Stopped VGM log");
 	genesis_context *gen = (genesis_context *)system;
 	vgm_close(gen->ym->vgm);
-	if (gen->header.type != SYSTEM_PICO) {
+	if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 		gen->ym->vgm = NULL;
 	}
 	gen->psg->vgm = NULL;
@@ -2367,7 +2424,7 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 	} else if (debug_view == DEBUG_OSCILLOSCOPE) {
 		if (gen->psg->scope) {
 			oscilloscope *scope = gen->psg->scope;
-			if (gen->header.type == SYSTEM_PICO) {
+			if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 				gen->adpcm->scope = NULL;
 			} else {
 				gen->ym->scope = NULL;
@@ -2380,7 +2437,7 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 			scope_close(scope);
 		} else {
 			oscilloscope *scope = create_oscilloscope();
-			if (gen->header.type == SYSTEM_PICO) {
+			if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 				pico_pcm_enable_scope(gen->adpcm, scope, gen->normal_clock);
 			} else {
 				ym_enable_scope(gen->ym, scope, gen->normal_clock);
@@ -2989,15 +3046,21 @@ static memmap_chunk pico_base_map[] = {
 	{0xE00000, 0x1000000, 0xFFFF, .flags = MMAP_READ | MMAP_WRITE | MMAP_CODE},
 	{0xC00000, 0xE00000,  0x1FFFFF, .read_16 = (read_16_fun)vdp_port_read,  .write_16 =(write_16_fun)vdp_port_write,
 			   .read_8 = (read_8_fun)vdp_port_read_b, .write_8 = (write_8_fun)vdp_port_write_b},
-	{0x800000, 0x900000,  0xFFFFFF,  .read_16 = pico_io_read_w, .write_16 = pico_io_write_w,
-			   .read_8 = pico_io_read, .write_8 = pico_io_write}
+	{0x800000, 0x900000,  0xFFFFFF, .read_16 = pico_io_read_w, .write_16 = pico_io_write_w,
+			   .read_8 = pico_io_read, .write_8 = pico_io_write},
+	{0xB00000, 0xC00000,  0xFFFFFF, .read_16 = copera_io_read_w, .write_16 = copera_io_write_w, 
+	           .read_8 = copera_io_read, .write_8 = copera_io_write}
 };
 const size_t pico_base_chunks = sizeof(pico_base_map)/sizeof(*pico_base_map);
 
-genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, uint32_t lock_on_size, uint32_t ym_opts, uint8_t force_region)
+genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, uint32_t lock_on_size, uint32_t ym_opts, uint8_t force_region, system_type stype)
 {
 	tern_node *rom_db = get_rom_db();
-	rom_info info = configure_rom(rom_db, rom, rom_size, lock_on, lock_on_size, pico_base_map, pico_base_chunks);
+	uint32_t chunks = pico_base_chunks;
+	if (stype == SYSTEM_PICO) {
+		chunks--;
+	}
+	rom_info info = configure_rom(rom_db, rom, rom_size, lock_on, lock_on_size, pico_base_map, chunks);
 	rom = info.rom;
 	rom_size = info.rom_size;
 #ifndef BLASTEM_BIG_ENDIAN
@@ -3040,7 +3103,7 @@ genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, 
 	gen->header.start_vgm_log = start_vgm_log;
 	gen->header.stop_vgm_log = stop_vgm_log;
 	gen->header.toggle_debug_view = toggle_debug_view;
-	gen->header.type = SYSTEM_PICO;
+	gen->header.type = stype;
 	gen->header.info = info;
 	set_region(gen, &info, force_region);
 	gen->vdp_unlocked = 1;
