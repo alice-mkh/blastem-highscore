@@ -1492,7 +1492,13 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 		close_handlers = realloc(close_handlers, (num_textures - FRAMEBUFFER_USER_START) * sizeof(*close_handlers));
 		win_idx = num_textures - FRAMEBUFFER_USER_START - 1;
 	}
-	extra_windows[win_idx] = SDL_CreateWindow(caption, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, 0);
+	int x = SDL_WINDOWPOS_UNDEFINED;
+	int y = SDL_WINDOWPOS_UNDEFINED;
+	SDL_GetWindowPosition(main_window, &x, &y);
+	if (x != SDL_WINDOWPOS_UNDEFINED) {
+		x += main_width;
+	}
+	extra_windows[win_idx] = SDL_CreateWindow(caption, x, y, width, height, 0);
 	if (!extra_windows[win_idx]) {
 		goto fail_window;
 	}
