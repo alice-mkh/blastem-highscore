@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdlib.h>
 #include "system.h"
 #include "genesis.h"
 #include "gen_player.h"
@@ -142,6 +143,10 @@ void system_request_exit(system_header *system, uint8_t force_release)
 
 void* load_media_subfile(const system_media *media, char *path, uint32_t *sizeout)
 {
+#ifdef IS_LIB
+	//TODO: Figure out how to handle Pico artwork and similar cases in libretro builds
+	return NULL;
+#else
 	char *to_free = NULL;
 	void *buffer = NULL;
 	uint32_t size = 0;
@@ -181,4 +186,5 @@ end:
 	}
 	free(to_free);
 	return buffer;
+#endif
 }

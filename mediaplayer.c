@@ -453,9 +453,12 @@ void vgm_frame(media_player *player)
 		}
 	}
 frame_end:
+#ifndef IS_LIB
 	if (player->scope) {
 		scope_render(player->scope);
 	}
+#endif
+	return;
 }
 
 void wave_frame(media_player *player)
