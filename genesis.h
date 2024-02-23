@@ -18,6 +18,7 @@
 #include "vdp.h"
 #include "psg.h"
 #include "pico_pcm.h"
+#include "ymz263b.h"
 #include "io.h"
 #include "romdb.h"
 #include "arena.h"
@@ -33,6 +34,7 @@ struct genesis_context {
 	ym2612_context  *ym;
 	psg_context     *psg;
 	pico_pcm        *adpcm;
+	ymz263b         *ymz;
 	uint16_t        *cart;
 	uint16_t        *lock_on;
 	uint16_t        *work_ram;

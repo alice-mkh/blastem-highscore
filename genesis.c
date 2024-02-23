@@ -688,9 +688,15 @@ static void sync_sound_pico(genesis_context * gen, uint32_t target)
 		uint32_t cur_target = gen->psg->cycles + MAX_SOUND_CYCLES;
 		psg_run(gen->psg, cur_target);
 		pico_pcm_run(gen->adpcm, cur_target);
+		if (gen->ymz) {
+			ymz263b_run(gen->ymz, cur_target);
+		}
 	}
 	psg_run(gen->psg, target);
 	pico_pcm_run(gen->adpcm, target);
+	if (gen->ymz) {
+		ymz263b_run(gen->ymz, target);
+	}
 }
 
 static void adjust_int_cycle_pico(m68k_context *context, vdp_context *v_context)
@@ -717,13 +723,8 @@ static void adjust_int_cycle_pico(m68k_context *context, vdp_context *v_context)
 
 				}
 			}
-			if (mask < 3) {
-				uint32_t next_pcm_int = pico_pcm_next_int(gen->adpcm);
-				if (next_pcm_int != CYCLE_NEVER && next_pcm_int < context->int_cycle) {
-					context->int_cycle = next_pcm_int;
-					context->int_num = 3;
-				}
-				if (mask < 2 && (v_context->regs[REG_MODE_3] & BIT_EINT_EN) && gen->header.type == SYSTEM_GENESIS) {
+			if (mask < 4) {
+				if (v_context->regs[REG_MODE_3] & BIT_EINT_EN) {
 					uint32_t next_eint_port0 = io_next_interrupt(gen->io.ports, context->current_cycle);
 					uint32_t next_eint_port1 = io_next_interrupt(gen->io.ports + 1, context->current_cycle);
 					uint32_t next_eint_port2 = io_next_interrupt(gen->io.ports + 2, context->current_cycle);
@@ -734,6 +735,21 @@ static void adjust_int_cycle_pico(m68k_context *context, vdp_context *v_context)
 						next_eint = next_eint < context->current_cycle ? context->current_cycle : next_eint;
 						if (next_eint < context->int_cycle) {
 							context->int_cycle = next_eint;
+							context->int_num = 2;
+						}
+					}
+				}
+				if (mask < 3) {
+					uint32_t next_pcm_int = pico_pcm_next_int(gen->adpcm);
+					if (next_pcm_int != CYCLE_NEVER && next_pcm_int < context->int_cycle) {
+						context->int_cycle = next_pcm_int;
+						context->int_num = 3;
+					}
+					
+					if (mask < 2 && gen->ymz) {
+						uint32_t ymz_int = ymz263b_next_int(gen->ymz);
+						if (ymz_int < context->int_cycle) {
+							context->int_cycle = ymz_int;
 							context->int_num = 2;
 						}
 					}
@@ -834,6 +850,9 @@ static m68k_context* sync_components_pico(m68k_context * context, uint32_t addre
 			}
 			gen->psg->cycles -= deduction;
 			gen->adpcm->cycle -= deduction;
+			if (gen->ymz) {
+				gen->ymz->cycle -= deduction;
+			}
 			if (gen->reset_cycle != CYCLE_NEVER) {
 				gen->reset_cycle -= deduction;
 			}
@@ -906,7 +925,7 @@ static m68k_context* sync_components_pico(m68k_context * context, uint32_t addre
 static m68k_context *int_ack(m68k_context *context)
 {
 	genesis_context * gen = context->system;
-	if ((gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) || context->int_num > 4 || context->int_num < 3) {
+	if ((gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) || context->int_num > 3) {
 		vdp_context * v_context = gen->vdp;
 		//printf("acknowledging %d @ %d:%d, vcounter: %d, hslot: %d\n", context->int_ack, context->current_cycle, v_context->cycles, v_context->vcounter, v_context->hslot);
 		vdp_run_context(v_context, context->current_cycle);
@@ -1561,8 +1580,28 @@ static uint16_t copera_io_read_w(uint32_t location, void *vcontext)
 
 static uint8_t copera_io_read(uint32_t location, void *vcontext)
 {
-	printf("Unhandled Copera 8-bit read %X\n", location);
-	return 0xFF;
+	uint8_t ret;
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
+	switch (location & 0xFF)
+	{
+	case 1:
+	case 5:
+		ymz263b_run(gen->ymz, m68k->current_cycle);
+		ret = ymz263b_status_read(gen->ymz);
+		printf("Copera YMZ263 Status read - %X: %X\n", location, ret);
+		adjust_int_cycle_pico(gen->m68k, gen->vdp);
+		return ret;
+	case 3:
+	case 7:
+		ymz263b_run(gen->ymz, m68k->current_cycle);
+		ret = ymz263b_data_read(gen->ymz, location & 4);
+		printf("Copera YMZ263 Data read - %X: %X\n", location, ret);
+		return ret;
+	default:
+		printf("Unhandled Copera 8-bit read %X\n", location);
+		return 0xFF;
+	}
 }
 
 static void* copera_io_write_w(uint32_t location, void *vcontext, uint16_t value)
@@ -1573,22 +1612,29 @@ static void* copera_io_write_w(uint32_t location, void *vcontext, uint16_t value
 
 static void* copera_io_write(uint32_t location, void *vcontext, uint8_t value)
 {
+	m68k_context *m68k = vcontext;
+	genesis_context *gen = m68k->system;
 	switch (location & 0xFF)
 	{
 	case 1:
 	case 5:
+		ymz263b_run(gen->ymz, m68k->current_cycle);
 		printf("Copera YMZ263 Address write - %X: %X\n", location, value);
+		ymz263b_address_write(gen->ymz, value);
 		break;
 	case 3:
 	case 7:
+		ymz263b_run(gen->ymz, m68k->current_cycle);
 		printf("Copera YMZ263 Channel #%d Data write - %X: %X\n", ((location & 4) >> 2) + 1, location, value);
+		ymz263b_data_write(gen->ymz, location & 4, value);
+		adjust_int_cycle_pico(gen->m68k, gen->vdp);
 		break;
 	case 0x24:
 	case 0x34:
-		printf("Copera YMF263 Address Part #%d write - %X: %X\n", ((location >> 4) & 1) + 1, location, value);
+		printf("Copera YMF262 Address Part #%d write - %X: %X\n", ((location >> 4) & 1) + 1, location, value);
 		break;
 	case 0x28:
-		printf("Copera YMF263 Data write - %X: %X\n", location, value);
+		printf("Copera YMF262 Data write - %X: %X\n", location, value);
 		break;
 	case 0x40:
 		//Bit 4 = SCI
@@ -2159,6 +2205,10 @@ static void free_genesis(system_header *system)
 	if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
 		pico_pcm_free(gen->adpcm);
 		free(gen->adpcm);
+		if (gen->ymz) {
+			//TODO: call cleanup function once it exists
+			free(gen->ymz);
+		}
 	} else {
 		ym_free(gen->ym);
 	}
@@ -3124,6 +3174,14 @@ genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, 
 	
 	gen->adpcm = calloc(1, sizeof(pico_pcm));
 	pico_pcm_init(gen->adpcm, gen->master_clock, 42);
+	
+	if (stype == SYSTEM_COPERA) {
+		gen->ymz = calloc(1, sizeof(*gen->ymz));
+		//This divider is just a guess, PCB diagram in MAME shows no other crystal
+		//Datasheet says the typical clock is 16.9344 MHz
+		//Master clock / 3 is 17.897725 MHz which is reasonably close
+		ymz263b_init(gen->ymz, 3);
+	}
 	
 	gen->work_ram = calloc(2, RAM_WORDS);
 	if (!strcmp("random", tern_find_path_default(config, "system\0ram_init\0", (tern_val){.ptrval = "zero"}, TVAL_PTR).ptrval))
