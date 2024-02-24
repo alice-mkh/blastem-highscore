@@ -395,6 +395,7 @@ class Op:
 				if destSize > size:
 					needsSizeAdjust = True
 					prog.sizeAdjust = size
+			needsCarry = needsOflow = needsHalf = False
 			if op == '-':
 				if flagUpdates:
 					for flag in flagUpdates:
@@ -407,13 +408,15 @@ class Op:
 							needsOflow = True
 				if needsCarry or needsOflow or needsHalf or (flagUpdates and needsSizeAdjust):
 					size = prog.paramSize(rawParams[1])
-					if needsCarry:
-						size *= 2
 					decl,name = prog.getTemp(size)
 					dst = prog.carryFlowDst = name
 					prog.lastA = 0
 					prog.lastB = params[0]
 					prog.lastBFlow = params[0]
+					if needsSizeAdjust:
+						return decl + '\n\t{dst} = {op}({a} & {mask});'.format(
+							dst = dst, a = params[0], op = op, mask = (1 << prog.sizeAdjust) - 1
+						)
 			if needsSizeAdjust:
 				return decl + '\n\t{dst} = ({dst} & ~{mask}) | (({op}{a}) & {mask});'.format(
 					dst = dst, a = params[0], op = op, mask = (1 << prog.sizeAdjust) - 1
@@ -498,6 +501,23 @@ def _updateFlagsCImpl(prog, params, rawParams):
 						#FIXME!!!!!
 						resultBit = 0
 					myRes = prog.lastA
+				elif prog.lastOp.op == 'neg':
+					if prog.carryFlowDst:
+						realSize = prog.getLastSize()
+						if realSize != prog.paramSize(prog.carryFlowDst):
+							lastDst = '({res} & {mask})'.format(res=lastDst, mask = (1 << realSize) - 1)
+					if type(storage) is tuple:
+						reg,storageBit = storage
+						reg = prog.resolveParam(reg, None, {})
+						output.append('\n\t{reg} = {res} ? ({reg} | {bit}U) : ({reg} & {mask}U);'.format(
+							reg = reg, mask = ~(1 << storageBit), res = lastDst, bit = 1 << storageBit
+						))
+					else:
+						reg = prog.resolveParam(storage, None, {})
+						output.append('\n\t{reg} = {res} != 0;'.format(
+							reg = reg, res = lastDst
+						))
+					continue
 				else:
 					resultBit = prog.getLastSize()
 					if prog.lastOp.op == 'ror':
