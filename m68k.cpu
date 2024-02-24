@@ -1256,6 +1256,11 @@ m68k_save_dst
 	m68k_fetch_dst_ea M R Z
 	sbc dst 0 dst Z
 	update_flags XNZVC
+	if Z = 2
+		if M = 0
+			cycles 2
+		end
+	end
 	m68k_save_dst Z
 	m68k_prefetch
 
@@ -1661,6 +1666,48 @@ m68k_save_dst
 	scratch2 += 2
 	scratch1 = dregs.D
 	ocall write_8
+	m68k_prefetch
+
+01000100ZZMMMRRR neg
+	invalid Z 3
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R Z
+	dst:Z = -dst
+	update_flags XNZVC
+	if Z = 2
+		if M = 0
+			cycles 2
+		end
+	end
+	m68k_save_dst Z
+	m68k_prefetch
+
+01000110ZZMMMRRR not
+	invalid Z 3
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R Z
+	dst:Z = ~dst
+	update_flags NZV0C0
+	if Z = 2
+		if M = 0
+			cycles 2
+		end
+	end
+	m68k_save_dst Z
 	m68k_prefetch
 
 0100111001110000 reset
