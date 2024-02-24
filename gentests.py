@@ -51,9 +51,9 @@ class Program(object):
 		if 'label' in already:
 			outfile.write('lbl_' + str(already['label']) + ':\n')
 		outfile.write('\t'+str(self.inst)+'\n')
-		outfile.write('\t'+self.inst.save_result(self.get_dreg(), True) + '\n')
 		save_ccr = self.get_dreg()
 		outfile.write('\tmove SR, ' + str(save_ccr) + '\n')
+		outfile.write('\t'+self.inst.save_result(self.get_dreg(), True) + '\n')
 		outfile.write('\tmove #$1F, CCR\n')
 		self.inst.invalidate_dest(already)
 		self.inst.write_init(outfile, already)
