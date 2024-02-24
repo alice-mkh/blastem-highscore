@@ -1371,8 +1371,10 @@ static void read_map_mode4(uint16_t column, uint32_t line, vdp_context * context
 	uint32_t vscroll = line;
 	if (column < 24 || !(context->regs[REG_MODE_1] & BIT_VSCRL_LOCK)) {
 		vscroll += context->regs[REG_Y_SCROLL];
+		vscroll &= 511;
 	}
 	if (vscroll > 223) {
+		//TODO: support V28 and V30 for SMS2/GG VDPs
 		vscroll -= 224;
 	}
 	address += (vscroll >> 3) * 2 * 32;
