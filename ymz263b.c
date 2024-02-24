@@ -113,33 +113,29 @@ void ymz263b_run(ymz263b *ymz, uint32_t target_cycle)
 	for (; ymz->cycle < target_cycle; ymz->cycle += ymz->clock_inc)
 	{
 		if (timer_ctrl & BIT_ST0) {
-			if (ymz->timers[0]) {
-				ymz->timers[0]--;
-			} else {
+			ymz->timers[0]--;
+			if (!ymz->timers[0]) {
 				ymz->timers[0] = ymz->base_regs[YMZ_TIMER0_HIGH] << 8 | ymz->base_regs[YMZ_TIMER0_LOW];
 				ymz->status |= STATUS_T0;
 			}
 		}
 		if (timer_ctrl & BIT_STBC) {
-			if (ymz->timers[3]) {
-				ymz->timers[3]--;
-			} else {
+			ymz->timers[3]--;
+			if (!ymz->timers[3]) {
 				ymz->timers[3] = ymz->base_regs[YMZ_TIMER1] << 8 & 0xF00;
 				ymz->timers[3] |= ymz->base_regs[YMZ_TIMER_BASE];
 				
 				if (timer_ctrl & BIT_ST1) {
-					if (ymz->timers[1]) {
-						ymz->timers[1]--;
-					} else {
+					ymz->timers[1]--;
+					if (!ymz->timers[1]) {
 						ymz->timers[1] = ymz->base_regs[YMZ_TIMER1] >> 4;
 						ymz->status |= STATUS_T1;
 					}
 				}
 				
 				if (timer_ctrl & BIT_ST2) {
-					if (ymz->timers[2]) {
-						ymz->timers[2]--;
-					} else {
+					ymz->timers[2]--;
+					if (!ymz->timers[2]) {
 						ymz->timers[2] = ymz->base_regs[YMZ_TIMER2_HIGH] << 8 | ymz->base_regs[YMZ_TIMER2_LOW];
 						ymz->status |= STATUS_T2;
 					}
@@ -194,23 +190,26 @@ uint32_t ymz263b_next_int(ymz263b *ymz)
 		enabled_ints &= 1;
 	}
 	if (enabled_ints & BIT_ST0) {
-		uint32_t t0 = ymz->cycle + (ymz->timers[0] + 1) * ymz->clock_inc;
+		uint32_t t0 = ymz->cycle + (ymz->timers[0] ? ymz->timers[0] : 0x10000) * ymz->clock_inc;
 		if (t0 < ret) {
 			ret = t0;
 		} 
 	}
 	if (enabled_ints & (BIT_ST1|BIT_ST2)) {
-		uint32_t base = ymz->cycle + (ymz->timers[3] + 1) * ymz->clock_inc;
+		uint32_t base = ymz->cycle + (ymz->timers[3] ? ymz->timers[3] : 0x1000) * ymz->clock_inc;
 		if (base < ret) {
 			uint32_t load = (ymz->base_regs[YMZ_TIMER1] << 8 & 0xF00) | ymz->base_regs[YMZ_TIMER_BASE];
+			if (!load) {
+				load = 0x1000;
+			}
 			if (enabled_ints & BIT_ST1) {
-				uint32_t t1 = ymz->timers[1] * (load + 1) * ymz->clock_inc;
+				uint32_t t1 = (ymz->timers[1] ? ymz->timers[1] - 1 : 0xF) * load * ymz->clock_inc;
 				if (t1 < ret) {
 					ret = t1;
 				}
 			}
 			if (enabled_ints & BIT_ST2) {
-				uint32_t t2 = ymz->timers[2] * (load + 1) * ymz->clock_inc;
+				uint32_t t2 = (ymz->timers[2] ? ymz->timers[2] - 1 : 0xFFFF) * load * ymz->clock_inc;
 				if (t2 < ret) {
 					ret = t2;
 				}
