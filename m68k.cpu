@@ -1710,6 +1710,18 @@ m68k_save_dst
 	m68k_save_dst Z
 	m68k_prefetch
 
+01001000ZZ000RRR ext
+	invalid Z 0
+	invalid Z 1
+	if Z = 3
+		meta bits 32
+	else
+		meta bits 16
+	end
+	sext bits dregs.R dregs.R
+	update_flags NZV0C0
+	m68k_prefetch
+
 0100111001110000 reset
 	if reset_handler
 	pcall reset_handler m68k_reset_handler context

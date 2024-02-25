@@ -712,6 +712,7 @@ def _sextCImpl(prog, params, rawParms):
 		fmt = '\n\t{dst} = {src} & 0x80 ? {src} | 0xFF00 : {src} & 0x7F;'
 	else:
 		fmt = '\n\t{dst} = {src} & 0x8000 ? {src} | 0xFFFF0000 : {src} & 0x7FFF;'
+	prog.lastSize = params[0]
 	return fmt.format(src=params[1], dst=params[2])
 	
 def _getCarryCheck(prog):
