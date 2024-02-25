@@ -503,6 +503,8 @@ class Entry(object):
 				sources = get_variations(src, size)
 				for source in sources:
 					for dest in dests:
+						if self.name == 'link':
+							dest.value = (dest.value //2) * 2
 						res.append(Program(Inst2Op(self.name, size, source, dest)))
 			else:
 				for dest in dests:
