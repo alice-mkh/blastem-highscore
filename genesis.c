@@ -3180,7 +3180,7 @@ genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, 
 		//This divider is just a guess, PCB diagram in MAME shows no other crystal
 		//Datasheet says the typical clock is 16.9344 MHz
 		//Master clock / 3 is 17.897725 MHz which is reasonably close
-		ymz263b_init(gen->ymz, 3);
+		ymz263b_init(gen->ymz, gen->master_clock, 3);
 	}
 	
 	gen->work_ram = calloc(2, RAM_WORDS);

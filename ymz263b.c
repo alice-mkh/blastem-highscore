@@ -36,7 +36,17 @@ enum {
 #define TIMER_INT_MASK (BIT_T0_MSK|BIT_T1_MSK|BIT_T2_MSK)
 
 //YMZ_PCM_PLAY_CTRL
+#define BIT_ADP_ST  0x01
+#define BIT_PLY_REC 0x02
+#define BIT_PCM     0x04
+#define BIT_PAN_L   0x20
+#define BIT_PAN_R   0x40
 #define BIT_ADP_RST 0x80
+
+//YMZ_PCM_FIFO_CTRL
+#define BIT_DMA_ENB 0x01
+#define BIT_MSK_FIF 0x02
+#define BIT_DMA_MOD 0x80
 
 //YMZ_MIDI_CTRL
 #define BIT_MSK_RRQ 0x01
@@ -55,19 +65,27 @@ enum {
 #define STATUS_T2   0x40
 #define STATUS_OV   0x80
 
+#define TIMER_DIVIDER 32
 #define MIDI_BYTE_DIVIDER 170
+#define PCM_BASE_DIVIDER 12
 
 #define FIFO_EMPTY 255
-void ymz263b_init(ymz263b *ymz, uint32_t clock_divider)
+void ymz263b_init(ymz263b *ymz, uint32_t master_clock, uint32_t clock_divider)
 {
 	memset(ymz, 0, sizeof(*ymz));
-	ymz->clock_inc = clock_divider * 32;
+	ymz->clock_inc = clock_divider * TIMER_DIVIDER;
+	ymz->audio = render_audio_source("YMZ263B", master_clock, ymz->clock_inc * PCM_BASE_DIVIDER, 2);
 	ymz->base_regs[YMZ_SELT] = 1;
 	ymz->pcm[0].regs[0] = BIT_ADP_RST;
 	ymz->pcm[1].regs[0] = BIT_ADP_RST;
+	ymz->pcm[0].counter = 1;
+	ymz->pcm[0].fifo_read = FIFO_EMPTY;
+	ymz->pcm[1].counter = 1;
+	ymz->pcm[1].fifo_read = FIFO_EMPTY;
 	ymz->midi_regs[0] = BIT_MTR_RST | BIT_MRC_RST;
 	ymz->midi_trs.read = ymz->midi_rcv.read = FIFO_EMPTY;
 	ymz->status = 0;
+	ymz->pcm_counter = PCM_BASE_DIVIDER;
 }
 
 static uint8_t fifo_empty(ymz_midi_fifo *fifo)
@@ -105,6 +123,186 @@ static uint8_t fifo_size(ymz_midi_fifo *fifo)
 		return 16;
 	}
 	return (fifo->write - fifo->read) & 15;
+}
+
+static uint8_t pcm_fifo_empty(ymz263b_pcm *pcm)
+{
+	return pcm->fifo_read == FIFO_EMPTY;
+}
+
+static uint16_t pcm_fifo_read(ymz263b_pcm *pcm, uint8_t nibbles)
+{
+	uint16_t ret = 0;
+	for (; nibbles && !pcm_fifo_empty(pcm); nibbles--)
+	{
+		ret <<= 4;
+		if (pcm->nibble) {
+			ret |= pcm->fifo[pcm->fifo_read++] & 0xF;
+			pcm->fifo_read &= sizeof(pcm->fifo) - 1;
+			pcm->nibble = 0;
+			if (pcm->fifo_read == pcm->fifo_write) {
+				pcm->fifo_read = FIFO_EMPTY;
+			}
+		} else {
+			ret |= pcm->fifo[pcm->fifo_read] >> 4;
+			pcm->nibble = 1;
+		}
+	}
+	return ret;
+}
+
+static uint8_t pcm_fifo_write(ymz263b_pcm *pcm, uint8_t nibbles, uint16_t value)
+{
+	uint8_t overflow = 0;
+	value <<= (4 - nibbles) * 4;
+	for (; nibbles; nibbles--)
+	{
+		if (pcm->nibble_write) {
+			pcm->fifo[pcm->fifo_write++] |= value >> 12;
+			pcm->fifo_write &= sizeof(pcm->fifo) - 1;
+			pcm->nibble_write = 0;
+		} else {
+			if (pcm->fifo_read == FIFO_EMPTY) {
+				pcm->fifo_read = pcm->fifo_write;
+			} else if (pcm->fifo_read == pcm->fifo_write) {
+				overflow = 1;
+			}
+			pcm->fifo[pcm->fifo_write] = value >> 8 & 0xF0;
+			pcm->nibble_write = 1;
+		}
+		value <<= 4;
+	}
+	return overflow;
+}
+
+static uint8_t pcm_fifo_free(ymz263b_pcm *pcm)
+{
+	if (pcm->fifo_read == FIFO_EMPTY) {
+		return sizeof(pcm->fifo);
+	}
+	return (pcm->fifo_read - pcm->fifo_write) & (sizeof(pcm->fifo) - 1);
+}
+
+static uint8_t pcm_dividers[] = {1, 2, 4, 6, 8};
+static void ymz263b_pcm_run(ymz263b *ymz, ymz263b_pcm *pcm, int16_t *output)
+{
+	if ((pcm->regs[0] & (BIT_ADP_RST|BIT_ADP_ST)) != BIT_ADP_ST) {
+		//PCM channel is either in reset or not started
+		return;
+	}
+	pcm->counter--;
+	if (!pcm->counter) {
+		uint8_t fs = pcm->regs[0] >> 3 & 3;
+		if (!(pcm->regs[0] & BIT_PCM)) {
+			//ADPCM can't use 44.1 kHz, but gains 5.5125 kHz
+			fs++;
+		}
+		pcm->counter = pcm_dividers[fs];
+		uint8_t nibbles = (pcm->regs[3] >> 5 & 3) + 2;
+		if (nibbles > 4) {
+			//4-bit format is encoded as the highest value for some reason
+			nibbles = 1;
+		}
+		//adlib driver suggests that FMT should be 3 for 4-bit ADPCM, but Copera games seem to use zero
+		//maybe FMT is ignored for ADPCM mode?
+		if (!(pcm->regs[0] & BIT_PCM)) {
+			nibbles = 1;
+		}
+		//adlib driver sets SELF to 5 for playback to trigger int "when less than 32 bytes in fifo" aka 96 bytes free
+		//adlib driver sets SELF to 3 for recording to trigger int "when more than 64 bytes in fifo" aka 64 bytes free
+		uint8_t fifo_threshold = ((pcm->regs[3] >> 2 & 7) + 1) << 4;
+		if (pcm->regs[0] & BIT_PLY_REC) {
+			//Playback mode
+			uint16_t sample = pcm_fifo_read(pcm, nibbles);
+			if (pcm->regs[0] & BIT_PCM) {
+				//TODO: Presumably SELT bit impacts this
+				if (sample & (1 << (nibbles * 4 - 1))) {
+					sample |= 0xFFF << (nibbles * 4);
+				}
+				switch (nibbles)
+				{
+				case 1:
+					sample <<= 8;
+					break;
+				case 2:
+					sample <<= 4;
+					break;
+				case 4:
+					//PCem's code seems to imply the "hole" is in the middle
+					//but that's ugly so hoping it's incorrect
+					sample >>= 4;
+					break;
+				}
+				pcm->output = sample;
+			} else {
+				//Values taken from YMFM 2610 ADPCM-A implementation
+				//They are almost certainly wrong for YMZ263B
+				static const int16_t mults[49] = {
+					16,  17,  19,   21,   23,   25,   28,
+					31,  34,  37,   41,   45,   50,   55,
+					60,  66,  73,   80,   88,   97,   107,
+					118, 130, 143,  157,  173,  190,  209,
+					230, 253, 279,  307,  337,  371,  408,
+					449, 494, 544,  598,  658,  724,  796,
+					876, 963, 1060, 1166, 1282, 1411, 1552
+				};
+				static const int8_t index_deltas[8] = {
+					-1, -1, -1, -1, 2, 5, 7, 9
+				};
+				uint16_t mag = sample & 7;
+				int16_t delta = (((mag << 1) + 1) * mults[pcm->adpcm_mul_index]) >> 3;
+				if (sample & 8) {
+					delta = -delta;
+				}
+				uint8_t old_index = pcm->adpcm_mul_index;
+				pcm->output += delta;
+				if (pcm->adpcm_mul_index || mag > 3) {
+					pcm->adpcm_mul_index += index_deltas[mag];
+					if (pcm->adpcm_mul_index >= sizeof(mults)) {
+						pcm->adpcm_mul_index = sizeof(mults) - 1;
+					}
+				}
+				int16_t output = pcm->output;
+				//Supposedly the YM2610 and YM2608 wrap around rather than clamp
+				//but since my tables have the wrong values I need to clamp
+				//in order to get something resembling the correct output
+				if (output > 0x7FF) {
+					pcm->output = 0x7FF;
+				} else if (output < -0x800) {
+					pcm->output = -0x800;
+				}
+				//printf("Sample %X, mag %X, delta %d, old index %d, new index %d, out %d\n", sample, mag, delta, old_index, pcm->adpcm_mul_index, (int16_t)pcm->output);
+			}
+			if (pcm->output & 0x800) {
+				pcm->output |= 0xF000;
+			} else {
+				pcm->output &= 0x0FFF;
+			}
+			if (pcm_fifo_free(pcm) > fifo_threshold) {
+				ymz->status |= pcm == &ymz->pcm[0] ? STATUS_FIF1 : STATUS_FIF2;
+			}
+		} else {
+			//Recording mode
+			//TODO: support recording actual audio input
+			if (pcm_fifo_write(pcm, nibbles, 0)) {
+				ymz->status |= STATUS_OV;
+			}
+			if (pcm_fifo_free(pcm) < fifo_threshold) {
+				ymz->status |= pcm == &ymz->pcm[0] ? STATUS_FIF1 : STATUS_FIF2;
+			}
+		}
+		
+	}
+	
+	if (pcm->regs[0] & BIT_PLY_REC) {
+		//TODO: Volume
+		if (pcm->regs[0] & BIT_PAN_L) {
+			output[0] += pcm->output;
+		}
+		if (pcm->regs[0] & BIT_PAN_R) {
+			output[1] += pcm->output;
+		}
+	}
 }
 
 void ymz263b_run(ymz263b *ymz, uint32_t target_cycle)
@@ -155,15 +353,71 @@ void ymz263b_run(ymz263b *ymz, uint32_t target_cycle)
 				}
 			}
 		}
+		ymz->pcm_counter--;
+		if (!ymz->pcm_counter) {
+			ymz->pcm_counter = PCM_BASE_DIVIDER;
+			int16_t output[2] = {0, 0};
+			ymz263b_pcm_run(ymz, &ymz->pcm[0], output);
+			ymz263b_pcm_run(ymz, &ymz->pcm[1], output);
+			render_put_stereo_sample(ymz->audio, output[0], output[1]);
+		}
 	}
+}
+
+static uint32_t predict_fifo_thres(ymz263b *ymz, ymz263b_pcm *pcm)
+{
+	if ((pcm->regs[0] & (BIT_ADP_RST|BIT_ADP_ST)) != BIT_ADP_ST) {
+		//PCM channel is either in reset or not started
+		return CYCLE_NEVER;
+	}
+	uint32_t next_pcm_cycle = ymz->cycle + ymz->pcm_counter * ymz->clock_inc;
+	next_pcm_cycle += (pcm->counter - 1) * PCM_BASE_DIVIDER * ymz->clock_inc;
+	uint32_t fifo_free = pcm_fifo_free(pcm);
+	//convert to nibbles
+	fifo_free <<= 1;
+	uint32_t fifo_threshold = ((pcm->regs[3] >> 2 & 7) + 1) << 5;
+	uint32_t diff;
+	if (pcm->regs[0] & BIT_PLY_REC) {
+		if (pcm->nibble) {
+			fifo_free++;
+		}
+		diff = fifo_threshold - fifo_free + 1;
+	} else {
+		if (pcm->nibble_write) {
+			fifo_free--;
+		}
+		diff = fifo_free - fifo_threshold + 1;
+	}
+	uint32_t nibbles_per_samp = (pcm->regs[3] >> 5 & 3) + 2;
+	if (nibbles_per_samp > 4) {
+		//4-bit format is encoded as the highest value for some reason
+		nibbles_per_samp = 1;
+	}
+	uint8_t fs = pcm->regs[0] >> 3 & 3;
+	if (!(pcm->regs[0] & BIT_PCM)) {
+		//ADPCM can't use 44.1 kHz, but gains 5.5125 kHz
+		fs++;
+		//see note in PCM playback code
+		nibbles_per_samp = 1;
+	}
+	diff /= nibbles_per_samp;
+	
+	next_pcm_cycle += diff * PCM_BASE_DIVIDER * pcm_dividers[fs] * ymz->clock_inc;
+	return next_pcm_cycle;
 }
 
 uint32_t ymz263b_next_int(ymz263b *ymz)
 {
-	//TODO: Handle FIFO and MIDI receive interrupts
+	//TODO: Handle MIDI receive interrupts
 	uint8_t enabled_ints = (~ymz->base_regs[YMZ_TIMER_CTRL]) & TIMER_INT_MASK;
 	if (!(ymz->base_regs[YMZ_MIDI_CTRL] & (BIT_MTR_RST|BIT_MSK_TRQ))) {
 		enabled_ints |= STATUS_TRQ;
+	}
+	if (!(ymz->pcm[0].regs[3] & BIT_MSK_FIF)) {
+		enabled_ints |= STATUS_FIF1;
+	}
+	if (!(ymz->pcm[1].regs[3] & BIT_MSK_FIF)) {
+		enabled_ints |= STATUS_FIF2;
 	}
 	if (!enabled_ints) {
 		return CYCLE_NEVER;
@@ -172,6 +426,7 @@ uint32_t ymz263b_next_int(ymz263b *ymz)
 	if (enabled_ints & ymz->status) {
 		return ymz->cycle;
 	}
+	
 	uint32_t ret = CYCLE_NEVER;
 	if (enabled_ints & STATUS_TRQ) {
 		uint8_t bytes = fifo_size(&ymz->midi_trs);
@@ -182,6 +437,20 @@ uint32_t ymz263b_next_int(ymz263b *ymz)
 			}
 		}
 	}
+	
+	if (enabled_ints & STATUS_FIF1) {
+		uint32_t next_pcm = predict_fifo_thres(ymz, &ymz->pcm[0]);
+		if (next_pcm < ret) {
+			ret = next_pcm;
+		}
+	}
+	if (enabled_ints & STATUS_FIF2) {
+		uint32_t next_pcm = predict_fifo_thres(ymz, &ymz->pcm[1]);
+		if (next_pcm < ret) {
+			ret = next_pcm;
+		}
+	}
+	
 	enabled_ints >>= 4;
 	//If timers aren't already expired, interrupts can't fire unless the timers are enabled
 	enabled_ints &= ymz->base_regs[YMZ_TIMER_CTRL];
@@ -228,13 +497,39 @@ void ymz263b_data_write(ymz263b *ymz, uint32_t channel, uint8_t value)
 {
 	if (channel) {
 		if (ymz->address >= YMZ_PCM_PLAY_CTRL && ymz->address < YMZ_MIDI_CTRL) {
+			if (ymz->address == YMZ_PCM_PLAY_CTRL) {
+				if (((value ^ ymz->pcm[1].regs[0]) & ymz->pcm[1].regs[0]) & BIT_ADP_RST) {
+					//Perform reset on falling edge of reset bit
+					ymz->pcm[1].counter = 1;
+					ymz->pcm[1].fifo_read = FIFO_EMPTY;
+					ymz->pcm[1].nibble = ymz->pcm[1].nibble_write = 0;
+					ymz->pcm[1].output = 0;
+					ymz->pcm[1].adpcm_mul_index = 0;
+				}
+			}
 			ymz->pcm[1].regs[ymz->address - YMZ_PCM_PLAY_CTRL] = value;
+			if (ymz->address == YMZ_PCM_DATA) {
+				pcm_fifo_write(&ymz->pcm[1], 2, value);
+				//Does an overflow here set the overflow statu sflag?
+			}
 		}
 	} else {
 		if (ymz->address < YMZ_PCM_PLAY_CTRL) {
 			ymz->base_regs[ymz->address] = value;
 		} else if (ymz->address < YMZ_MIDI_CTRL) {
+			if (((value ^ ymz->pcm[0].regs[0]) & ymz->pcm[1].regs[0]) & BIT_ADP_RST) {
+				//Perform reset on falling edge of reset bit
+				ymz->pcm[0].counter = 1;
+				ymz->pcm[0].fifo_read = FIFO_EMPTY;
+				ymz->pcm[0].nibble = ymz->pcm[1].nibble_write = 0;
+				ymz->pcm[0].output = 0;
+				ymz->pcm[0].adpcm_mul_index = 0;
+			}
 			ymz->pcm[0].regs[ymz->address - YMZ_PCM_PLAY_CTRL] = value;
+			if (ymz->address == YMZ_PCM_DATA) {
+				pcm_fifo_write(&ymz->pcm[0], 2, value);
+				//Does an overflow here set the overflow statu sflag?
+			}
 		} else {
 			ymz->midi_regs[ymz->address - YMZ_MIDI_CTRL] = value;
 			if (ymz->address == YMZ_MIDI_DATA) {
@@ -253,12 +548,18 @@ uint8_t ymz263b_data_read(ymz263b *ymz, uint32_t channel)
 	//TODO: Supposedly only a few registers are actually readable
 	if (channel) {
 		if (ymz->address >= YMZ_PCM_PLAY_CTRL && ymz->address < YMZ_MIDI_CTRL) {
+			if (ymz->address == YMZ_PCM_DATA) {
+				return pcm_fifo_read(&ymz->pcm[1], 2);
+			}
 			return ymz->pcm[1].regs[ymz->address - YMZ_PCM_PLAY_CTRL];
 		}
 	} else {
 		if (ymz->address < YMZ_PCM_PLAY_CTRL) {
 			return ymz->base_regs[ymz->address];
 		} else if (ymz->address < YMZ_MIDI_CTRL) {
+			if (ymz->address == YMZ_PCM_DATA) {
+				return pcm_fifo_read(&ymz->pcm[0], 2);
+			}
 			return ymz->pcm[0].regs[ymz->address - YMZ_PCM_PLAY_CTRL];
 		} else {
 			return ymz->midi_regs[ymz->address - YMZ_MIDI_CTRL];
