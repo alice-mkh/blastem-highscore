@@ -1722,6 +1722,17 @@ m68k_save_dst
 	update_flags NZV0C0
 	m68k_prefetch
 
+0100111001010RRR link
+	a7 -= 4
+	scratch2 = a7
+	#TODO: confirm order of fetch and write
+	m68k_write32 aregs.R
+	m68k_prefetch
+	aregs.R = a7
+	sext 32 scratch1 scratch1
+	a7 += scratch1
+	m68k_prefetch
+
 0100111001110000 reset
 	if reset_handler
 	pcall reset_handler m68k_reset_handler context
