@@ -319,6 +319,7 @@ void ymz263b_run(ymz263b *ymz, uint32_t target_cycle)
 		}
 		if (timer_ctrl & BIT_STBC) {
 			ymz->timers[3]--;
+			ymz->timers[3] &= 0xFFF;
 			if (!ymz->timers[3]) {
 				ymz->timers[3] = ymz->base_regs[YMZ_TIMER1] << 8 & 0xF00;
 				ymz->timers[3] |= ymz->base_regs[YMZ_TIMER_BASE];
@@ -472,13 +473,13 @@ uint32_t ymz263b_next_int(ymz263b *ymz)
 				load = 0x1000;
 			}
 			if (enabled_ints & BIT_ST1) {
-				uint32_t t1 = (ymz->timers[1] ? ymz->timers[1] - 1 : 0xF) * load * ymz->clock_inc;
+				uint32_t t1 = base + (ymz->timers[1] ? ymz->timers[1] - 1 : 0xF) * load * ymz->clock_inc;
 				if (t1 < ret) {
 					ret = t1;
 				}
 			}
 			if (enabled_ints & BIT_ST2) {
-				uint32_t t2 = (ymz->timers[2] ? ymz->timers[2] - 1 : 0xFFFF) * load * ymz->clock_inc;
+				uint32_t t2 = base + (ymz->timers[2] ? ymz->timers[2] - 1 : 0xFFFF) * load * ymz->clock_inc;
 				if (t2 < ret) {
 					ret = t2;
 				}
@@ -515,6 +516,21 @@ void ymz263b_data_write(ymz263b *ymz, uint32_t channel, uint8_t value)
 		}
 	} else {
 		if (ymz->address < YMZ_PCM_PLAY_CTRL) {
+			if (ymz->address == YMZ_TIMER_CTRL) {
+				uint8_t newly_set = (ymz->base_regs[ymz->address] ^ value) & value;
+				if (newly_set & BIT_ST0) {
+					ymz->timers[0] = ymz->base_regs[YMZ_TIMER0_HIGH] << 8 | ymz->base_regs[YMZ_TIMER0_LOW];
+				}
+				if (newly_set & BIT_ST1) {
+					ymz->timers[1] = ymz->base_regs[YMZ_TIMER1] >> 4;
+				}
+				if (newly_set & BIT_ST2) {
+					ymz->timers[2] = ymz->base_regs[YMZ_TIMER2_HIGH] << 8 | ymz->base_regs[YMZ_TIMER2_LOW];
+				}
+				if (newly_set & BIT_STBC) {
+					ymz->timers[0] = (ymz->base_regs[YMZ_TIMER1] << 8 | ymz->base_regs[YMZ_TIMER_BASE]) & 0xFFF;
+				}
+			}
 			ymz->base_regs[ymz->address] = value;
 		} else if (ymz->address < YMZ_MIDI_CTRL) {
 			if (((value ^ ymz->pcm[0].regs[0]) & ymz->pcm[1].regs[0]) & BIT_ADP_RST) {
