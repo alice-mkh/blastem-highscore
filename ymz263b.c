@@ -234,49 +234,45 @@ static void ymz263b_pcm_run(ymz263b *ymz, ymz263b_pcm *pcm, int16_t *output)
 					break;
 				}
 				pcm->output = sample;
+				if (pcm->output & 0x800) {
+					pcm->output |= 0xF000;
+				} else {
+					pcm->output &= 0x0FFF;
+				}
 			} else {
-				//Values taken from YMFM 2610 ADPCM-A implementation
-				//They are almost certainly wrong for YMZ263B
-				static const int16_t mults[49] = {
-					16,  17,  19,   21,   23,   25,   28,
-					31,  34,  37,   41,   45,   50,   55,
-					60,  66,  73,   80,   88,   97,   107,
-					118, 130, 143,  157,  173,  190,  209,
-					230, 253, 279,  307,  337,  371,  408,
-					449, 494, 544,  598,  658,  724,  796,
-					876, 963, 1060, 1166, 1282, 1411, 1552
-				};
-				static const int8_t index_deltas[8] = {
-					-1, -1, -1, -1, 2, 5, 7, 9
-				};
+				//This uses superctr's YMZ280B decoder as a reference
+				//That chip has 16-bit output, but supposedly is compatible
+				//with ADPCM data from the YM263B
+				//Currently I'm 'calculating as 16-bit internally and
+				//truncating to 12-bit on output
 				uint16_t mag = sample & 7;
-				int16_t delta = (((mag << 1) + 1) * mults[pcm->adpcm_mul_index]) >> 3;
+				int32_t delta = (((mag << 1) + 1) * pcm->adpcm_step) >> 3;
+				if (delta > 0x7FFF) {
+					delta = 0x7FFF;
+				}
 				if (sample & 8) {
 					delta = -delta;
 				}
-				uint8_t old_index = pcm->adpcm_mul_index;
-				pcm->output += delta;
-				if (pcm->adpcm_mul_index || mag > 3) {
-					pcm->adpcm_mul_index += index_deltas[mag];
-					if (pcm->adpcm_mul_index >= sizeof(mults)) {
-						pcm->adpcm_mul_index = sizeof(mults) - 1;
-					}
+				int32_t value = ((int16_t)pcm->output);
+				value = (value * 254) >> 8;
+				value += delta;
+				if (value > 0x7FFF) {
+					value = 0x7FFF;
+				} else if (value < -0x8000) {
+					value = -0x8000;
 				}
-				int16_t output = pcm->output;
-				//Supposedly the YM2610 and YM2608 wrap around rather than clamp
-				//but since my tables have the wrong values I need to clamp
-				//in order to get something resembling the correct output
-				if (output > 0x7FF) {
-					pcm->output = 0x7FF;
-				} else if (output < -0x800) {
-					pcm->output = -0x800;
+				pcm->output = value;
+				
+				static const uint16_t step_adjust[8] = {
+					230, 230, 230, 230, 307, 409, 512, 614
+				};
+				int32_t step = pcm->adpcm_step * step_adjust[mag];
+				if (step > 24576) {
+					step = 24576;
+				} else if (step < 127) {
+					step = 127;
 				}
-				//printf("Sample %X, mag %X, delta %d, old index %d, new index %d, out %d\n", sample, mag, delta, old_index, pcm->adpcm_mul_index, (int16_t)pcm->output);
-			}
-			if (pcm->output & 0x800) {
-				pcm->output |= 0xF000;
-			} else {
-				pcm->output &= 0x0FFF;
+				pcm->adpcm_step = step;
 			}
 			if (pcm_fifo_free(pcm) > fifo_threshold) {
 				ymz->status |= pcm == &ymz->pcm[0] ? STATUS_FIF1 : STATUS_FIF2;
@@ -296,11 +292,15 @@ static void ymz263b_pcm_run(ymz263b *ymz, ymz263b_pcm *pcm, int16_t *output)
 	
 	if (pcm->regs[0] & BIT_PLY_REC) {
 		//TODO: Volume
+		int16_t value = pcm->output;
+		if (!(pcm->regs[0] & BIT_PCM)) {
+			value >>= 4;
+		}
 		if (pcm->regs[0] & BIT_PAN_L) {
-			output[0] += pcm->output;
+			output[0] += value;
 		}
 		if (pcm->regs[0] & BIT_PAN_R) {
-			output[1] += pcm->output;
+			output[1] += value;
 		}
 	}
 }
@@ -505,7 +505,7 @@ void ymz263b_data_write(ymz263b *ymz, uint32_t channel, uint8_t value)
 					ymz->pcm[1].fifo_read = FIFO_EMPTY;
 					ymz->pcm[1].nibble = ymz->pcm[1].nibble_write = 0;
 					ymz->pcm[1].output = 0;
-					ymz->pcm[1].adpcm_mul_index = 0;
+					ymz->pcm[1].adpcm_step = 127;
 				}
 			}
 			ymz->pcm[1].regs[ymz->address - YMZ_PCM_PLAY_CTRL] = value;
@@ -539,7 +539,7 @@ void ymz263b_data_write(ymz263b *ymz, uint32_t channel, uint8_t value)
 				ymz->pcm[0].fifo_read = FIFO_EMPTY;
 				ymz->pcm[0].nibble = ymz->pcm[1].nibble_write = 0;
 				ymz->pcm[0].output = 0;
-				ymz->pcm[0].adpcm_mul_index = 0;
+				ymz->pcm[0].adpcm_step = 127;
 			}
 			ymz->pcm[0].regs[ymz->address - YMZ_PCM_PLAY_CTRL] = value;
 			if (ymz->address == YMZ_PCM_DATA) {

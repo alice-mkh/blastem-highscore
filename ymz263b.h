@@ -7,6 +7,7 @@
 
 typedef struct {
 	uint16_t output;
+	uint16_t adpcm_step;
 	uint8_t  fifo[128];
 	uint8_t  fifo_read;
 	uint8_t  fifo_write;
@@ -15,7 +16,6 @@ typedef struct {
 	uint8_t  counter;
 	uint8_t  nibble;
 	uint8_t  nibble_write;
-	uint8_t  adpcm_mul_index;
 } ymz263b_pcm;
 
 typedef struct {
