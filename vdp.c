@@ -4883,7 +4883,11 @@ void vdp_data_port_write_pbc(vdp_context * context, uint8_t value)
 	if (context->regs[REG_MODE_2] & BIT_MODE_5) {
 		cur->cd = context->cd;
 	} else {
-		cur->cd = (context->cd & 2) | 1;
+		if ((context->cd & 3) == CRAM_WRITE) {
+			cur->cd = CRAM_WRITE;
+		} else {
+			cur->cd = VRAM_WRITE;
+		}
 	}
 	cur->partial = 3;
 	if (context->fifo_read < 0) {
