@@ -194,6 +194,11 @@ RETRO_API size_t retro_serialize_size(void)
 	if (!serialize_size_cache) {
 		uint8_t *tmp = current_system->serialize(current_system, &serialize_size_cache);
 		free(tmp);
+		//VDP serialization size can vary based on FIFO fullness
+		//add a little fudge factor here to ensure the returned size is always >= the actual size
+		serialize_size_cache += 64;
+		//We need to store the actual size saved too
+		serialize_size_cache += sizeof(size_t);
 	}
 	return serialize_size_cache;
 }
@@ -202,21 +207,23 @@ RETRO_API size_t retro_serialize_size(void)
  * retro_serialize_size(), it should return false, true otherwise. */
 RETRO_API bool retro_serialize(void *data, size_t size)
 {
-	size_t actual_size;
-	uint8_t *tmp = current_system->serialize(current_system, &actual_size);
-	if (actual_size > size) {
+	size_t *buffer = data;
+	uint8_t *tmp = current_system->serialize(current_system, buffer);
+	if (*buffer > size) {
+		fprintf(stderr, "retro_serialize failed frontend size %d, actual size %d\n", (int)size, (int)*buffer);
 		free(tmp);
 		return 0;
 	}
-	memcpy(data, tmp, actual_size);
+	memcpy(buffer + 1, tmp, *buffer);
 	free(tmp);
 	return 1;
 }
 
 RETRO_API bool retro_unserialize(const void *data, size_t size)
 {
-	current_system->deserialize(current_system, (uint8_t *)data, size);
-	return 0;
+	const size_t *buffer = data;
+	current_system->deserialize(current_system, (uint8_t *)(buffer + 1), *buffer);
+	return 1;
 }
 
 RETRO_API void retro_cheat_reset(void)
