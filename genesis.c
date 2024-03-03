@@ -139,13 +139,19 @@ static uint8_t *serialize(system_header *sys, size_t *size_out)
 	genesis_context *gen = (genesis_context *)sys;
 	uint32_t address;
 	if (gen->m68k->resume_pc) {
-		gen->m68k->target_cycle = gen->m68k->current_cycle;
+		
 		gen->header.save_state = SERIALIZE_SLOT+1;
-		resume_68k(gen->m68k);
+		while (!gen->serialize_tmp)
+		{
+			gen->m68k->target_cycle = gen->m68k->current_cycle + 1;
+			resume_68k(gen->m68k);
+		}
 		if (size_out) {
 			*size_out = gen->serialize_size;
 		}
-		return gen->serialize_tmp;
+		uint8_t *ret = gen->serialize_tmp;
+		gen->serialize_tmp = NULL;
+		return ret;
 	} else {
 		serialize_buffer state;
 		init_serialize(&state);
