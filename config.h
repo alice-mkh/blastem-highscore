@@ -23,6 +23,7 @@ char **get_extension_list(tern_node *config, uint32_t *num_exts_out);
 uint32_t get_lowpass_cutoff(tern_node *config);
 tern_node *get_systems_config(void);
 tern_node *get_model(tern_node *config, system_type stype);
+uint8_t is_config_in_exe_dir(tern_node *app_config);
 
 #endif //CONFIG_H_
 

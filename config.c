@@ -505,11 +505,16 @@ tern_node *load_config()
 	return ret;
 }
 
-void persist_config_at(tern_node *app_config, tern_node *to_save, char *fname)
+uint8_t is_config_in_exe_dir(tern_node *app_config)
 {
 	char*use_exe_dir = tern_find_path_default(app_config, "ui\0config_in_exe_dir\0", (tern_val){.ptrval = "off"}, TVAL_PTR).ptrval;
+	return !strcmp(use_exe_dir, "on");
+}
+
+void persist_config_at(tern_node *app_config, tern_node *to_save, char *fname)
+{
 	char *confpath;
-	if (!strcmp(use_exe_dir, "on")) {
+	if (is_config_in_exe_dir(app_config)) {
 		confpath = path_append(get_exe_dir(), fname);
 		if (app_config == to_save && app_config_in_config_dir) {
 			//user switched to "portable" configs this session and there is an
