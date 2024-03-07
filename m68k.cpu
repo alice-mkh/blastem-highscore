@@ -1737,6 +1737,87 @@ m68k_save_dst
 	ror dregs.R 16 dregs.R
 	update_flags NZV0C0
 	m68k_prefetch
+	
+m68k_calc_ea
+	arg mode 16
+	arg reg 16
+	
+	switch mode
+	case 2
+		#address reg indirect
+		meta ea aregs.reg
+	case 5
+		#displacement
+		m68k_prefetch
+		sext 32 prefetch scratch1
+		scratch1 += aregs.reg
+		meta ea scratch1
+	case 6
+		#index
+		m68k_index_word
+		cycles 4
+		scratch1 += aregs.reg
+		meta ea scratch1
+	case 7
+		switch reg
+		case 0
+			#absolute short
+			m68k_prefetch
+			sext 32 prefetch scratch1
+		case 1
+			#absoltue long
+			m68k_prefetch
+			scratch2 = prefetch << 16
+			m68k_prefetch
+			scratch1 = scratch2 | prefetch
+		case 2
+			#pc displacement
+			m68k_prefetch
+			sext 32 prefetch scratch1
+			scratch1 += pc
+			scratch1 -= 2
+		case 3
+			#pc indexed
+			m68k_index_word
+			cycles 4
+			scratch1 += pc
+			scratch1 -= 2
+		end
+		meta ea scratch1
+	end
+
+0100100001MMMRRR pea
+	invalid M 0
+	invalid M 1
+	invalid M 3
+	invalid M 4
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_calc_ea M R
+	scratch2 = a7 - 4
+	m68k_write32_lowfirst ea
+	a7 -= 4
+	
+	m68k_prefetch
+
+0100DDD111MMMRRR lea
+	invalid M 0
+	invalid M 1
+	invalid M 3
+	invalid M 4
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_calc_ea M R
+	aregs.D = ea
+	
+	m68k_prefetch
+	
 
 0100111001110000 reset
 	if reset_handler

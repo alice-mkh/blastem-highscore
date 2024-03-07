@@ -54,6 +54,10 @@ class Block:
 				if op == '=':
 					if len(parts) > 2 and parts[2] in binaryOps:
 						op = parts[2]
+						if op == '-':
+							tmp = parts[1]
+							parts[1] = parts[3]
+							parts[3] = tmp
 						parts[0] = binaryOps[op]
 						del parts[2]
 					elif len(parts) > 1 and parts[1][0] in unaryOps:
