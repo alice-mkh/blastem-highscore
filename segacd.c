@@ -17,6 +17,10 @@
 #define REFRESH_INTERVAL 259
 #define REFRESH_DELAY 2
 
+#ifdef HIGHSCORE
+extern int sega_cd_region;
+#endif
+
 enum {
 	GA_SUB_CPU_CTRL,
 	GA_MEM_MODE,
@@ -1605,6 +1609,9 @@ segacd_context *alloc_configure_segacd(system_media *media, uint32_t opts, uint8
 			region = info->regions;
 		}
 	}
+#ifdef HIGHSCORE
+	sega_cd_region = region;
+#endif
 	const char *key;
 	if (region & REGION_E) {
 		key = "system\0scd_bios_eu\0";
