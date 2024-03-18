@@ -1,7 +1,11 @@
 #include "blastem-highscore.h"
 
-#include "render_audio.h"
+#include <stdint.h>
+
 #include "system.h"
+#include "cdimage.h"
+#include "segacd.h"
+#include "render_audio.h"
 #include "util.h"
 
 static BlastemCore *core;
@@ -17,14 +21,20 @@ struct _BlastemCore
 
   guint32 prev_input_state[2];
   guint32 input_state[2];
+
+  char *mcd_bios_us_path;
+  char *mcd_bios_jp_path;
+  char *mcd_bios_eu_path;
 };
 
 #include "libblastem-highscore.c"
 
 static void blastem_mega_drive_core_init (HsMegaDriveCoreInterface *iface);
+static void blastem_mega_cd_core_init (HsMegaCdCoreInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE (BlastemCore, blastem_core, HS_TYPE_CORE,
-                               G_IMPLEMENT_INTERFACE (HS_TYPE_MEGA_DRIVE_CORE, blastem_mega_drive_core_init))
+                               G_IMPLEMENT_INTERFACE (HS_TYPE_MEGA_DRIVE_CORE, blastem_mega_drive_core_init)
+                               G_IMPLEMENT_INTERFACE (HS_TYPE_MEGA_CD_CORE, blastem_mega_cd_core_init))
 
 static gboolean
 blastem_core_load_rom (HsCore      *core,
@@ -48,6 +58,12 @@ blastem_core_load_rom (HsCore      *core,
   load_media ((char *) rom_paths[0], &media, &self->stype);
   if (self->stype == SYSTEM_UNKNOWN)
     self->stype = detect_system_type (&media);
+
+  if (self->stype == SYSTEM_SEGACD) {
+    config = tern_insert_path (config, "system\0scd_bios_us\0", (tern_val){.ptrval = strdup (self->mcd_bios_us_path)}, TVAL_PTR);
+    config = tern_insert_path (config, "system\0scd_bios_jp\0", (tern_val){.ptrval = strdup (self->mcd_bios_jp_path)}, TVAL_PTR);
+    config = tern_insert_path (config, "system\0scd_bios_eu\0", (tern_val){.ptrval = strdup (self->mcd_bios_eu_path)}, TVAL_PTR);
+  }
 
   current_system = alloc_config_system (self->stype, &media, 0, 0);
 
@@ -233,6 +249,12 @@ blastem_core_get_region (HsCore *core)
 static void
 blastem_core_finalize (GObject *object)
 {
+  BlastemCore *self = BLASTEM_CORE (object);
+
+  g_clear_pointer (&self->mcd_bios_us_path, g_free);
+  g_clear_pointer (&self->mcd_bios_jp_path, g_free);
+  g_clear_pointer (&self->mcd_bios_eu_path, g_free);
+
   G_OBJECT_CLASS (blastem_core_parent_class)->finalize (object);
 
   core = NULL;
@@ -277,6 +299,49 @@ blastem_core_init (BlastemCore *self)
 static void
 blastem_mega_drive_core_init (HsMegaDriveCoreInterface *iface)
 {
+}
+
+static void
+blastem_mega_cd_core_set_bios_path (HsMegaCdCore *core,
+                                    HsMegaCdBios  type,
+                                    const char   *path)
+{
+  BlastemCore *self = BLASTEM_CORE (core);
+
+  switch (type) {
+    case HS_MEGA_CD_BIOS_US:
+      g_set_str (&self->mcd_bios_us_path, path);
+      break;
+    case HS_MEGA_CD_BIOS_JP:
+      g_set_str (&self->mcd_bios_jp_path, path);
+      break;
+    case HS_MEGA_CD_BIOS_EU:
+      g_set_str (&self->mcd_bios_eu_path, path);
+      break;
+    default:
+      g_assert_not_reached ();
+  }
+}
+
+static HsMegaCdBios
+blastem_mega_cd_core_get_used_bios (HsMegaCdCore *core)
+{
+  BlastemCore *self = BLASTEM_CORE (core);
+
+  if (sega_cd_region & REGION_E)
+    return HS_MEGA_CD_BIOS_EU;
+
+  if (sega_cd_region & REGION_J)
+    return HS_MEGA_CD_BIOS_JP;
+
+  return HS_MEGA_CD_BIOS_US;
+}
+
+static void
+blastem_mega_cd_core_init (HsMegaCdCoreInterface *iface)
+{
+  iface->set_bios_path = blastem_mega_cd_core_set_bios_path;
+  iface->get_used_bios = blastem_mega_cd_core_get_used_bios;
 }
 
 GType

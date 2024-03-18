@@ -16,6 +16,8 @@ tern_node *config;
 uint8_t use_native_states = 1;
 system_header *current_system;
 
+uint8_t sega_cd_region;
+
 static uint8_t last_fb;
 
 static uint32_t overscan_top, overscan_bot, overscan_left, overscan_right;
