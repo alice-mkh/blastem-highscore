@@ -93,6 +93,7 @@ blastem_deps = [
 blastem_c_args = [
   '-fvisibility=hidden',
   '-DIS_LIB',
+  '-DHIGHSCORE',
   '-Wno-implicit-fallthrough',
   '-Wno-missing-field-initializers',
   '-Wno-parentheses',
