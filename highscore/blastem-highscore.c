@@ -36,6 +36,8 @@ blastem_core_load_rom (HsCore      *core,
   if (!g_file_get_contents (rom_path, &data, &length, error))
     return FALSE;
 
+  disable_stdout_messages ();
+
   media.dir = path_dirname (rom_path);
   media.name = basename_no_extension (rom_path);
   media.extension = path_extension (rom_path);
