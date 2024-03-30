@@ -37,6 +37,7 @@ struct sfnt_container {
 
 sfnt_container *load_sfnt(uint8_t *buffer, uint32_t size);
 char *sfnt_name(sfnt_table *sfnt, uint16_t name_type);
+uint8_t sfnt_has_truetype_glyphs(sfnt_table *sfnt);
 uint8_t *sfnt_flatten(sfnt_table *sfnt, uint32_t *size_out);
 sfnt_table *sfnt_subfamily_by_names(sfnt_container *sfnt, const char **names);
 void sfnt_free(sfnt_container *sfnt);
