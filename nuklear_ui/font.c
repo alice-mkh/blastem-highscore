@@ -23,7 +23,7 @@ char **preferred_font_paths(uint32_t *num_out)
 	if (!fc_pipe) {
 		return NULL;
 	}
-	size_t buf_size = 4096;
+	size_t buf_size = 2048;
 	char *buffer = NULL;
 	size_t total = 0, read = 0;
 	do {
@@ -33,7 +33,7 @@ char **preferred_font_paths(uint32_t *num_out)
 		if (!buffer) {
 			return NULL;
 		}
-		read = fread(buffer, 1, buf_size - total, fc_pipe);
+		read = fread(buffer + total, 1, buf_size - total, fc_pipe);
 	} while (read == (buf_size - total));
 	total += read;
 	buffer[total] = 0;
