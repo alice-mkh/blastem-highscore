@@ -21,6 +21,10 @@ enum {
 	MEDIA_UNKNOWN
 };
 
+#define STREAM_FLAG_REVERSE 0x01
+#define STREAM_FLAG_LOOP    0x10
+#define STREAM_FLAG_PLAY    0x80
+
 uint32_t cycles_to_samples(uint32_t clock_rate, uint32_t cycles)
 {
 	return ((uint64_t)cycles) * ((uint64_t)44100) / ((uint64_t)clock_rate);
@@ -50,6 +54,17 @@ void ym_no_scope(void *context)
 {
 	ym2612_context *ym = context;
 	ym->scope = NULL;
+}
+
+void ym_stream(chip_info *chip, uint8_t port, uint8_t command, uint16_t sample)
+{
+	ym2612_context *ym = chip->context;
+	if (port) {
+		ym_address_write_part2(ym, command);
+	} else {
+		ym_address_write_part1(ym, command);
+	}
+	ym_data_write(ym, sample);
 }
 
 void psg_adjust(chip_info *chip)
@@ -125,6 +140,38 @@ void vgm_wait(media_player *player, uint32_t samples)
 		vgm_wait(player, MAX_RUN_SAMPLES);
 		samples -= MAX_RUN_SAMPLES;
 	}
+	uint8_t keep_going;
+	do {
+		keep_going = 0;
+		for (uint32_t i = 0; i < 0xFF; i++)
+		{
+			if (!player->streams[i] || !(player->streams[i]->flags & STREAM_FLAG_PLAY)) {
+				continue;
+			}
+			vgm_stream *stream = player->streams[i];
+			uint32_t cycle = samples_to_cycles(stream->chip->clock, stream->chip->samples + samples);
+			if (cycle >= stream->next_sample_cycle) {
+				stream->chip->run(stream->chip->context, stream->next_sample_cycle);
+				if (stream->block_offset >= stream->cur_block->size) {
+					stream->cur_block = stream->cur_block->next;
+					if (!stream->cur_block) {
+						//TODO: looping support
+						player->streams[i]->flags &= ~STREAM_FLAG_PLAY;
+						continue;
+					}
+				}
+				//TODO: support for chips where the stream data unit is not a byte
+				uint16_t sample = stream->cur_block->data[stream->block_offset];
+				stream->block_offset += stream->step;
+				if (stream->chip->stream) {
+					stream->chip->stream(stream->chip, stream->port, stream->command, sample);
+				}
+				stream->next_sample_cycle += stream->cycles_per_sample;
+				//TODO: deal with cycle adjustments
+				keep_going = 1;
+			}
+		}
+	} while (keep_going);
 	for (uint32_t i = 0; i < num_chips; i++)
 	{
 		chips[i].samples += samples;
@@ -163,6 +210,17 @@ chip_info *find_chip_by_data(media_player *player, uint8_t data_type)
 	for (uint32_t i = 0; i < player->num_chips; i++)
 	{
 		if (player->chips[i].data_type == data_type) {
+			return &player->chips[i];
+		}
+	}
+	return NULL;
+}
+
+chip_info *find_chip_by_stream(media_player *player, uint8_t stream_type)
+{
+	for (uint32_t i = 0; i < player->num_chips; i++)
+	{
+		if (player->chips[i].stream_type == stream_type) {
 			return &player->chips[i];
 		}
 	}
@@ -402,6 +460,167 @@ void vgm_frame(media_player *player)
 				player->current_offset += data_size;
 			}
 			break;
+		case CMD_DAC_STREAM_SETUP:
+			if (player->current_offset > player->media->size - 4) {
+				vgm_stop(player);
+				goto frame_end;
+			} else {
+				uint8_t stream_id = read_byte(player);
+				if (!player->streams[stream_id]) {
+					player->streams[stream_id] = calloc(1, sizeof(vgm_stream));
+				}
+				vgm_stream *stream = player->streams[stream_id];
+				uint8_t chip_type = read_byte(player);
+				stream->chip = find_chip_by_stream(player, chip_type);
+				if (!stream->chip) {
+					fprintf(stderr, "Failed to find chip with stream type %d for stream %d\n", chip_type, stream_id);
+				}
+				stream->port = read_byte(player);
+				stream->command = read_byte(player);
+			}
+			break;
+		case CMD_DAC_STREAM_DATA:
+			if (player->current_offset > player->media->size - 4) {
+				vgm_stop(player);
+				goto frame_end;
+			} else {
+				uint8_t stream_id = read_byte(player);
+				if (!player->streams[stream_id]) {
+					player->streams[stream_id] = calloc(1, sizeof(vgm_stream));
+				}
+				vgm_stream *stream = player->streams[stream_id];
+				stream->data_type = read_byte(player);
+				stream->step = read_byte(player);
+				stream->start_offset = read_byte(player);
+			}
+			break;
+		case CMD_DAC_STREAM_FREQ:
+			if (player->current_offset > player->media->size - 4) {
+				vgm_stop(player);
+				goto frame_end;
+			} else {
+				uint8_t stream_id = read_byte(player);
+				if (!player->streams[stream_id]) {
+					player->streams[stream_id] = calloc(1, sizeof(vgm_stream));
+				}
+				vgm_stream *stream = player->streams[stream_id];
+				stream->sample_rate = read_long_le(player);
+				if (stream->chip) {
+					stream->cycles_per_sample = stream->chip->clock / stream->sample_rate;
+				}
+			}
+			break;
+		case CMD_DAC_STREAM_START:
+			if (player->current_offset > player->media->size - 10) {
+				vgm_stop(player);
+				goto frame_end;
+			} else {
+				uint8_t stream_id = read_byte(player);
+				if (!player->streams[stream_id]) {
+					player->streams[stream_id] = calloc(1, sizeof(vgm_stream));
+				}
+				vgm_stream *stream = player->streams[stream_id];
+				uint32_t data_start_offset = read_long_le(player);
+				uint8_t length_mode = read_byte(player);
+				uint32_t length = read_long_le(player);
+				stream->flags = length_mode & STREAM_FLAG_REVERSE;
+				if (length_mode & 0x80) {
+					stream->flags |= STREAM_FLAG_LOOP;
+				}
+				length_mode &= 0x3;
+				if (length_mode) {
+					stream->length_mode = length_mode;
+					if (length_mode == 2) {
+						//length is in msec
+						if (stream->chip) {
+							stream->remaining = (((uint64_t)length) * (uint64_t)stream->sample_rate) / 1000;
+						}
+					} else if (length_mode == 3) {
+						//play until end of data
+						stream->remaining = 0xFFFFFFFF;
+					} else {
+						//length is in commands?
+						stream->remaining = length;
+					}
+				}
+				if (stream->chip && data_start_offset != 0xFFFFFFFF) {
+					data_block * cur_block = stream->chip->blocks;
+					data_start_offset += stream->start_offset;
+					while (cur_block)
+					{
+						if (cur_block->type == stream->data_type) {
+							if (data_start_offset >= cur_block->size) {
+								data_start_offset -= cur_block->size;
+								cur_block = cur_block->next;
+							} else {
+								stream->block_offset = data_start_offset;
+								stream->cur_block = cur_block;
+								break;
+							}
+						} else {
+							cur_block = cur_block->next;
+						}
+					}
+				}
+				if (stream->chip && stream->cur_block) {
+					stream->flags |= STREAM_FLAG_PLAY;
+				}
+			}
+			break;
+		case CMD_DAC_STREAM_STOP:
+			if (player->current_offset < player->media->size) {
+				vgm_stop(player);
+				goto frame_end;
+			} else {
+				uint8_t stream_id = read_byte(player);
+				if (stream_id == 0xFF) {
+					for (uint32_t i = 0; i < 0xFF; i++) {
+						if (player->streams[i]) {
+							player->streams[i]->flags &= ~STREAM_FLAG_PLAY;
+						}
+					}
+				} else {
+					if (!player->streams[stream_id]) {
+						player->streams[stream_id] = calloc(1, sizeof(vgm_stream));
+					}
+					player->streams[stream_id]->flags &= ~STREAM_FLAG_PLAY;
+				}
+			}
+			break;
+		case CMD_DAC_STREAM_STARTFAST:
+			if (player->current_offset > player->media->size - 4) {
+				vgm_stop(player);
+				goto frame_end;
+			} else {
+				uint8_t stream_id = read_byte(player);
+				if (!player->streams[stream_id]) {
+					player->streams[stream_id] = calloc(1, sizeof(vgm_stream));
+				}
+				vgm_stream *stream = player->streams[stream_id];
+				uint16_t block_id = read_word_le(player);
+				stream->flags = read_byte(player) & (STREAM_FLAG_LOOP|STREAM_FLAG_REVERSE);
+				if (stream->chip) {
+					uint16_t cur_block_id = 0;
+					data_block *cur_block = stream->chip->blocks;
+					while (cur_block)
+					{
+						if (cur_block_id == block_id) {
+							stream->cur_block = cur_block;
+							stream->block_offset = stream->start_offset;
+							break;
+						}
+						if (cur_block->type == stream->data_type) {
+							cur_block_id++;
+						}
+						cur_block = cur_block->next;
+					}
+					if (stream->cur_block) {
+						stream->flags |= STREAM_FLAG_PLAY;
+						stream->next_sample_cycle = samples_to_cycles(stream->chip->clock, stream->chip->samples);
+					}
+				}
+			}
+			break;
 		case CMD_DATA_SEEK:
 			if (player->current_offset > player->media->size - 4) {
 				vgm_stop(player);
@@ -558,10 +777,12 @@ void vgm_init(media_player *player, uint32_t opts)
 			.scope = ym_scope,
 			.no_scope = ym_no_scope,
 			.free = (chip_noarg_fun)ym_free,
+			.stream = ym_stream,
 			.clock = player->vgm->ym2612_clk,
 			.samples = 0,
 			.cmd = CMD_YM2612_0,
-			.data_type = DATA_YM2612_PCM
+			.data_type = DATA_YM2612_PCM,
+			.stream_type = STREAM_CHIP_YM2612
 		};
 	}
 	if (player->vgm->sn76489_clk) {
@@ -577,7 +798,8 @@ void vgm_init(media_player *player, uint32_t opts)
 			.clock = player->vgm->sn76489_clk,
 			.samples = 0,
 			.cmd = CMD_PSG,
-			.data_type = 0xFF
+			.data_type = 0xFF,
+			.stream_type = STREAM_CHIP_PSG
 		};
 	}
 	if (player->vgm_ext && player->vgm_ext->rf5c68_clk) {
@@ -593,7 +815,8 @@ void vgm_init(media_player *player, uint32_t opts)
 			.clock = player->vgm_ext->rf5c68_clk,
 			.samples = 0,
 			.cmd = CMD_PCM68_REG,
-			.data_type = DATA_RF5C68
+			.data_type = DATA_RF5C68,
+			.stream_type = STREAM_CHIP_RF5C68
 		};
 	}
 	if (player->vgm_ext && player->vgm_ext->rf5c164_clk) {
@@ -609,7 +832,8 @@ void vgm_init(media_player *player, uint32_t opts)
 			.clock = player->vgm_ext->rf5c164_clk,
 			.samples = 0,
 			.cmd = CMD_PCM164_REG,
-			.data_type = DATA_RF5C164
+			.data_type = DATA_RF5C164,
+			.stream_type = STREAM_CHIP_RF5C164
 		};
 	}
 	player->current_offset = player->vgm->data_offset + offsetof(vgm_header, data_offset);
