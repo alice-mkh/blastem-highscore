@@ -1879,6 +1879,10 @@ shader_prog *get_shader_progs(dir_entry *entries, size_t num_entries, shader_pro
 		if (entries[i].is_dir) {
 			continue;
 		}
+		if (startswith(entries[i].name, "extra_window.")) {
+			//skip shader used for debug windows
+			continue;
+		}
 		char *no_ext = basename_no_extension(entries[i].name);
 		uint32_t len = strlen(no_ext);
 		if (no_ext[len-1] == 'f' && no_ext[len-2] == '.') {
