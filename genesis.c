@@ -33,7 +33,6 @@ uint32_t MCLKS_PER_68K;
 #define DEFAULT_SYNC_INTERVAL MCLKS_LINE
 #define DEFAULT_LOWPASS_CUTOFF 3390
 
-//TODO: Figure out the exact value for this
 #define LINES_NTSC 262
 #define LINES_PAL 313
 
