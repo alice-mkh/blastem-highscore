@@ -27,6 +27,7 @@ typedef struct {
 
 void pico_pcm_init(pico_pcm *pcm, uint32_t master_clock, uint32_t divider);
 void pico_pcm_free(pico_pcm *pcm);
+void pico_pcm_adjust_master_clock(pico_pcm *pcm, uint32_t master_clock);
 void pico_pcm_enable_scope(pico_pcm *pcm, oscilloscope *scope, uint32_t master_clock);
 void pico_pcm_run(pico_pcm *pcm, uint32_t cycle);
 void pico_pcm_ctrl_write(pico_pcm *pcm, uint16_t value);

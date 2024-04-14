@@ -1876,14 +1876,24 @@ static void set_speed_percent(system_header * system, uint32_t percent)
 	genesis_context *context = (genesis_context *)system;
 	uint32_t old_clock = context->master_clock;
 	context->master_clock = ((uint64_t)context->normal_clock * (uint64_t)percent) / 100;
-	while (context->ym->current_cycle != context->psg->cycles) {
-		sync_sound(context, context->psg->cycles + MCLKS_PER_PSG);
+	if (context->header.type != SYSTEM_PICO && context->header.type != SYSTEM_COPERA) {
+		while (context->ym->current_cycle != context->psg->cycles) {
+			sync_sound(context, context->psg->cycles + MCLKS_PER_PSG);
+		}
+		if (context->expansion) {
+			segacd_context *cd = context->expansion;
+			segacd_set_speed_percent(cd, percent);
+		}
+		ym_adjust_master_clock(context->ym, context->master_clock);
+	} else {
+		while (context->adpcm->cycle != context->psg->cycles) {
+			sync_sound_pico(context, context->psg->cycles + MCLKS_PER_PSG);
+		}
+		if (context->ymz) {
+			ymz263b_adjust_master_clock(context->ymz, context->master_clock);
+		}
+		pico_pcm_adjust_master_clock(context->adpcm, context->master_clock);
 	}
-	if (context->expansion) {
-		segacd_context *cd = context->expansion;
-		segacd_set_speed_percent(cd, percent);
-	}
-	ym_adjust_master_clock(context->ym, context->master_clock);
 	psg_adjust_master_clock(context->psg, context->master_clock);
 }
 
@@ -2211,7 +2221,7 @@ static void free_genesis(system_header *system)
 		pico_pcm_free(gen->adpcm);
 		free(gen->adpcm);
 		if (gen->ymz) {
-			//TODO: call cleanup function once it exists
+			ymz263b_free(gen->ymz);
 			free(gen->ymz);
 		}
 	} else {
