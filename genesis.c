@@ -2457,9 +2457,11 @@ static void start_vgm_log(system_header *system, char *filename)
 	vgm_writer *vgm = vgm_write_open(filename, gen->version_reg & HZ50 ? 50 : 60, gen->normal_clock, gen->m68k->current_cycle);
 	if (vgm) {
 		printf("Started logging VGM to %s\n", filename);
-		sync_sound(gen, vgm->last_cycle);
 		if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
+			sync_sound(gen, vgm->last_cycle);
 			ym_vgm_log(gen->ym, gen->normal_clock, vgm);
+		} else {
+			sync_sound_pico(gen, vgm->last_cycle);
 		}
 		psg_vgm_log(gen->psg, gen->normal_clock, vgm);
 		gen->header.vgm_logging = 1;
@@ -2472,7 +2474,7 @@ static void stop_vgm_log(system_header *system)
 {
 	puts("Stopped VGM log");
 	genesis_context *gen = (genesis_context *)system;
-	vgm_close(gen->ym->vgm);
+	vgm_close(gen->psg->vgm);
 	if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 		gen->ym->vgm = NULL;
 	}
