@@ -44,7 +44,7 @@ typedef struct {
 	uint32_t             *texture_buf;
 	uint32_t             tex_width;
 	uint32_t             tex_height;
-	GLuint               gl_texture;
+	GLuint               gl_texture[2];
 	GLuint               *gl_static_images;
 	GLuint               vshader;
 	GLuint               fshader;
@@ -57,6 +57,7 @@ typedef struct {
 	GLint                un_height;
 	GLint                at_pos;
 	GLint                at_uv;
+	uint8_t              color[4];
 #endif
 } extra_window;
 
@@ -1549,21 +1550,28 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
 		glEnable(GL_DEBUG_OUTPUT);
 		glDebugMessageCallback(gl_message_callback, NULL);
-		glGenTextures(1, &extras[win_idx].gl_texture);
-		glBindTexture(GL_TEXTURE_2D, extras[win_idx].gl_texture);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		extras[win_idx].tex_width = width;
-		extras[win_idx].tex_height = height;
-		char *npot_textures = tern_find_path_default(config, "video\0npot_textures\0", (tern_val){.ptrval = "off"}, TVAL_PTR).ptrval;
-		if (strcmp(npot_textures, "on")) {
-			extras[win_idx].tex_width = nearest_pow2(width);
-			extras[win_idx].tex_height = nearest_pow2(height);
+		glGenTextures(2, extras[win_idx].gl_texture);
+		for (int i = 0; i < 2; i++)
+		{
+			glBindTexture(GL_TEXTURE_2D, extras[win_idx].gl_texture[i]);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			if (i) {
+				glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, 1, 1, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, extras[win_idx].color);
+			} else {
+				extras[win_idx].tex_width = width;
+				extras[win_idx].tex_height = height;
+				char *npot_textures = tern_find_path_default(config, "video\0npot_textures\0", (tern_val){.ptrval = "off"}, TVAL_PTR).ptrval;
+				if (strcmp(npot_textures, "on")) {
+					extras[win_idx].tex_width = nearest_pow2(width);
+					extras[win_idx].tex_height = nearest_pow2(height);
+				}
+				extras[win_idx].texture_buf = calloc(extras[win_idx].tex_width * extras[win_idx].tex_height, sizeof(uint32_t));
+				glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, extras[win_idx].tex_width, extras[win_idx].tex_height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, extras[win_idx].texture_buf);
+			}
 		}
-		extras[win_idx].texture_buf = calloc(extras[win_idx].tex_width * extras[win_idx].tex_height, sizeof(uint32_t));
-		glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, extras[win_idx].tex_width, extras[win_idx].tex_height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, extras[win_idx].texture_buf);
 		glGenBuffers(3, extras[win_idx].gl_buffers);
 		glBindBuffer(GL_ARRAY_BUFFER, extras[win_idx].gl_buffers[0]);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data_default), vertex_data_default, GL_STATIC_DRAW);
@@ -1589,6 +1597,7 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 		extras[win_idx].un_height = glGetUniformLocation(program, "height");
 		extras[win_idx].at_pos = glGetAttribLocation(program, "pos");
 		extras[win_idx].at_uv = glGetAttribLocation(program, "uv");
+		extras[win_idx].color[3] = 255;
 	} else {
 sdl_renderer:
 #endif
@@ -1621,6 +1630,8 @@ void render_destroy_window(uint8_t which)
 		//Destroying the renderers also frees the textures
 		SDL_DestroyRenderer(extras[win_idx].renderer);
 		extras[win_idx].renderer = NULL;
+		free (extras[win_idx].static_images);
+		extras[win_idx].static_images = NULL;
 	}
 #ifndef DISABLE_OPENGL
 	else {
@@ -1628,14 +1639,25 @@ void render_destroy_window(uint8_t which)
 		glDeleteProgram(extras[win_idx].program);
 		glDeleteShader(extras[win_idx].vshader);
 		glDeleteShader(extras[win_idx].fshader);
-		glDeleteBuffers(2, extras[win_idx].gl_buffers);
-		glDeleteTextures(1, &extras[win_idx].gl_texture);
+		glDeleteBuffers(3, extras[win_idx].gl_buffers);
+		glDeleteTextures(2, extras[win_idx].gl_texture);
+		for (uint8_t i = 0; i < extras[win_idx].num_static; i++)
+		{
+			if (extras[win_idx].gl_static_images[i]) {
+				glDeleteTextures(1, extras[win_idx].gl_static_images + i);
+			}
+		}
 		SDL_GL_DeleteContext(extras[win_idx].gl_context);
+		free(extras[win_idx].image_vertices);
+		extras[win_idx].image_vertices = NULL;
+		free(extras[win_idx].gl_static_images);
+		extras[win_idx].gl_static_images = NULL;
 	}
 #endif
 	SDL_DestroyWindow(extras[win_idx].win);
 
 	extras[win_idx].win = NULL;
+	extras[win_idx].num_static = 0;
 }
 
 #ifndef DISABLE_OPENGL
@@ -1734,6 +1756,21 @@ uint8_t render_static_image(uint8_t window, uint8_t *buffer, uint32_t size)
 	return img_index;
 }
 
+#ifndef DISABLE_OPENGL
+static void extra_update_verts(extra_window *extra, int x, int y, int width, int height)
+{
+	memcpy(extra->image_vertices, vertex_data_default, sizeof(vertex_data_default));
+	extra->image_vertices[0] = extra->image_vertices[4] = 2.0f * x / (float)extra->width - 1.0f;
+	extra->image_vertices[2] = extra->image_vertices[6] = 2.0f * (x + width) / (float)extra->width - 1.0f;
+	extra->image_vertices[1] = extra->image_vertices[3] = -2.0f * (y + height) / (float)extra->height + 1.0f;
+	extra->image_vertices[5] = extra->image_vertices[7] = -2.0f * y / (float)extra->height + 1.0f;
+	
+	SDL_GL_MakeCurrent(extra->win, extra->gl_context);
+	glBindBuffer(GL_ARRAY_BUFFER, extra->image_buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data_default), extra->image_vertices, GL_DYNAMIC_DRAW);
+}
+#endif
+
 void render_draw_image(uint8_t window, uint8_t image, int x, int y, int width, int height)
 {
 	extra_window *extra = extras + window - FRAMEBUFFER_USER_START;
@@ -1748,15 +1785,7 @@ void render_draw_image(uint8_t window, uint8_t image, int x, int y, int width, i
 	}
 #ifndef DISABLE_OPENGL
 	else {
-		memcpy(extra->image_vertices, vertex_data_default, sizeof(vertex_data_default));
-		extra->image_vertices[0] = extra->image_vertices[4] = 2.0f * x / (float)extra->width - 1.0f;
-		extra->image_vertices[2] = extra->image_vertices[6] = 2.0f * (x + width) / (float)extra->width - 1.0f;
-		extra->image_vertices[1] = extra->image_vertices[3] = -2.0f * (y + height) / (float)extra->height + 1.0f;
-		extra->image_vertices[5] = extra->image_vertices[7] = -2.0f * y / (float)extra->height + 1.0f;
-	
-		SDL_GL_MakeCurrent(extra->win, extra->gl_context);
-		glBindBuffer(GL_ARRAY_BUFFER, extra->image_buffer);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data_default), extra->image_vertices, GL_DYNAMIC_DRAW);
+		extra_update_verts(extra, x, y, width, height);
 		extra_draw_quad(extra, extra->gl_static_images[image], 1.0f, 1.0f);
 	}
 #endif
@@ -1780,20 +1809,26 @@ void render_clear_window(uint8_t window, uint8_t r, uint8_t g, uint8_t b)
 
 void render_fill_rect(uint8_t window, uint8_t r, uint8_t g, uint8_t b, int x, int y, int width, int height)
 {
-	uint8_t win_idx = window - FRAMEBUFFER_USER_START;
-	if (extras[win_idx].renderer) {
-		SDL_SetRenderDrawColor(extras[win_idx].renderer, r, g, b, 255);
+	extra_window *extra = extras + window - FRAMEBUFFER_USER_START;
+	if (extra->renderer) {
+		SDL_SetRenderDrawColor(extra->renderer, r, g, b, 255);
 		SDL_Rect dst = {
 			.x = x,
 			.y = y,
 			.w = width,
 			.h = height
 		};
-		SDL_RenderFillRect(extras[win_idx].renderer, &dst);
+		SDL_RenderFillRect(extra->renderer, &dst);
 	}
 #ifndef DISABLE_OPENGL
 	else {
-		//TODO: implement me
+		extra_update_verts(extra, x, y, width, height);
+		extra->color[0] = b;
+		extra->color[1] = g;
+		extra->color[2] = r;
+		glBindTexture(GL_TEXTURE_2D, extra->gl_texture[1]);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, SRC_FORMAT, GL_UNSIGNED_BYTE, extra->color);
+		extra_draw_quad(extra, extra->gl_texture[1], 1.0f, 1.0f);
 	}
 #endif
 }
@@ -1963,7 +1998,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 	} else if (render_gl && which >= FRAMEBUFFER_USER_START) {
 		uint8_t win_idx = which - FRAMEBUFFER_USER_START;
 		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
-		glBindTexture(GL_TEXTURE_2D, extras[win_idx].gl_texture);
+		glBindTexture(GL_TEXTURE_2D, extras[win_idx].gl_texture[0]);
 		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, extras[win_idx].width, extras[win_idx].height, SRC_FORMAT, GL_UNSIGNED_BYTE, buffer);
 	} else {
 #endif
@@ -2035,7 +2070,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 			glBindBuffer(GL_ARRAY_BUFFER, extras[win_idx].gl_buffers[0]);
 			extra_draw_quad(
 				extras + win_idx,
-				extras[win_idx].gl_texture, 
+				extras[win_idx].gl_texture[0], 
 				(float)extras[win_idx].width / (float)extras[win_idx].tex_width,
 				(float)extras[win_idx].height / (float)extras[win_idx].tex_height
 			);
