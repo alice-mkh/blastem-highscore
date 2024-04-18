@@ -34,23 +34,29 @@ typedef struct {
 	SDL_Window *win;
 	SDL_Renderer         *renderer;
 	SDL_Texture          *sdl_texture;
+	SDL_Texture          **static_images;
 	window_close_handler on_close;
 	uint32_t             width;
 	uint32_t             height;
+	uint8_t              num_static;
 #ifndef DISABLE_OPENGL
 	SDL_GLContext        *gl_context;
 	uint32_t             *texture_buf;
 	uint32_t             tex_width;
 	uint32_t             tex_height;
 	GLuint               gl_texture;
+	GLuint               *gl_static_images;
 	GLuint               vshader;
 	GLuint               fshader;
 	GLuint               program;
-	GLuint               gl_buffers[2];
+	GLuint               gl_buffers[3];
+	GLuint               image_buffer;
+	GLfloat              *image_vertices;
 	GLint                un_texture;
 	GLint                un_width;
 	GLint                un_height;
 	GLint                at_pos;
+	GLint                at_uv;
 #endif
 } extra_window;
 
@@ -335,6 +341,13 @@ static GLfloat vertex_data_default[] = {
 	 1.0f, -1.0f,
 	-1.0f,  1.0f,
 	 1.0f,  1.0f
+};
+
+static GLfloat uvs[] = {
+	 0.0f,  1.0f,
+	 1.0f,  1.0f,
+	 0.0f,  0.0f,
+	 1.0f,  0.0f
 };
 
 static GLfloat vertex_data[8];
@@ -1551,11 +1564,13 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 		}
 		extras[win_idx].texture_buf = calloc(extras[win_idx].tex_width * extras[win_idx].tex_height, sizeof(uint32_t));
 		glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, extras[win_idx].tex_width, extras[win_idx].tex_height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, extras[win_idx].texture_buf);
-		glGenBuffers(2, extras[win_idx].gl_buffers);
+		glGenBuffers(3, extras[win_idx].gl_buffers);
 		glBindBuffer(GL_ARRAY_BUFFER, extras[win_idx].gl_buffers[0]);
 		glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data_default), vertex_data_default, GL_STATIC_DRAW);
 		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, extras[win_idx].gl_buffers[1]);
 		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(element_data), element_data, GL_STATIC_DRAW);
+		glBindBuffer(GL_ARRAY_BUFFER, extras[win_idx].gl_buffers[2]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(uvs), uvs, GL_STATIC_DRAW);
 		extras[win_idx].vshader = load_shader("extra_window.v.glsl", GL_VERTEX_SHADER);
 		extras[win_idx].fshader = load_shader("extra_window.f.glsl", GL_FRAGMENT_SHADER);
 		extras[win_idx].program = glCreateProgram();
@@ -1573,6 +1588,7 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 		extras[win_idx].un_width = glGetUniformLocation(program, "width");
 		extras[win_idx].un_height = glGetUniformLocation(program, "height");
 		extras[win_idx].at_pos = glGetAttribLocation(program, "pos");
+		extras[win_idx].at_uv = glGetAttribLocation(program, "uv");
 	} else {
 sdl_renderer:
 #endif
@@ -1622,52 +1638,126 @@ void render_destroy_window(uint8_t which)
 	extras[win_idx].win = NULL;
 }
 
-SDL_Texture **static_images;
-uint8_t num_static;
+#ifndef DISABLE_OPENGL
+static void extra_draw_quad(extra_window *extra, GLuint texture, float width, float height)
+{
+	glUseProgram(extra->program);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glUniform1i(extra->un_texture, 0);
+	
+	glUniform1f(extra->un_width, width);
+	glUniform1f(extra->un_height, height);
+	
+	glVertexAttribPointer(extra->at_pos, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat[2]), (void *)0);
+	glEnableVertexAttribArray(extra->at_pos);
+	
+	glBindBuffer(GL_ARRAY_BUFFER, extra->gl_buffers[2]);
+	glVertexAttribPointer(extra->at_uv, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat[2]), (void *)0);
+	glEnableVertexAttribArray(extra->at_uv);
+	
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, extra->gl_buffers[1]);
+	glDrawElements(GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_SHORT, (void *)0);
+}
+#endif
+
 uint8_t render_static_image(uint8_t window, uint8_t *buffer, uint32_t size)
 {
 	window -= FRAMEBUFFER_USER_START;
+	extra_window *extra = extras + window;
 	uint32_t width, height;
 	uint32_t *pixels = load_png(buffer, size, &width, &height);
 	if (!pixels) {
 		return 0xFF;
 	}
 	uint8_t img_index = 0;
-	if (!num_static) {
-		num_static = 8;
-		static_images = calloc(num_static, sizeof(SDL_Texture*));
+	if (!extra->num_static) {
+		extra->num_static = 8;
+#ifndef DISABLE_OPENGL
+		if (render_gl) {
+			extra->gl_static_images = calloc(extra->num_static, sizeof(GLuint));
+			extra->image_vertices = malloc(sizeof(vertex_data_default));
+			memcpy(extra->image_vertices, vertex_data_default, sizeof(vertex_data_default));
+			SDL_GL_MakeCurrent(extra->win, extra->gl_context);
+			glGenBuffers(1, &extra->image_buffer);
+			glBindBuffer(GL_ARRAY_BUFFER, extra->image_buffer);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data_default), extra->image_vertices, GL_DYNAMIC_DRAW);
+		} else 
+#endif
+		{
+			extra->static_images = calloc(extra->num_static, sizeof(SDL_Texture*));
+		}
 	}
-	for (; img_index < num_static; img_index++)
+	for (; img_index < extra->num_static; img_index++)
 	{
-		if (!static_images[img_index]) {
+#ifndef DISABLE_OPENGL
+		if (render_gl) {
+			if (!extra->gl_static_images[img_index]) {
+				break;
+			}
+		} else
+#endif
+		if (!extra->static_images[img_index]) {
 			break;
 		}
 	}
-	if (img_index == num_static) {
-		num_static *= 2;
-		static_images = realloc(static_images, num_static * sizeof(SDL_Texture*));
+	if (img_index == extra->num_static) {
+		extra->num_static *= 2;
+#ifndef DISABLE_OPENGL
+		if (render_gl) {
+			extra->gl_static_images = realloc(extra->static_images, extra->num_static * sizeof(GLuint));
+		} else 
+#endif
+		{
+			extra->static_images = realloc(extra->static_images, extra->num_static * sizeof(SDL_Texture*));
+		}
 	}
-	static_images[img_index] = SDL_CreateTexture(extras[window].renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, width, height);
-	SDL_UpdateTexture(static_images[img_index], NULL, pixels, sizeof(uint32_t) * width);
+#ifndef DISABLE_OPENGL
+	if (render_gl) {
+		SDL_GL_MakeCurrent(extra->win, extra->gl_context);
+		
+		glGenTextures(1, extra->gl_static_images + img_index);
+		glBindTexture(GL_TEXTURE_2D, extra->gl_static_images[img_index]);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		//TODO: maybe make this respect the npot texture setting?
+		glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, width, height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, pixels);
+	} else
+#endif
+	{
+		extra->static_images[img_index] = SDL_CreateTexture(extra->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, width, height);
+		SDL_UpdateTexture(extra->static_images[img_index], NULL, pixels, sizeof(uint32_t) * width);
+	}
 	free(pixels);
 	return img_index;
 }
 
 void render_draw_image(uint8_t window, uint8_t image, int x, int y, int width, int height)
 {
-	uint8_t win_idx = window - FRAMEBUFFER_USER_START;
-	if (extras[win_idx].renderer) {
+	extra_window *extra = extras + window - FRAMEBUFFER_USER_START;
+	if (extra->renderer) {
 		SDL_Rect dst = {
 			.x = x,
 			.y = y,
 			.w = width,
 			.h = height
 		};
-		SDL_RenderCopy(extras[win_idx].renderer, static_images[image], NULL, &dst);
+		SDL_RenderCopy(extra->renderer, extra->static_images[image], NULL, &dst);
 	}
 #ifndef DISABLE_OPENGL
 	else {
-		//TODO: implement me
+		memcpy(extra->image_vertices, vertex_data_default, sizeof(vertex_data_default));
+		extra->image_vertices[0] = extra->image_vertices[4] = 2.0f * x / (float)extra->width - 1.0f;
+		extra->image_vertices[2] = extra->image_vertices[6] = 2.0f * (x + width) / (float)extra->width - 1.0f;
+		extra->image_vertices[1] = extra->image_vertices[3] = -2.0f * (y + height) / (float)extra->height + 1.0f;
+		extra->image_vertices[5] = extra->image_vertices[7] = -2.0f * y / (float)extra->height + 1.0f;
+	
+		SDL_GL_MakeCurrent(extra->win, extra->gl_context);
+		glBindBuffer(GL_ARRAY_BUFFER, extra->image_buffer);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data_default), extra->image_vertices, GL_DYNAMIC_DRAW);
+		extra_draw_quad(extra, extra->gl_static_images[image], 1.0f, 1.0f);
 	}
 #endif
 }
@@ -1942,20 +2032,13 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 			glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 			
-			glUseProgram(extras[win_idx].program);
-			glActiveTexture(GL_TEXTURE0);
-			glBindTexture(GL_TEXTURE_2D, extras[win_idx].gl_texture);
-			glUniform1i(extras[win_idx].un_texture, 0);
-			
-			glUniform1f(extras[win_idx].un_width, (float)extras[win_idx].width / (float)extras[win_idx].tex_width);
-			glUniform1f(extras[win_idx].un_height, (float)extras[win_idx].height / (float)extras[win_idx].tex_height);
-			
 			glBindBuffer(GL_ARRAY_BUFFER, extras[win_idx].gl_buffers[0]);
-			glVertexAttribPointer(extras[win_idx].at_pos, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat[2]), (void *)0);
-			glEnableVertexAttribArray(extras[win_idx].at_pos);
-			
-			glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, extras[win_idx].gl_buffers[1]);
-			glDrawElements(GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_SHORT, (void *)0);
+			extra_draw_quad(
+				extras + win_idx,
+				extras[win_idx].gl_texture, 
+				(float)extras[win_idx].width / (float)extras[win_idx].tex_width,
+				(float)extras[win_idx].height / (float)extras[win_idx].tex_height
+			);
 			
 			SDL_GL_SwapWindow(extras[win_idx].win);
 		}
