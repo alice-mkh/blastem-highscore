@@ -1402,6 +1402,11 @@ void render_config_updated(void)
 
 SDL_Window *render_get_window(void)
 {
+#ifndef DISABLE_OPENGL
+	if (render_gl) {
+		SDL_GL_MakeCurrent(main_window, main_context);
+	}
+#endif
 	return main_window;
 }
 
