@@ -169,6 +169,15 @@ void vgm_wait(media_player *player, uint32_t samples)
 				stream->next_sample_cycle += stream->cycles_per_sample;
 				//TODO: deal with cycle adjustments
 				keep_going = 1;
+				if (stream->length_mode == 1) {
+					//unclear how this is supposed to work
+				} else {
+					stream->remaining--;
+					if (!stream->remaining) {
+						//TODO: looping support
+						player->streams[i]->flags &= ~STREAM_FLAG_PLAY;
+					}
+				}
 			}
 		}
 	} while (keep_going);
@@ -615,6 +624,8 @@ void vgm_frame(media_player *player)
 						cur_block = cur_block->next;
 					}
 					if (stream->cur_block) {
+						stream->remaining = 0xFFFFFFFF;
+						stream->length_mode = 3;
 						stream->flags |= STREAM_FLAG_PLAY;
 						stream->next_sample_cycle = samples_to_cycles(stream->chip->clock, stream->chip->samples);
 					}
