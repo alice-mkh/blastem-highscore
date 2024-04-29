@@ -212,7 +212,7 @@ m68k_context * write_bank_reg_w(uint32_t address, m68k_context * context, uint16
 	address >>= 1;
 	if (!address) {
 		if (gen->mapper_type == MAPPER_SEGA_MED_V2) {
-			if (!value & 0x8000) {
+			if (!(value & 0x8000)) {
 				//writes without protection bit set are ignored
 				return context;
 			}
