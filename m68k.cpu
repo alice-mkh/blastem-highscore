@@ -1748,10 +1748,19 @@ m68k_save_dst
 m68k_calc_ea
 	arg mode 16
 	arg reg 16
+	arg index_penalty 32
 	
 	switch mode
 	case 2
 		#address reg indirect
+		meta ea aregs.reg
+	case 3
+		#postincrement
+		meta ea aregs.reg
+	case 4
+		#predecrement
+		#note: this case is only used when m68k_calc_ea
+		#is called from movem_reg_to_mem which does its own decrementing
 		meta ea aregs.reg
 	case 5
 		#displacement
@@ -1762,7 +1771,7 @@ m68k_calc_ea
 	case 6
 		#index
 		m68k_index_word
-		cycles 4
+		cycles index_penalty
 		scratch1 += aregs.reg
 		meta ea scratch1
 	case 7
@@ -1786,7 +1795,7 @@ m68k_calc_ea
 		case 3
 			#pc indexed
 			m68k_index_word
-			cycles 4
+			cycles index_penalty
 			scratch1 += pc
 			scratch1 -= 2
 		end
@@ -1803,7 +1812,7 @@ m68k_calc_ea
 	invalid M 7 R 6
 	invalid M 7 R 7
 	
-	m68k_calc_ea M R
+	m68k_calc_ea M R 4
 	scratch2 = a7 - 4
 	m68k_write32_lowfirst ea
 	a7 -= 4
@@ -1820,7 +1829,7 @@ m68k_calc_ea
 	invalid M 7 R 6
 	invalid M 7 R 7
 	
-	m68k_calc_ea M R
+	m68k_calc_ea M R 4
 	aregs.D = ea
 	
 	m68k_prefetch
@@ -1903,7 +1912,7 @@ m68k_calc_ea
 	scratch1 = a7
 	m68k_write32 pc
 	
-	m68k_calc_ea M R
+	m68k_calc_ea M R 2
 	pc = ea
 	
 	cycles 4
@@ -1919,11 +1928,40 @@ m68k_calc_ea
 	invalid M 7 R 6
 	invalid M 7 R 7
 	
-	m68k_calc_ea M R
+	m68k_calc_ea M R 2
 	pc = ea
 	
 	cycles 4
 	m68k_prefetch
+
+m68k_movem_reg_to_mem
+	arg reglist 16
+	arg mask 16
+	arg reg 32
+	arg size 16
+	
+	scratch1 = reglist & mask
+	if scratch1
+		scratch2 = addr
+		scratch1 = reg
+		m68k_write_size size 1
+		addsize size addr addr
+	end
+
+m68k_movem_reg_to_mem_dec
+	arg reglist 16
+	arg mask 16
+	arg reg 32
+	arg size 16
+	
+	scratch1 = reglist & mask
+	if scratch1
+		decsize size addr addr
+		scratch2 = addr
+		scratch1 = reg
+		m68k_write_size size 1
+	end
+	
 
 010010001ZMMMRRR movem_reg_to_mem
 	invalid M 0
@@ -1936,9 +1974,91 @@ m68k_calc_ea
 	invalid M 7 R 6
 	invalid M 7 R 7
 	local reglist 16
+	local address 32
+	local sz 16
+	sz = Z + 1
 	
 	m68k_prefetch
 	reglist = scratch1
+	
+	m68k_calc_ea M R 2
+	address = ea
+	meta addr address
+	if M = 4
+		m68k_movem_reg_to_mem_dec reglist 1 a7 sz
+		m68k_movem_reg_to_mem_dec reglist 2 a6 sz
+		m68k_movem_reg_to_mem_dec reglist 4 a5 sz
+		m68k_movem_reg_to_mem_dec reglist 8 a4 sz
+		m68k_movem_reg_to_mem_dec reglist 16 a3 sz
+		m68k_movem_reg_to_mem_dec reglist 32 a2 sz
+		m68k_movem_reg_to_mem_dec reglist 64 a1 sz
+		m68k_movem_reg_to_mem_dec reglist 128 a0 sz
+		m68k_movem_reg_to_mem_dec reglist 256 d7 sz
+		m68k_movem_reg_to_mem_dec reglist 512 d6 sz
+		m68k_movem_reg_to_mem_dec reglist 1024 d5 sz
+		m68k_movem_reg_to_mem_dec reglist 2048 d4 sz
+		m68k_movem_reg_to_mem_dec reglist 4096 d3 sz
+		m68k_movem_reg_to_mem_dec reglist 8192 d2 sz
+		m68k_movem_reg_to_mem_dec reglist 16384 d1 sz
+		m68k_movem_reg_to_mem_dec reglist 32768 d0 sz
+		ea = address
+	else
+		m68k_movem_reg_to_mem reglist 1 d0 sz
+		m68k_movem_reg_to_mem reglist 2 d1 sz
+		m68k_movem_reg_to_mem reglist 4 d2 sz
+		m68k_movem_reg_to_mem reglist 8 d3 sz
+		m68k_movem_reg_to_mem reglist 16 d4 sz
+		m68k_movem_reg_to_mem reglist 32 d5 sz
+		m68k_movem_reg_to_mem reglist 64 d6 sz
+		m68k_movem_reg_to_mem reglist 128 d7 sz
+		m68k_movem_reg_to_mem reglist 256 a0 sz
+		m68k_movem_reg_to_mem reglist 512 a1 sz
+		m68k_movem_reg_to_mem reglist 1024 a2 sz
+		m68k_movem_reg_to_mem reglist 2048 a3 sz
+		m68k_movem_reg_to_mem reglist 4096 a4 sz
+		m68k_movem_reg_to_mem reglist 8192 a5 sz
+		m68k_movem_reg_to_mem reglist 16384 a6 sz
+		m68k_movem_reg_to_mem reglist 32768 a7 sz
+	end
+	m68k_prefetch
+
+m68k_movem_mem_to_dreg
+	arg reglist 16
+	arg mask 16
+	arg reg 32
+	arg size 16
+	
+	scratch1 = reglist & mask
+	if scratch1
+		scratch1 = addr
+		if sz = 1
+			ocall read_16
+			sext 32 scratch1 dregs.reg
+		else
+			m68k_read32
+			dregs.reg = scratch1
+		end
+		addsize size addr addr
+	end
+
+m68k_movem_mem_to_areg
+	arg reglist 16
+	arg mask 16
+	arg reg 32
+	arg size 16
+	
+	scratch1 = reglist & mask
+	if scratch1
+		scratch1 = addr
+		if sz = 1
+			ocall read_16
+			sext 32 scratch1 aregs.reg
+		else
+			m68k_read32
+			aregs.reg = scratch1
+		end
+		addsize size addr addr
+	end
 	
 010011001ZMMMRRR movem_mem_to_reg
 	invalid M 0
@@ -1949,6 +2069,46 @@ m68k_calc_ea
 	invalid M 7 R 6
 	invalid M 7 R 7
 	local reglist 16
+	local address 32
+	local sz 16
+	sz = Z + 1
 	
 	m68k_prefetch
 	reglist = scratch1
+	
+	m68k_calc_ea M R 2
+	address = ea
+	meta addr address
+	
+	m68k_movem_mem_to_dreg reglist 1 0 sz
+	m68k_movem_mem_to_dreg reglist 2 1 sz
+	m68k_movem_mem_to_dreg reglist 4 2 sz
+	m68k_movem_mem_to_dreg reglist 8 3 sz
+	m68k_movem_mem_to_dreg reglist 16 4 sz
+	m68k_movem_mem_to_dreg reglist 32 5 sz
+	m68k_movem_mem_to_dreg reglist 64 6 sz
+	m68k_movem_mem_to_dreg reglist 128 7 sz
+	m68k_movem_mem_to_areg reglist 256 0 sz
+	m68k_movem_mem_to_areg reglist 512 1 sz
+	m68k_movem_mem_to_areg reglist 1024 2 sz
+	m68k_movem_mem_to_areg reglist 2048 3 sz
+	m68k_movem_mem_to_areg reglist 4096 4 sz
+	m68k_movem_mem_to_areg reglist 8192 5 sz
+	m68k_movem_mem_to_areg reglist 16384 6 sz
+	m68k_movem_mem_to_areg reglist 32768 7 sz
+	#dummy read
+	scratch1 = address
+	ocall read_16
+	if M = 3
+		ea = address
+	end
+	
+	m68k_prefetch
+
+0111RRR0IIIIIIII moveq
+	local tmp 32
+	sext 16 I tmp
+	sext 32 tmp dregs.R
+	cmp 0 dregs.R
+	update_flags NZV0C0
+	m68k_prefetch
