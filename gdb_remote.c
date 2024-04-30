@@ -128,14 +128,14 @@ void update_status(m68k_context * context, uint16_t value)
 static uint8_t m68k_read_byte(m68k_context *context, uint32_t address)
 {
 	//TODO: share this implementation with builtin debugger
-	return read_byte(address, (void **)context->mem_pointers, &context->options->gen, context);
+	return read_byte(address, (void **)context->mem_pointers, &context->opts->gen, context);
 }
 
 void m68k_write_byte(m68k_context * context, uint32_t address, uint8_t value)
 {
 	genesis_context *gen = context->system;
 	//TODO: Use generated read/write functions so that memory map is properly respected
-	uint16_t * word = get_native_pointer(address & 0xFFFFFFFE, (void **)context->mem_pointers, &context->options->gen);
+	uint16_t * word = get_native_pointer(address & 0xFFFFFFFE, (void **)context->mem_pointers, &context->opts->gen);
 	if (word) {
 		if (address & 1) {
 			*word = (*word & 0xFF00) | value;

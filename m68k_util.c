@@ -87,3 +87,13 @@ void m68k_print_regs(m68k_context *context)
 		printf("a%d: %X\n", i, context->aregs[i]);
 	}
 }
+
+void m68k_serialize(m68k_context *context, uint32_t pc, serialize_buffer *buf)
+{
+	//TODO: implement me
+}
+
+void m68k_deserialize(deserialize_buffer *buf, void *vcontext)
+{
+	//TODO: implement me
+}

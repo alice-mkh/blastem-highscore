@@ -174,7 +174,7 @@ static void *word_ram_2M_write8(uint32_t address, void *vcontext, uint8_t value)
 		}
 		m68k_invalidate_code_range(cd->genesis->m68k, cd->base + 0x200000 + (address & ~1), cd->base + 0x200000 + (address & ~1) + 1);
 		cd->sub_paused_wordram = 1;
-		m68k->sync_cycle = m68k->target_cycle = m68k->current_cycle;
+		m68k->sync_cycle = m68k->target_cycle = m68k->cycles;
 		m68k->should_return = 1;
 	} else {
 		value &= 0xF;
@@ -407,8 +407,8 @@ static uint8_t pcm_read8(uint32_t address, void *vcontext)
 	segacd_context *cd = m68k->system;
 	if (address & 1) {
 		//need to run CD drive because there may be a PCM DMA underway
-		cdd_run(cd, m68k->current_cycle);
-		rf5c164_run(&cd->pcm, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
+		rf5c164_run(&cd->pcm, m68k->cycles);
 		return rf5c164_read(&cd->pcm, address >> 1);
 	} else {
 		return 0xFF;
@@ -426,13 +426,13 @@ static void *pcm_write8(uint32_t address, void *vcontext, uint8_t value)
 	segacd_context *cd = m68k->system;
 	if (address & 1) {
 		//need to run CD drive because there may be a PCM DMA underway
-		cdd_run(cd, m68k->current_cycle);
-		rf5c164_run(&cd->pcm, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
+		rf5c164_run(&cd->pcm, m68k->cycles);
 		while ((cd->pcm.flags & 0x81) == 1) {
 			//not sounding, but pending write
 			//DMA write conflict presumably adds wait states
-			m68k->current_cycle += 4;
-			rf5c164_run(&cd->pcm, m68k->current_cycle);
+			m68k->cycles += 4;
+			rf5c164_run(&cd->pcm, m68k->cycles);
 		}
 		rf5c164_write(&cd->pcm, address >> 1, value);
 	}
@@ -449,7 +449,7 @@ static uint16_t cart_area_read16(uint32_t address, void *vcontext)
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
-	uint16_t open_bus = read_word(m68k->last_prefetch_address, (void **)m68k->mem_pointers, &m68k->options->gen, m68k);
+	uint16_t open_bus = read_word(m68k->last_prefetch_address, (void **)m68k->mem_pointers, &m68k->opts->gen, m68k);
 	if (cd->bram_cart_id > 7) {
 		// No cart, just return open bus
 		return open_bus;
@@ -477,19 +477,19 @@ static uint8_t cart_area_read8(uint32_t address, void *vcontext)
 	segacd_context *cd = gen->expansion;
 	if (!(address & 1) || cd->bram_cart_id > 7) {
 		//open bus
-		return read_byte(m68k->last_prefetch_address | (address & 1), (void **)m68k->mem_pointers, &m68k->options->gen, m68k);
+		return read_byte(m68k->last_prefetch_address | (address & 1), (void **)m68k->mem_pointers, &m68k->opts->gen, m68k);
 	}
 	address &= 0x3FFFFF;
 	if (address < 0x200000) {
 		if (address < 0x100000) {
 			return cd->bram_cart_id;
 		}
-		return read_byte(m68k->last_prefetch_address | 1, (void **)m68k->mem_pointers, &m68k->options->gen, m68k);
+		return read_byte(m68k->last_prefetch_address | 1, (void **)m68k->mem_pointers, &m68k->opts->gen, m68k);
 	} else {
 		address &= 0x1FFFFF;
 		uint32_t end = 0x2000 << (1 + cd->bram_cart_id);
 		if (address >= end) {
-			return read_byte(m68k->last_prefetch_address | 1, (void **)m68k->mem_pointers, &m68k->options->gen, m68k);
+			return read_byte(m68k->last_prefetch_address | 1, (void **)m68k->mem_pointers, &m68k->opts->gen, m68k);
 		}
 		return cd->bram_cart[address >> 1];
 	}
@@ -567,7 +567,7 @@ static void calculate_target_cycle(m68k_context * context)
 	uint32_t cdc_cycle = CYCLE_NEVER;
 	if (mask < 6) {
 		if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN6) {
-			uint32_t subcode_cycle = cd->cdd.subcode_int_pending ? context->current_cycle : cd->cdd.next_subcode_int_cycle;
+			uint32_t subcode_cycle = cd->cdd.subcode_int_pending ? context->cycles : cd->cdd.next_subcode_int_cycle;
 			if (subcode_cycle != CYCLE_NEVER) {
 				context->int_cycle = subcode_cycle;
 				context->int_num = 6;
@@ -591,7 +591,7 @@ static void calculate_target_cycle(m68k_context * context)
 			}
 			if (mask < 4) {
 				if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN4) {
-					uint32_t cdd_cycle = cd->cdd.int_pending ? context->current_cycle : cd->cdd.next_int_cycle;
+					uint32_t cdd_cycle = cd->cdd.int_pending ? context->cycles : cd->cdd.next_int_cycle;
 					if (cdd_cycle < context->int_cycle) {
 						context->int_cycle = cdd_cycle;
 						context->int_num = 4;
@@ -622,23 +622,23 @@ static void calculate_target_cycle(m68k_context * context)
 			}
 		}
 	}
-	if (context->int_cycle > context->current_cycle && context->int_pending == INT_PENDING_SR_CHANGE) {
+	if (context->int_cycle > context->cycles && context->int_pending == INT_PENDING_SR_CHANGE) {
 		context->int_pending = INT_PENDING_NONE;
 	}
-	if (context->current_cycle >= context->sync_cycle) {
+	if (context->cycles >= context->sync_cycle) {
 		context->should_return = 1;
-		context->target_cycle = context->current_cycle;
+		context->target_cycle = context->cycles;
 		return;
 	}
 	if (context->status & M68K_STATUS_TRACE || context->trace_pending) {
-		context->target_cycle = context->current_cycle;
+		context->target_cycle = context->cycles;
 		return;
 	}
 	context->target_cycle = context->sync_cycle < context->int_cycle ? context->sync_cycle : context->int_cycle;
 	if (context->int_cycle == cdc_cycle && context->int_num == 5) {
-		uint32_t before = cdc_cycle - cd->m68k->options->gen.clock_divider * 158; //divs worst case
+		uint32_t before = cdc_cycle - cd->m68k->opts->gen.clock_divider * 158; //divs worst case
 		if (before < context->target_cycle) {
-			while (before <= context->current_cycle) {
+			while (before <= context->cycles) {
 				before += cd->cdc.clock_step;
 			}
 			if (before < context->target_cycle) {
@@ -652,12 +652,12 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 {
 	m68k_context *m68k = vcontext;
 	segacd_context *cd = m68k->system;
-	uint32_t before_cycle = m68k->current_cycle - m68k->options->gen.clock_divider * 4;
+	uint32_t before_cycle = m68k->cycles - m68k->opts->gen.clock_divider * 4;
 	if (before_cycle >= cd->last_refresh_cycle) {
 		uint32_t num_refresh = (before_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
-		uint32_t num_full = (m68k->current_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
+		uint32_t num_full = (m68k->cycles - cd->last_refresh_cycle) / REFRESH_INTERVAL;
 		cd->last_refresh_cycle = cd->last_refresh_cycle + num_full * REFRESH_INTERVAL;
-		m68k->current_cycle += num_refresh * REFRESH_DELAY;
+		m68k->cycles += num_refresh * REFRESH_DELAY;
 	}
 	
 	
@@ -666,7 +666,7 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 	{
 	case GA_SUB_CPU_CTRL: {
 		uint16_t value = cd->gate_array[reg] & 0xFFFE;
-		if (cd->periph_reset_cycle == CYCLE_NEVER || (m68k->current_cycle - cd->periph_reset_cycle) > SCD_PERIPH_RESET_CLKS) {
+		if (cd->periph_reset_cycle == CYCLE_NEVER || (m68k->cycles - cd->periph_reset_cycle) > SCD_PERIPH_RESET_CLKS) {
 			value |= BIT_PRES;
 		}
 		return value;
@@ -674,13 +674,13 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 	case GA_MEM_MODE:
 		return cd->gate_array[reg] & 0xFF1F;
 	case GA_CDC_CTRL:
-		cdd_run(cd, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
 		return cd->gate_array[reg] | cd->cdc.ar;
 	case GA_CDC_REG_DATA:
-		cdd_run(cd, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
 		return lc8951_reg_read(&cd->cdc);
 	case GA_CDC_HOST_DATA: {
-		cdd_run(cd, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
 		uint16_t dst = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
 		if (dst == DST_SUB_CPU) {
 			if (cd->gate_array[GA_CDC_CTRL] & BIT_DSR) {
@@ -694,14 +694,14 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 	}
 	case GA_STOP_WATCH:
 	case GA_TIMER:
-		timers_run(cd, m68k->current_cycle);
+		timers_run(cd, m68k->cycles);
 		return cd->gate_array[reg];
 	case GA_CDD_STATUS0:
 	case GA_CDD_STATUS1:
 	case GA_CDD_STATUS2:
 	case GA_CDD_STATUS3:
 	case GA_CDD_STATUS4:
-		cdd_run(cd, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
 		return cd->gate_array[reg];
 		break;
 	case GA_FONT_DATA0:
@@ -726,7 +726,7 @@ static uint16_t sub_gate_read16(uint32_t address, void *vcontext)
 	case GA_STAMP_SIZE:
 	case GA_IMAGE_BUFFER_LINES:
 		//these two have bits that change based on graphics operations
-		cd_graphics_run(cd, m68k->current_cycle);
+		cd_graphics_run(cd, m68k->cycles);
 		return cd->gate_array[reg];
 	case GA_TRACE_VECTOR_BASE:
 		//write only
@@ -749,12 +749,12 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 {
 	m68k_context *m68k = vcontext;
 	segacd_context *cd = m68k->system;
-	uint32_t before_cycle = m68k->current_cycle - m68k->options->gen.clock_divider * 4;
+	uint32_t before_cycle = m68k->cycles - m68k->opts->gen.clock_divider * 4;
 	if (before_cycle >= cd->last_refresh_cycle) {
 		uint32_t num_refresh = (before_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
-		uint32_t num_full = (m68k->current_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
+		uint32_t num_full = (m68k->cycles - cd->last_refresh_cycle) / REFRESH_INTERVAL;
 		cd->last_refresh_cycle = cd->last_refresh_cycle + num_full * REFRESH_INTERVAL;
-		m68k->current_cycle += num_refresh * REFRESH_DELAY;
+		m68k->cycles += num_refresh * REFRESH_DELAY;
 	}
 	
 	uint32_t reg = address >> 1;
@@ -764,7 +764,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cd->gate_array[reg] &= 0xF0;
 		cd->gate_array[reg] |= value & (BIT_LEDG|BIT_LEDR);
 		if (value & BIT_PRES) {
-			cd->periph_reset_cycle = m68k->current_cycle;
+			cd->periph_reset_cycle = m68k->cycles;
 		}
 		break;
 	case GA_MEM_MODE: {
@@ -836,7 +836,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		break;
 	}
 	case GA_CDC_CTRL: {
-		cdd_run(cd, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
 		lc8951_ar_write(&cd->cdc, value);
 		//cd->gate_array[reg] &= 0xC000;
 		uint16_t old_dest = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
@@ -859,8 +859,8 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		break;
 	}
 	case GA_CDC_REG_DATA:
-		cdd_run(cd, m68k->current_cycle);
-		printf("CDC write %X: %X @ %u\n", cd->cdc.ar, value, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
+		printf("CDC write %X: %X @ %u\n", cd->cdc.ar, value, m68k->cycles);
 		if (cd->cdc.ar == 6) {
 			cd->cdc_dst_low = 0;
 			//TODO: Confirm if DSR is cleared here on hardware
@@ -874,7 +874,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		sub_gate_read16(address, vcontext);
 		break;
 	case GA_CDC_DMA_ADDR:
-		cdd_run(cd, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value;
 		cd->cdc_dst_low = 0;
 		//TODO: Confirm if DSR is cleared here on hardware
@@ -883,7 +883,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_STOP_WATCH:
 		//docs say you should only write zero to reset
 		//mcd-verificator comments suggest any value will reset
-		timers_run(cd, m68k->current_cycle);
+		timers_run(cd, m68k->cycles);
 		cd->gate_array[reg] = 0;
 		break;
 	case GA_COMM_FLAG:
@@ -902,7 +902,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cd->gate_array[reg] = value;
 		break;
 	case GA_TIMER:
-		timers_run(cd, m68k->current_cycle);
+		timers_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value & 0xFF;
 		cd->timer_value = 0;
 		calculate_target_cycle(m68k);
@@ -916,14 +916,14 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		calculate_target_cycle(m68k);
 		break;
 	case GA_CDD_FADER:
-		cdd_run(cd, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
 		value &= 0x7FFF;
 		cdd_fader_attenuation_write(&cd->fader, value);
 		cd->gate_array[reg] &= 0x8000;
 		cd->gate_array[reg] |= value;
 		break;
 	case GA_CDD_CTRL: {
-		cdd_run(cd, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
 		uint16_t changed = cd->gate_array[reg] ^ value;
 		if (changed & BIT_HOCK) {
 			cd->gate_array[reg] &= ~BIT_HOCK;
@@ -942,11 +942,11 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_CDD_CMD1:
 	case GA_CDD_CMD2:
 	case GA_CDD_CMD3:
-		cdd_run(cd, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value & 0x0F0F;
 		break;
 	case GA_CDD_CMD4:
-		cdd_run(cd, m68k->current_cycle);
+		cdd_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value & 0x0F0F;
 		cdd_mcu_start_cmd_recv(&cd->cdd, cd->gate_array + GA_CDD_CTRL);
 		break;
@@ -957,36 +957,36 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cd->gate_array[reg] = value;
 		break;
 	case GA_STAMP_SIZE:
-		cd_graphics_run(cd, m68k->current_cycle);
+		cd_graphics_run(cd, m68k->cycles);
 		cd->gate_array[reg] &= BIT_GRON;
 		cd->gate_array[reg] |= value & (BIT_SMS|BIT_STS|BIT_RPT);
 		break;
 	case GA_STAMP_MAP_BASE:
-		cd_graphics_run(cd, m68k->current_cycle);
+		cd_graphics_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value & 0xFFE0;
 		break;
 	case GA_IMAGE_BUFFER_VCELLS:
-		cd_graphics_run(cd, m68k->current_cycle);
+		cd_graphics_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value & 0x1F;
 		break;
 	case GA_IMAGE_BUFFER_START:
-		cd_graphics_run(cd, m68k->current_cycle);
+		cd_graphics_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value & 0xFFF8;
 		break;
 	case GA_IMAGE_BUFFER_OFFSET:
-		cd_graphics_run(cd, m68k->current_cycle);
+		cd_graphics_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value & 0x3F;
 		break;
 	case GA_IMAGE_BUFFER_HDOTS:
-		cd_graphics_run(cd, m68k->current_cycle);
+		cd_graphics_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value & 0x1FF;
 		break;
 	case GA_IMAGE_BUFFER_LINES:
-		cd_graphics_run(cd, m68k->current_cycle);
+		cd_graphics_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value & 0xFF;
 		break;
 	case GA_TRACE_VECTOR_BASE:
-		cd_graphics_run(cd, m68k->current_cycle);
+		cd_graphics_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value & 0xFFFE;
 		cd_graphics_start(cd);
 		break;
@@ -1026,7 +1026,7 @@ static void *sub_gate_write8(uint32_t address, void *vcontext, uint8_t value)
 	case GA_CDD_CMD4:
 		if (!address) {
 			//byte write to $FF804A should not trigger transfer
-			cdd_run(cd, m68k->current_cycle);
+			cdd_run(cd, m68k->cycles);
 			cd->gate_array[reg] &= 0x0F;
 			cd->gate_array[reg] |= (value << 8 & 0x0F00);
 			return vcontext;
@@ -1095,7 +1095,7 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		cd->cdc_dst_low = dma_addr & 7;
 		cd->gate_array[GA_CDC_DMA_ADDR] = dma_addr >> 3;
 		//TODO: determine actual main CPU penalty
-		cd->m68k->current_cycle += 2 * cd->m68k->options->gen.bus_cycles;
+		cd->m68k->cycles += 2 * cd->m68k->opts->gen.bus_cycles;
 		break;
 	case DST_PROG_RAM:
 		if (can_main_access_prog(cd)) {
@@ -1107,7 +1107,7 @@ static uint8_t handle_cdc_byte(void *vsys, uint8_t value)
 		cd->cdc_dst_low = dma_addr & 7;
 		cd->gate_array[GA_CDC_DMA_ADDR] = dma_addr >> 3;
 		//TODO: determine actual main CPU penalty
-		cd->m68k->current_cycle += 2 * cd->m68k->options->gen.bus_cycles;
+		cd->m68k->cycles += 2 * cd->m68k->opts->gen.bus_cycles;
 		break;
 	case DST_WORD_RAM:
 		if (cd->gate_array[GA_MEM_MODE] & BIT_MEM_MODE) {
@@ -1150,11 +1150,11 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 {
 	segacd_context *cd = context->system;
 
-	uint32_t num_refresh = (context->current_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
+	uint32_t num_refresh = (context->cycles - cd->last_refresh_cycle) / REFRESH_INTERVAL;
 	cd->last_refresh_cycle = cd->last_refresh_cycle + num_refresh * REFRESH_INTERVAL;
-	context->current_cycle += num_refresh * REFRESH_DELAY;
+	context->cycles += num_refresh * REFRESH_DELAY;
 
-	scd_peripherals_run(cd, context->current_cycle);
+	scd_peripherals_run(cd, context->cycles);
 	if (address) {
 		if (cd->enter_debugger) {
 			genesis_context *gen = cd->genesis;
@@ -1176,7 +1176,7 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 static m68k_context *int_ack(m68k_context *context)
 {	
 	segacd_context *cd = context->system;
-	scd_peripherals_run(cd, context->current_cycle);
+	scd_peripherals_run(cd, context->cycles);
 	switch (context->int_pending)
 	{
 	case 1:
@@ -1204,8 +1204,8 @@ static m68k_context *int_ack(m68k_context *context)
 	//Base 68K core has added 4 cycles for a normal int ack cycle already
 	//We add 5 + the current cycle count (in 68K cycles) mod 10 to simulate the
 	//additional variable delay from the use of the 6800 cycle
-	uint32_t cycle_count = context->current_cycle / context->options->gen.clock_divider;
-	context->current_cycle += 5 + (cycle_count % 10);
+	uint32_t cycle_count = context->cycles / context->opts->gen.clock_divider;
+	context->cycles += 5 + (cycle_count % 10);
 	
 	return context;
 }
@@ -1213,14 +1213,14 @@ static m68k_context *int_ack(m68k_context *context)
 void scd_run(segacd_context *cd, uint32_t cycle)
 {
 	uint8_t m68k_run = !can_main_access_prog(cd);
-	while (cycle > cd->m68k->current_cycle) {
+	while (cycle > cd->m68k->cycles) {
 		if (m68k_run && !cd->sub_paused_wordram) {
-			uint32_t num_refresh = (cd->m68k->current_cycle - cd->last_refresh_cycle) / REFRESH_INTERVAL;
+			uint32_t num_refresh = (cd->m68k->cycles - cd->last_refresh_cycle) / REFRESH_INTERVAL;
 			cd->last_refresh_cycle = cd->last_refresh_cycle + num_refresh * REFRESH_INTERVAL;
-			cd->m68k->current_cycle += num_refresh * REFRESH_DELAY;
+			cd->m68k->cycles += num_refresh * REFRESH_DELAY;
 
 
-			cd->m68k->sync_cycle = cd->enter_debugger ? cd->m68k->current_cycle + 1 : cycle;
+			cd->m68k->sync_cycle = cd->enter_debugger ? cd->m68k->cycles + 1 : cycle;
 			if (cd->need_reset) {
 				cd->need_reset = 0;
 				m68k_reset(cd->m68k);
@@ -1229,10 +1229,10 @@ void scd_run(segacd_context *cd, uint32_t cycle)
 				resume_68k(cd->m68k);
 			}
 		} else {
-			cd->m68k->current_cycle = cycle;
+			cd->m68k->cycles = cycle;
 			cd->last_refresh_cycle = cycle;
 		}
-		scd_peripherals_run(cd, cd->m68k->current_cycle);
+		scd_peripherals_run(cd, cd->m68k->cycles);
 	}
 
 }
@@ -1245,7 +1245,7 @@ uint32_t gen_cycle_to_scd(uint32_t cycle, genesis_context *gen)
 void scd_adjust_cycle(segacd_context *cd, uint32_t deduction)
 {
 	deduction = gen_cycle_to_scd(deduction, cd->genesis);
-	cd->m68k->current_cycle -= deduction;
+	cd->m68k->cycles -= deduction;
 	cd->stopwatch_cycle -= deduction;
 	if (deduction >= cd->int2_cycle) {
 		cd->int2_cycle = 0;
@@ -1281,7 +1281,7 @@ static uint16_t main_gate_read16(uint32_t address, void *vcontext)
 	gen_update_refresh_free_access(m68k);
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
-	uint32_t scd_cycle = gen_cycle_to_scd(m68k->current_cycle, gen);
+	uint32_t scd_cycle = gen_cycle_to_scd(m68k->cycles, gen);
 	scd_run(cd, scd_cycle);
 	uint32_t offset = (address & 0x1FF) >> 1;
 	switch (offset)
@@ -1370,7 +1370,7 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	gen_update_refresh_free_access(m68k);
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
-	uint32_t scd_cycle = gen_cycle_to_scd(m68k->current_cycle, gen);
+	uint32_t scd_cycle = gen_cycle_to_scd(m68k->cycles, gen);
 	uint32_t reg = (address & 0x1FF) >> 1;
 	if (reg != GA_SUB_CPU_CTRL) {
 		scd_run(cd, scd_cycle);
@@ -1380,9 +1380,9 @@ static void *main_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 	case GA_SUB_CPU_CTRL: {
 		if ((value & BIT_IFL2) && (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN2)) {
 			if (cd->int2_cycle != CYCLE_NEVER) {
-				scd_run(cd, scd_cycle - 4 * cd->m68k->options->gen.clock_divider);
-				while (cd->int2_cycle != CYCLE_NEVER && cd->m68k->current_cycle < scd_cycle) {
-					scd_run(cd, cd->m68k->current_cycle + cd->m68k->options->gen.clock_divider);
+				scd_run(cd, scd_cycle - 4 * cd->m68k->opts->gen.clock_divider);
+				while (cd->int2_cycle != CYCLE_NEVER && cd->m68k->cycles < scd_cycle) {
+					scd_run(cd, cd->m68k->cycles + cd->m68k->opts->gen.clock_divider);
 				}
 			}
 			cd->int2_cycle = scd_cycle;
@@ -1665,7 +1665,7 @@ void free_segacd(segacd_context *cd)
 {
 	cdd_fader_deinit(&cd->fader);
 	rf5c164_deinit(&cd->pcm);
-	m68k_options_free(cd->m68k->options);
+	m68k_options_free(cd->m68k->opts);
 	free(cd->m68k);
 	free(cd->bram);
 	free(cd->word_ram);

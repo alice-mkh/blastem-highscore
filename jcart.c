@@ -23,8 +23,8 @@ void *jcart_write_w(uint32_t address, void *context, uint16_t value)
 	m68k_context *m68k= context;
 	io_port *ports = get_ports(m68k);
 	value = value << 6 & 0x40;
-	io_data_write(ports, value, m68k->current_cycle);
-	io_data_write(ports + 1, value, m68k->current_cycle);
+	io_data_write(ports, value, m68k->cycles);
+	io_data_write(ports + 1, value, m68k->cycles);
 	return context;
 }
 
@@ -42,8 +42,8 @@ uint16_t jcart_read_w(uint32_t address, void *context)
 	io_port *ports = get_ports(m68k);
 	//according to Eke, bit 14 is forced low, at least on the Micro Machines 2 cart
 	//TODO: Test behavior of actual cart
-	uint16_t value = io_data_read(ports, m68k->current_cycle) << 8;
-	value |= io_data_read(ports + 1, m68k->current_cycle);
+	uint16_t value = io_data_read(ports, m68k->cycles) << 8;
+	value |= io_data_read(ports + 1, m68k->cycles);
 	return value;
 }
 
@@ -51,14 +51,14 @@ uint8_t jcart_read_b(uint32_t address, void *context)
 {
 	m68k_context *m68k= context;
 	io_port *ports = get_ports(m68k);
-	return io_data_read(ports + (address & 1), m68k->current_cycle);
+	return io_data_read(ports + (address & 1), m68k->cycles);
 }
 
 void jcart_adjust_cycles(genesis_context *context, uint32_t deduction)
 {
 	io_port *ports = get_ports(context->m68k);
-	io_adjust_cycles(ports, context->m68k->current_cycle, deduction);
-	io_adjust_cycles(ports + 1, context->m68k->current_cycle, deduction);
+	io_adjust_cycles(ports, context->m68k->cycles, deduction);
+	io_adjust_cycles(ports + 1, context->m68k->cycles, deduction);
 }
 
 void jcart_gamepad_down(genesis_context *context, uint8_t gamepad_num, uint8_t button)

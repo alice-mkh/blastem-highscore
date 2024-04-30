@@ -3,10 +3,11 @@
 
 #include <stdint.h>
 #include "tern.h"
-#include "m68k_core.h"
 #ifdef NEW_CORE
+#include "m68k.h"
 #include "z80.h"
 #else
+#include "m68k_core.h"
 #include "z80_to_x86.h"
 #endif
 #include "disasm.h"

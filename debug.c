@@ -1535,12 +1535,12 @@ void strip_nl(char * buf)
 static uint8_t m68k_read_byte(uint32_t address, m68k_context *context)
 {
 	//TODO: share this implementation with GDB debugger
-	return read_byte(address, (void **)context->mem_pointers, &context->options->gen, context);
+	return read_byte(address, (void **)context->mem_pointers, &context->opts->gen, context);
 }
 
 static uint16_t m68k_read_word(uint32_t address, m68k_context *context)
 {
-	return read_word(address, (void **)context->mem_pointers, &context->options->gen, context);
+	return read_word(address, (void **)context->mem_pointers, &context->opts->gen, context);
 }
 
 static uint32_t m68k_read_long(uint32_t address, m68k_context *context)
@@ -1573,20 +1573,20 @@ static uint8_t write_m68k(debug_root *root, uint32_t address, uint32_t value, ch
 {
 	m68k_context *context = root->cpu_context;
 	if (size == 'b') {
-		write_byte(address, value, (void **)context->mem_pointers, &context->options->gen, context);
+		write_byte(address, value, (void **)context->mem_pointers, &context->opts->gen, context);
 	} else if (size == 'l') {
 		if (address & 1) {
 			fprintf(stderr, "Longword access to odd addresses ($%X) is not allowed\n", address);
 			return 0;
 		}
-		write_word(address, value >> 16, (void **)context->mem_pointers, &context->options->gen, context);
-		write_word(address + 2, value, (void **)context->mem_pointers, &context->options->gen, context);
+		write_word(address, value >> 16, (void **)context->mem_pointers, &context->opts->gen, context);
+		write_word(address + 2, value, (void **)context->mem_pointers, &context->opts->gen, context);
 	} else {
 		if (address & 1) {
 			fprintf(stderr, "Wword access to odd addresses ($%X) is not allowed\n", address);
 			return 0;
 		}
-		write_word(address, value, (void **)context->mem_pointers, &context->options->gen, context);
+		write_word(address, value, (void **)context->mem_pointers, &context->opts->gen, context);
 	}
 	return 1;
 }
@@ -1655,7 +1655,7 @@ static void m68k_sr_set(debug_var *var, debug_val val)
 static debug_val m68k_cycle_get(debug_var *var)
 {
 	m68k_context *context = var->ptr;
-	return debug_int(context->current_cycle);
+	return debug_int(context->cycles);
 }
 
 static debug_val m68k_usp_get(debug_var *var)
@@ -3589,8 +3589,8 @@ static void on_vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
 		if (debugging) {
 			printf("VDP Register Breakpoint %d hit on register write $%X - Old: $%X, New: $%X\n", (*this_bp)->index, reg, context->regs[reg], value);
 			gen->header.enter_debugger = 1;
-			if (gen->m68k->sync_cycle > gen->m68k->current_cycle + 1) {
-				gen->m68k->sync_cycle = gen->m68k->current_cycle + 1;
+			if (gen->m68k->sync_cycle > gen->m68k->cycles + 1) {
+				gen->m68k->sync_cycle = gen->m68k->cycles + 1;
 			}
 			if (gen->m68k->target_cycle > gen->m68k->sync_cycle) {
 				gen->m68k->target_cycle = gen->m68k->sync_cycle;
@@ -3746,7 +3746,7 @@ static uint8_t cmd_backtrace_m68k(debug_root *root, parsed_command *cmd)
 	uint8_t non_adr_count = 0;
 	do {
 		uint32_t bt_address = m68k_instruction_fetch(stack, context);
-		bt_address = get_instruction_start(context->options, bt_address - 2);
+		bt_address = get_instruction_start(context->opts, bt_address - 2);
 		if (bt_address) {
 			stack += 4;
 			non_adr_count = 0;
@@ -4804,11 +4804,11 @@ static debug_val debug_frame_get(debug_var *var)
 static uint32_t m68k_chunk_end(debug_root *root, uint32_t start_address)
 {
 	m68k_context *m68k = root->cpu_context;
-	memmap_chunk const *chunk = find_map_chunk(start_address, &m68k->options->gen, 0, NULL);
+	memmap_chunk const *chunk = find_map_chunk(start_address, &m68k->opts->gen, 0, NULL);
 	if (!chunk) {
 		return start_address;
 	}
-	if (chunk->mask == m68k->options->gen.address_mask) {
+	if (chunk->mask == m68k->opts->gen.address_mask) {
 		return chunk->end;
 	}
 	return (start_address & ~chunk->mask) + chunk->mask + 1;
@@ -5382,7 +5382,7 @@ void debugger(m68k_context * context, uint32_t address)
 
 	init_terminal();
 
-	context->options->sync_components(context, 0);
+	context->opts->sync_components(context, 0);
 	debug_root *root = find_m68k_root(context);
 	if (!root) {
 		return;

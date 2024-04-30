@@ -1598,6 +1598,7 @@ class Program:
 		hFile.write('\n#include "backend.h"')
 		hFile.write('\n\ntypedef struct {')
 		hFile.write('\n\tcpu_options gen;')
+		hFile.write('\n\tuint8_t address_log;')
 		hFile.write('\n}} {0}options;'.format(self.prefix))
 		hFile.write('\n\ntypedef struct {')
 		hFile.write('\n\t{0}options *opts;'.format(self.prefix))
@@ -1606,6 +1607,8 @@ class Program:
 		hFile.write('\n')
 		hFile.write('\nvoid {pre}execute({type} *context, uint32_t target_cycle);'.format(pre = self.prefix, type = self.context_type))
 		for decl in self.declares:
+			if decl.startswith('define '):
+				decl = '#' + decl
 			hFile.write('\n' + decl)
 		hFile.write('\n#endif //{0}_'.format(macro))
 		hFile.write('\n')

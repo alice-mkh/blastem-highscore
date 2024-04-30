@@ -15,6 +15,17 @@ declare
 	m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler reset_handler);
 	void m68k_reset(m68k_context *context);
 	void m68k_print_regs(m68k_context *context);
+	void m68k_serialize(m68k_context *context, uint32_t pc, serialize_buffer *buf);
+	void m68k_deserialize(deserialize_buffer *buf, void *vcontext);
+	define NUM_MEM_AREAS 10
+	define M68K_OPT_BROKEN_READ_MODIFY 1
+	define INT_PENDING_SR_CHANGE 254
+	define INT_PENDING_NONE 255
+	define M68K_STATUS_TRACE 0x80
+	define m68k_invalidate_code_range(context, start, end)
+	define m68k_options_free free
+	define m68k_handle_code_write(address, context)
+	define resume_68k(context) m68k_execute(context, context->cycles)
 
 regs
 	dregs 32 d0 d1 d2 d3 d4 d5 d6 d7
@@ -24,7 +35,11 @@ regs
 	scratch1 32
 	scratch2 32
 	int_cycle 32
+	target_cycle 32
+	wp_hit_address 32
 	prefetch 16
+	wp_hit_value 16
+	wp_old_value 16
 	int_priority 8
 	int_num 8
 	int_pending 8
@@ -37,8 +52,11 @@ regs
 	zflag 8
 	vflag 8
 	cflag 8
+	wp_hit 8
+	trace_pending 8
+	system ptrvoid
 	reset_handler ptrvoid
-	mem_pointers ptrvoid 8
+	mem_pointers ptrvoid 10
 	
 flags
 	register ccr
