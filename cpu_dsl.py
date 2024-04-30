@@ -1012,8 +1012,8 @@ class NormalOp:
 					dst = maybeLocal
 				parent.regValues[dst] = result
 				if prog.isReg(dst):
-					shortProc = (procParams[0], procParams[-1])
-					shortParams = (self.params[0], self.params[-1])
+					shortProc = (result, procParams[-1])
+					shortParams = (result, self.params[-1])
 					output.append(_opMap['mov'].generate(otype, prog, shortProc, shortParams, None))
 			else:
 				output.append(opDef.generate(otype, prog, procParams, self.params, flagUpdates))
