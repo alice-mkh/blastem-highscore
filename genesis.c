@@ -137,6 +137,7 @@ static uint8_t *serialize(system_header *sys, size_t *size_out)
 {
 	genesis_context *gen = (genesis_context *)sys;
 	uint32_t address;
+#ifndef NEW_CORE
 	if (gen->m68k->resume_pc) {
 		
 		gen->header.save_state = SERIALIZE_SLOT+1;
@@ -151,7 +152,9 @@ static uint8_t *serialize(system_header *sys, size_t *size_out)
 		uint8_t *ret = gen->serialize_tmp;
 		gen->serialize_tmp = NULL;
 		return ret;
-	} else {
+	} else 
+#endif
+	{
 		serialize_buffer state;
 		init_serialize(&state);
 		uint32_t address = read_word(4, (void **)gen->m68k->mem_pointers, &gen->m68k->opts->gen, gen->m68k) << 16;
@@ -223,7 +226,9 @@ static void tmss_deserialize(deserialize_buffer *buf, void *vgen)
 static void adjust_int_cycle(m68k_context * context, vdp_context * v_context);
 static void check_tmss_lock(genesis_context *gen);
 static void toggle_tmss_rom(genesis_context *gen);
+#ifndef NEW_CORE
 #include "m68k_internal.h" //needed for get_native_address_trans, should be eliminated once handling of PC is cleaned up
+#endif
 void genesis_deserialize(deserialize_buffer *buf, genesis_context *gen)
 {
 	register_section_handler(buf, (section_handler){.fun = m68k_deserialize, .data = gen->m68k}, SECTION_68000);
@@ -268,6 +273,7 @@ void genesis_deserialize(deserialize_buffer *buf, genesis_context *gen)
 	}
 	update_z80_bank_pointer(gen);
 	adjust_int_cycle(gen->m68k, gen->vdp);
+#ifndef NEW_CORE
 	//HACK: Fix this once PC/IR is represented in a better way in 68K core
 	//Would be better for this hack to live in side the 68K core itself, but it's better to do it
 	//after RAM has been loaded to avoid any unnecessary retranslation
@@ -276,6 +282,7 @@ void genesis_deserialize(deserialize_buffer *buf, genesis_context *gen)
 		segacd_context *cd = gen->expansion;
 		cd->m68k->resume_pc = get_native_address_trans(cd->m68k, cd->m68k->last_prefetch_address);
 	}
+#endif
 	free(buf->handlers);
 	buf->handlers = NULL;
 }
@@ -301,9 +308,12 @@ uint16_t read_dma_value(uint32_t address)
 		uint32_t word_ram = cd->base + 0x200000;
 		uint32_t word_ram_end = cd->base + 0x240000;
 		if (address >= word_ram && address < word_ram_end) {
-			//FIXME: first word should just be garbage
 			if (!cd->has_vdp_dma_value) {
+#ifdef NEW_CORE
+				cd->vdp_dma_value = genesis->m68k->prefetch;
+#else
 				cd->vdp_dma_value = read_word(genesis->m68k->last_prefetch_address, (void **)genesis->m68k->mem_pointers, &genesis->m68k->opts->gen, genesis->m68k);
+#endif
 				cd->has_vdp_dma_value = 1;
 			}
 			uint16_t ret = cd->vdp_dma_value;
@@ -328,7 +338,11 @@ void vdp_dma_started(void)
 static uint16_t get_open_bus_value(system_header *system)
 {
 	genesis_context *genesis = (genesis_context *)system;
+#ifdef NEW_CORE
+	return genesis->m68k->prefetch;
+#else
 	return read_dma_value(genesis->m68k->last_prefetch_address/2);
+#endif
 }
 
 static void adjust_int_cycle(m68k_context * context, vdp_context * v_context)
@@ -1945,6 +1959,7 @@ static uint8_t load_state(system_header *system, uint8_t slot)
 	deserialize_buffer state;
 	uint32_t pc = 0;
 	uint8_t ret;
+#ifndef NEW_CORE
 	if (!gen->m68k->resume_pc) {
 		system->delayed_load_slot = slot + 1;
 		gen->m68k->should_return = 1;
@@ -1955,6 +1970,7 @@ static uint8_t load_state(system_header *system, uint8_t slot)
 		}
 		goto done;
 	}
+#endif
 	if (load_from_file(&state, statepath)) {
 		genesis_deserialize(&state, gen);
 		free(state.data);
@@ -2015,8 +2031,12 @@ static void start_genesis(system_header *system, char *statefile)
 		if (load_from_file(&state, statefile)) {
 			genesis_deserialize(&state, gen);
 			free(state.data);
+#ifdef NEW_CORE
+			pc = gen->m68k->pc;
+#else
 			//HACK
 			pc = gen->m68k->last_prefetch_address;
+#endif
 		} else {
 			pc = load_gst(gen, statefile);
 			if (!pc) {
@@ -2047,6 +2067,12 @@ static void start_genesis(system_header *system, char *statefile)
 		}
 		m68k_reset(gen->m68k);
 	}
+#ifdef NEW_CORE
+	while (!gen->m68k->should_return) {
+		sync_components(gen->m68k, 0);
+		m68k_execute(gen->m68k, gen->m68k->target_cycle);
+	}
+#endif
 	handle_reset_requests(gen);
 	return;
 }

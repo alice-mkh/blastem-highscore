@@ -97,3 +97,11 @@ void m68k_deserialize(deserialize_buffer *buf, void *vcontext)
 {
 	//TODO: implement me
 }
+
+void start_68k_context(m68k_context *context, uint32_t pc)
+{
+	context->scratch1 = context->pc = pc;
+	m68k_read_16(context);
+	context->prefetch = context->scratch1;
+	context->pc += 2;
+}

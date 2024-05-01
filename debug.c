@@ -1630,10 +1630,14 @@ static debug_val m68k_sr_get(debug_var *var)
 	m68k_context *context = var->ptr;
 	debug_val ret;
 	ret.v.u32 = context->status << 8;
+#ifdef NEW_CORE
+	//TODO: implement me
+#else
 	for (int flag = 0; flag < 5; flag++)
 	{
 		ret.v.u32 |= context->flags[flag] << (4-flag);
 	}
+#endif
 	ret.type = DBG_VAL_U32;
 	return ret;
 }
@@ -1647,9 +1651,13 @@ static void m68k_sr_set(debug_var *var, debug_val val)
 		return;
 	}
 	context->status = ival >> 8;
+#ifdef NEW_CORE
+	//TODO: implement me
+#else
 	for (int flag = 0; flag < 5; flag++) {
 		context->flags[flag] = (ival & (1 << (4 - flag))) != 0;
 	}
+#endif
 }
 
 static debug_val m68k_cycle_get(debug_var *var)
@@ -3742,6 +3750,9 @@ static uint8_t cmd_next_m68k(debug_root *root, parsed_command *cmd)
 static uint8_t cmd_backtrace_m68k(debug_root *root, parsed_command *cmd)
 {
 	m68k_context *context = root->cpu_context;
+#ifdef NEW_CORE
+	//TODO: implement me
+#else
 	uint32_t stack = context->aregs[7];
 	uint8_t non_adr_count = 0;
 	do {
@@ -3762,6 +3773,7 @@ static uint8_t cmd_backtrace_m68k(debug_root *root, parsed_command *cmd)
 		}
 		//TODO: Make sure we don't wander into an invalid memory region
 	} while (stack && non_adr_count < 6);
+#endif
 	return 1;
 }
 
@@ -3775,6 +3787,7 @@ static uint8_t cmd_disassemble_m68k(debug_root *root, parsed_command *cmd)
 			return 1;
 		}
 	}
+#ifndef NEW_CORE
 	char disasm_buf[1024];
 	m68kinst inst;
 	do {
@@ -3790,6 +3803,7 @@ static uint8_t cmd_disassemble_m68k(debug_root *root, parsed_command *cmd)
 		m68k_disasm_labels(&inst, disasm_buf, root->disasm);
 		printf("\t%s\n", disasm_buf);
 	} while(!m68k_is_terminal(&inst));
+#endif
 	return 1;
 }
 
@@ -4372,6 +4386,7 @@ command_def scd_sub_commands[] = {
 #define NUM_SCD_SUB (sizeof(scd_main_commands)/sizeof(*scd_main_commands))
 
 #ifndef NO_Z80
+#ifndef NEW_CORE
 
 static uint8_t cmd_delete_z80(debug_root *root, parsed_command *cmd)
 {
@@ -4591,6 +4606,7 @@ static uint8_t cmd_disassemble_z80(debug_root *root, parsed_command *cmd)
 	} while(!z80_is_terminal(&inst));
 	return 1;
 }
+#endif //NEW_CORE
 
 static uint8_t cmd_gen_m68k(debug_root *root, parsed_command *cmd)
 {
@@ -4637,6 +4653,7 @@ static uint8_t cmd_vdp_regs_sms(debug_root *root, parsed_command *cmd)
 }
 
 command_def z80_commands[] = {
+#ifndef NEW_CORE
 	{
 		.names = (const char *[]){
 			"breakpoint", "b", NULL
@@ -4727,6 +4744,7 @@ command_def z80_commands[] = {
 		.min_args = 0,
 		.max_args = 1
 	}
+#endif //NEW_CORE
 };
 
 #define NUM_Z80 (sizeof(z80_commands)/sizeof(*z80_commands))
@@ -4874,14 +4892,19 @@ debug_root *find_m68k_root(m68k_context *context)
 }
 
 #ifndef NO_Z80
+#ifdef NEW_CORE
+#define Z80_OPTS opts
+#else
+#define Z80_OPTS options
+#endif
 
 static uint8_t read_z80(debug_root *root, uint32_t *out, char size)
 {
 	z80_context *context = root->cpu_context;
 	uint32_t address = *out;
-	*out = read_byte(address, (void **)context->mem_pointers, &context->options->gen, context);
+	*out = read_byte(address, (void **)context->mem_pointers, &context->Z80_OPTS->gen, context);
 	if (size == 'w') {
-		*out |= read_byte(address + 1, (void **)context->mem_pointers, &context->options->gen, context) << 8;
+		*out |= read_byte(address + 1, (void **)context->mem_pointers, &context->Z80_OPTS->gen, context) << 8;
 	}
 	return 1;
 }
@@ -4889,13 +4912,14 @@ static uint8_t read_z80(debug_root *root, uint32_t *out, char size)
 static uint8_t write_z80(debug_root *root, uint32_t address, uint32_t value, char size)
 {
 	z80_context *context = root->cpu_context;
-	write_byte(address, value, (void **)context->mem_pointers, &context->options->gen, context);
+	write_byte(address, value, (void **)context->mem_pointers, &context->Z80_OPTS->gen, context);
 	if (size == 'w') {
-		write_byte(address + 1, value >> 8, (void **)context->mem_pointers, &context->options->gen, context);
+		write_byte(address + 1, value >> 8, (void **)context->mem_pointers, &context->Z80_OPTS->gen, context);
 	}
 	return 1;
 }
 
+#ifndef NEW_CORE
 static debug_val z80_reg8_get(debug_var *var)
 {
 	z80_context *context = var->ptr;
@@ -5212,15 +5236,16 @@ static void z80_names(debug_root *root)
 	root->variables = tern_insert_ptr(root->variables, "pc", var);
 	root->variables = tern_insert_ptr(root->variables, "PC", var);
 }
+#endif //NEW_CORE
 
 static uint32_t z80_chunk_end(debug_root *root, uint32_t start_address)
 {
 	z80_context *z80 = root->cpu_context;
-	memmap_chunk const *chunk = find_map_chunk(start_address, &z80->options->gen, 0, NULL);
+	memmap_chunk const *chunk = find_map_chunk(start_address, &z80->Z80_OPTS->gen, 0, NULL);
 	if (!chunk) {
 		return start_address;
 	}
-	if (chunk->mask == z80->options->gen.address_mask) {
+	if (chunk->mask == z80->Z80_OPTS->gen.address_mask) {
 		return chunk->end;
 	}
 	return (start_address & ~chunk->mask) + chunk->mask + 1;
@@ -5232,7 +5257,9 @@ debug_root *find_z80_root(z80_context *context)
 	if (root && !root->commands) {
 		add_commands(root, common_commands, NUM_COMMON);
 		add_commands(root, z80_commands, NUM_Z80);
+#ifndef NEW_CORE
 		z80_names(root);
+#endif
 		genesis_context *gen;
 		sms_context *sms;
 		coleco_context *coleco;
@@ -5315,6 +5342,7 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 	} else {
 		zremove_breakpoint(context, address);
 	}
+#ifndef NEW_CORE
 	if (context->wp_hit) {
 		context->wp_hit = 0;
 		this_bp = find_breakpoint(&root->breakpoints, context->wp_hit_address, BP_TYPE_CPU_WATCH);
@@ -5348,6 +5376,7 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 			}
 		}
 	}
+#endif
 	uint8_t * pc = get_native_pointer(address, (void **)context->mem_pointers, &context->Z80_OPTS->gen);
 	if (!pc) {
 		fatal_error("Failed to get native pointer on entering Z80 debugger at address %X\n", address);
@@ -5382,7 +5411,9 @@ void debugger(m68k_context * context, uint32_t address)
 
 	init_terminal();
 
+#ifndef NEW_CORE
 	context->opts->sync_components(context, 0);
+#endif
 	debug_root *root = find_m68k_root(context);
 	if (!root) {
 		return;
@@ -5469,9 +5500,11 @@ void debugger(m68k_context * context, uint32_t address)
 		genesis_context *gen = context->system;
 		vdp_force_update_framebuffer(gen->vdp);
 	}
+#ifndef NEW_CORE
 	uint32_t after = m68k_decode(m68k_instruction_fetch, context, &inst, address);
 	root->after = after;
 	root->inst = &inst;
+#endif
 	for (disp_def * cur = root->displays; cur; cur = cur->next) {
 		char format_str[8];
 		make_format_str(format_str, cur->format);

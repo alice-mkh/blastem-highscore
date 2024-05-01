@@ -280,7 +280,11 @@ uint16_t med_reg_read_w(uint32_t address, void *vcontext)
 		//ensure USB serial read returns "not-ready" status
 		return 0x02;
 	default:
+#ifdef NEW_CORE
+		return context->prefetch;
+#else
 		return read_word(context->last_prefetch_address, (void **)context->mem_pointers, &context->opts->gen, context);
+#endif
 	}
 }
 

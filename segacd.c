@@ -449,7 +449,11 @@ static uint16_t cart_area_read16(uint32_t address, void *vcontext)
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
 	segacd_context *cd = gen->expansion;
+#ifdef NEW_CORE
+	uint16_t open_bus = m68k->prefetch;
+#else
 	uint16_t open_bus = read_word(m68k->last_prefetch_address, (void **)m68k->mem_pointers, &m68k->opts->gen, m68k);
+#endif
 	if (cd->bram_cart_id > 7) {
 		// No cart, just return open bus
 		return open_bus;
@@ -477,19 +481,31 @@ static uint8_t cart_area_read8(uint32_t address, void *vcontext)
 	segacd_context *cd = gen->expansion;
 	if (!(address & 1) || cd->bram_cart_id > 7) {
 		//open bus
+#ifdef NEW_CORE
+		return (address & 1) ? m68k->prefetch : m68k->prefetch >> 8;
+#else
 		return read_byte(m68k->last_prefetch_address | (address & 1), (void **)m68k->mem_pointers, &m68k->opts->gen, m68k);
+#endif
 	}
 	address &= 0x3FFFFF;
 	if (address < 0x200000) {
 		if (address < 0x100000) {
 			return cd->bram_cart_id;
 		}
+#ifdef NEW_CORE
+		return m68k->prefetch;
+#else
 		return read_byte(m68k->last_prefetch_address | 1, (void **)m68k->mem_pointers, &m68k->opts->gen, m68k);
+#endif
 	} else {
 		address &= 0x1FFFFF;
 		uint32_t end = 0x2000 << (1 + cd->bram_cart_id);
 		if (address >= end) {
+#ifdef NEW_CORE
+			return m68k->prefetch;
+#else
 			return read_byte(m68k->last_prefetch_address | 1, (void **)m68k->mem_pointers, &m68k->opts->gen, m68k);
+#endif
 		}
 		return cd->bram_cart[address >> 1];
 	}
