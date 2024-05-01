@@ -1933,7 +1933,7 @@ m68k_calc_ea
 	invalid M 7 R 7
 	
 	a7 -= 4
-	scratch1 = a7
+	scratch2 = a7
 	m68k_write32 pc
 	
 	m68k_calc_ea M R 2
@@ -1942,7 +1942,7 @@ m68k_calc_ea
 	cycles 4
 	m68k_prefetch
 
-0100111010MMMRRR jmp
+0100111011MMMRRR jmp
 	invalid M 0
 	invalid M 1
 	invalid M 3
@@ -2129,10 +2129,178 @@ m68k_movem_mem_to_areg
 	
 	m68k_prefetch
 
+0100111001100RRR move_to_usp
+	#TODO: trap if not in supervisor mode
+	other_sp = aregs.R
+	m68k_prefetch
+
+0100111001101RRR move_from_usp
+	#TODO: trap if not in supervisor mode
+	aregs.R = other_sp
+	m68k_prefetch
+
 0111RRR0IIIIIIII moveq
 	local tmp 32
 	sext 16 I tmp
 	sext 32 tmp dregs.R
 	cmp 0 dregs.R
 	update_flags NZV0C0
+	m68k_prefetch
+
+0110000100000000 bsr_w
+	#mid-instruction timing isn't quite right
+	#becuase I'm only emulating a 1-word prefetch buffer instead of 2
+	local offset 32
+	m68k_prefetch
+	sext 32 prefetch offset
+	
+	a7 -= 4
+	scratch2 = a7
+	m68k_write32 pc
+	
+	pc += offset
+	pc -= 2
+	
+	cycles 2
+	m68k_prefetch
+	
+	
+01100001DDDDDDDD bsr
+	#mid-instruction timing isn't quite right
+	#becuase I'm only emulating a 1-word prefetch buffer instead of 2
+	local offset 32
+	sext 16 D offset
+	sext 32 offset offset
+	
+	a7 -= 4
+	scratch2 = a7
+	m68k_write32 pc
+	
+	pc += offset
+	
+	cycles 6
+	m68k_prefetch
+
+m68k_check_cond
+	arg cond 16
+	local invert 8
+	switch cond
+	case 0
+		#true
+		meta istrue 1
+	case 1
+		#false
+		meta istrue 0
+	case 2
+		#high
+		meta istrue invert
+		invert = zflag | cflag
+		invert = !invert
+	case 3
+		#low or same
+		meta istrue invert
+		invert = zflag | cflag
+	case 4
+		#carry clear
+		meta istrue invert
+		invert = !cflag
+	case 5
+		#carry set
+		meta istrue cflag
+	case 6
+		#not equal
+		meta istrue invert
+		invert = !zflag
+	case 7
+		#equal
+		meta istrue zflag
+	case 8
+		#overflow clear
+		meta istrue invert
+		invert = !vflag
+	case 9
+		#overflow set
+		meta istrue vflag
+	case 10
+		#plus
+		meta istrue invert
+		invert = !nflag
+	case 11
+		#minus
+		meta istrue nflag 
+	case 12
+		#greater or equal
+		meta istrue invert
+		invert = nflag - vflag
+		invert = !invert
+	case 13
+		#less
+		meta istrue invert
+		invert = nflag - vflag
+	case 14
+		#greater
+		meta istrue invert
+		invert = vflag ^ nflag
+		invert |= zflag
+		invert = !invert
+	case 15
+		#less or equal
+		meta istrue invert
+		invert = vflag ^ nflag
+		invert |= zflag
+	end
+
+0110CCCC00000000 bcc_w
+	#mid-instruction timing isn't quite right
+	#becuase I'm only emulating a 1-word prefetch buffer instead of 2
+	local offset 32
+	m68k_prefetch
+	m68k_check_cond C
+	if istrue
+	
+		sext 32 prefetch offset
+		pc += offset
+		pc -= 2
+		cycles 2
+	else
+		cycles 4
+	end
+	m68k_prefetch
+
+0110CCCCDDDDDDDD bcc
+	#mid-instruction timing isn't quite right
+	#becuase I'm only emulating a 1-word prefetch buffer instead of 2
+	local offset 32
+	m68k_check_cond C
+	if istrue
+		sext 16 D offset
+		sext 32 offset offset
+		
+		pc += offset
+		
+		cycles 6
+	else
+		cycles 4
+	end
+	m68k_prefetch
+
+0101CCCC11001RRR dbcc
+	local offset 32
+	local tmp 16
+	m68k_prefetch
+	m68k_check_cond C
+	if istrue
+		cycles 4
+	else
+		dregs.R:1 -= 1
+		tmp = dregs.R
+		if tmp = 65535
+			cycles 6
+		else
+			sext 32 prefetch offset
+			pc += offset
+			pc -= 2
+			cycles 2
+		end
+	end
 	m68k_prefetch
