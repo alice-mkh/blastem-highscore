@@ -4692,7 +4692,7 @@ void vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
 		if (c) {
 			context->kmod_buffer_length++;
 			if ((context->kmod_buffer_length + 1) > context->kmod_buffer_storage) {
-				context->kmod_buffer_storage = context->kmod_buffer_length ? 128 : context->kmod_buffer_length * 2;
+				context->kmod_buffer_storage = context->kmod_buffer_storage ? context->kmod_buffer_storage * 2 : 128;
 				context->kmod_msg_buffer = realloc(context->kmod_msg_buffer, context->kmod_buffer_storage);
 			}
 			context->kmod_msg_buffer[context->kmod_buffer_length - 1] = c;

@@ -29,13 +29,44 @@
 
 #define MAX_EVENT_POLL_PER_FRAME 2
 
+
+typedef struct {
+	SDL_Window *win;
+	SDL_Renderer         *renderer;
+	SDL_Texture          *sdl_texture;
+	SDL_Texture          **static_images;
+	window_close_handler on_close;
+	uint32_t             width;
+	uint32_t             height;
+	uint8_t              num_static;
+#ifndef DISABLE_OPENGL
+	SDL_GLContext        *gl_context;
+	uint32_t             *texture_buf;
+	uint32_t             tex_width;
+	uint32_t             tex_height;
+	GLuint               gl_texture[2];
+	GLuint               *gl_static_images;
+	GLuint               vshader;
+	GLuint               fshader;
+	GLuint               program;
+	GLuint               gl_buffers[3];
+	GLuint               image_buffer;
+	GLfloat              *image_vertices;
+	GLint                un_texture;
+	GLint                un_width;
+	GLint                un_height;
+	GLint                at_pos;
+	GLint                at_uv;
+	uint8_t              color[4];
+#endif
+} extra_window;
+
 static SDL_Window *main_window;
-static SDL_Window **extra_windows;
+static extra_window *extras;
 static SDL_Renderer *main_renderer;
-static SDL_Renderer **extra_renderers;
-static SDL_Texture  **sdl_textures;
+static SDL_Texture  *sdl_textures[FRAMEBUFFER_UI + 1];
 static window_close_handler *close_handlers;
-static uint8_t num_textures;
+static uint8_t num_extras;
 static SDL_Rect      main_clip;
 static SDL_GLContext *main_context;
 
@@ -313,6 +344,13 @@ static GLfloat vertex_data_default[] = {
 	 1.0f,  1.0f
 };
 
+static GLfloat uvs[] = {
+	 0.0f,  1.0f,
+	 1.0f,  1.0f,
+	 0.0f,  0.0f,
+	 1.0f,  0.0f
+};
+
 static GLfloat vertex_data[8];
 
 static const GLushort element_data[] = {0, 1, 2, 3};
@@ -480,10 +518,6 @@ static void render_alloc_surfaces()
 	if (texture_init) {
 		return;
 	}
-	if (!sdl_textures) {
-		sdl_textures= calloc(sizeof(SDL_Texture *), 3);
-		num_textures = 3;
-	}
 	texture_init = 1;
 #ifndef DISABLE_OPENGL
 	if (render_gl) {
@@ -502,14 +536,12 @@ static void render_alloc_surfaces()
 
 static void free_surfaces(void)
 {
-	for (int i = 0; i < num_textures; i++)
+	for (int i = 0; i <= FRAMEBUFFER_UI; i++)
 	{
 		if (sdl_textures[i]) {
 			SDL_DestroyTexture(sdl_textures[i]);
 		}
 	}
-	free(sdl_textures);
-	sdl_textures = NULL;
 	texture_init = 0;
 }
 
@@ -943,11 +975,11 @@ static int32_t handle_event(SDL_Event *event)
 			if (main_window && SDL_GetWindowID(main_window) == event->window.windowID) {
 				exit(0);
 			} else {
-				for (int i = 0; i < num_textures - FRAMEBUFFER_USER_START; i++)
+				for (int i = 0; i < num_extras; i++)
 				{
-					if (SDL_GetWindowID(extra_windows[i]) == event->window.windowID) {
-						if (close_handlers[i]) {
-							close_handlers[i](i + FRAMEBUFFER_USER_START);
+					if (SDL_GetWindowID(extras[i].win) == event->window.windowID) {
+						if (extras[i].on_close) {
+							extras[i].on_close(i + FRAMEBUFFER_USER_START);
 						}
 						break;
 					}
@@ -1293,8 +1325,7 @@ static int in_toggle;
 
 void render_config_updated(void)
 {
-	int n = num_textures < FRAMEBUFFER_USER_START ? num_textures : FRAMEBUFFER_USER_START;
-	for (int i = 0; i < n; i++)
+	for (int i = 0; i <= FRAMEBUFFER_UI; i++)
 	{
 		if (sdl_textures[i]) {
 			SDL_DestroyTexture(sdl_textures[i]);
@@ -1371,6 +1402,11 @@ void render_config_updated(void)
 
 SDL_Window *render_get_window(void)
 {
+#ifndef DISABLE_OPENGL
+	if (render_gl) {
+		SDL_GL_MakeCurrent(main_window, main_context);
+	}
+#endif
 	return main_window;
 }
 
@@ -1473,130 +1509,346 @@ void render_save_video(char *path)
 	free(path);
 }
 
+void GLAPIENTRY gl_message_callback(GLenum source, GLenum type, GLenum id, GLenum severity, GLsizei length, const GLchar *message, const void *user)
+{
+	fprintf(stderr, "GL Message: %d, %d, %d - %s\n", source, type, severity, message);
+}
+
 uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, window_close_handler close_handler)
 {
 	uint8_t win_idx = 0xFF;
-	for (int i = 0; i < num_textures - FRAMEBUFFER_USER_START; i++)
+	for (int i = 0; i < num_extras; i++)
 	{
-		if (!extra_windows[i]) {
+		if (!extras[i].win) {
 			win_idx = i;
 			break;
 		}
 	}
 
 	if (win_idx == 0xFF) {
-		num_textures++;
-		sdl_textures = realloc(sdl_textures, num_textures * sizeof(*sdl_textures));
-		extra_windows = realloc(extra_windows, (num_textures - FRAMEBUFFER_USER_START) * sizeof(*extra_windows));
-		extra_renderers = realloc(extra_renderers, (num_textures - FRAMEBUFFER_USER_START) * sizeof(*extra_renderers));
-		close_handlers = realloc(close_handlers, (num_textures - FRAMEBUFFER_USER_START) * sizeof(*close_handlers));
-		win_idx = num_textures - FRAMEBUFFER_USER_START - 1;
+		num_extras++;
+		extras = realloc(extras, num_extras * sizeof(*extras));
+		win_idx = num_extras - 1;
 	}
+	memset(&extras[win_idx], 0, sizeof(extra_window));
+	uint32_t flags = 0;
+#ifndef DISABLE_OPENGL
+	if (render_gl) {
+		flags |= SDL_WINDOW_OPENGL;
+	}
+#endif
 	int x = SDL_WINDOWPOS_UNDEFINED;
 	int y = SDL_WINDOWPOS_UNDEFINED;
 	SDL_GetWindowPosition(main_window, &x, &y);
 	if (x != SDL_WINDOWPOS_UNDEFINED) {
 		x += main_width;
 	}
-	extra_windows[win_idx] = SDL_CreateWindow(caption, x, y, width, height, 0);
-	if (!extra_windows[win_idx]) {
+	extras[win_idx].win = SDL_CreateWindow(caption, x, y, width, height, flags);
+	if (!extras[win_idx].win) {
 		goto fail_window;
 	}
-	extra_renderers[win_idx] = SDL_CreateRenderer(extra_windows[win_idx], -1, SDL_RENDERER_ACCELERATED);
-	if (!extra_renderers[win_idx]) {
-		goto fail_renderer;
+	extras[win_idx].width = width;
+	extras[win_idx].height = height;
+#ifndef DISABLE_OPENGL
+	if (render_gl) {
+		extras[win_idx].gl_context = SDL_GL_CreateContext(extras[win_idx].win);
+		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
+		glEnable(GL_DEBUG_OUTPUT);
+		glDebugMessageCallback(gl_message_callback, NULL);
+		glGenTextures(2, extras[win_idx].gl_texture);
+		for (int i = 0; i < 2; i++)
+		{
+			glBindTexture(GL_TEXTURE_2D, extras[win_idx].gl_texture[i]);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+			if (i) {
+				glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, 1, 1, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, extras[win_idx].color);
+			} else {
+				extras[win_idx].tex_width = width;
+				extras[win_idx].tex_height = height;
+				char *npot_textures = tern_find_path_default(config, "video\0npot_textures\0", (tern_val){.ptrval = "off"}, TVAL_PTR).ptrval;
+				if (strcmp(npot_textures, "on")) {
+					extras[win_idx].tex_width = nearest_pow2(width);
+					extras[win_idx].tex_height = nearest_pow2(height);
+				}
+				extras[win_idx].texture_buf = calloc(extras[win_idx].tex_width * extras[win_idx].tex_height, sizeof(uint32_t));
+				glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, extras[win_idx].tex_width, extras[win_idx].tex_height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, extras[win_idx].texture_buf);
+			}
+		}
+		glGenBuffers(3, extras[win_idx].gl_buffers);
+		glBindBuffer(GL_ARRAY_BUFFER, extras[win_idx].gl_buffers[0]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data_default), vertex_data_default, GL_STATIC_DRAW);
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, extras[win_idx].gl_buffers[1]);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(element_data), element_data, GL_STATIC_DRAW);
+		glBindBuffer(GL_ARRAY_BUFFER, extras[win_idx].gl_buffers[2]);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(uvs), uvs, GL_STATIC_DRAW);
+		extras[win_idx].vshader = load_shader("extra_window.v.glsl", GL_VERTEX_SHADER);
+		extras[win_idx].fshader = load_shader("extra_window.f.glsl", GL_FRAGMENT_SHADER);
+		extras[win_idx].program = glCreateProgram();
+		glAttachShader(program, extras[win_idx].vshader);
+		glAttachShader(program, extras[win_idx].fshader);
+		glLinkProgram(extras[win_idx].program);
+		GLint link_status;
+		glGetProgramiv(program, GL_LINK_STATUS, &link_status);
+		if (!link_status) {
+			fputs("Failed to link shader program\n", stderr);
+			//TODO: cleanup
+			goto sdl_renderer;
+		}
+		extras[win_idx].un_texture = glGetUniformLocation(program, "texture");
+		extras[win_idx].un_width = glGetUniformLocation(program, "width");
+		extras[win_idx].un_height = glGetUniformLocation(program, "height");
+		extras[win_idx].at_pos = glGetAttribLocation(program, "pos");
+		extras[win_idx].at_uv = glGetAttribLocation(program, "uv");
+		extras[win_idx].color[3] = 255;
+	} else {
+sdl_renderer:
+#endif
+		extras[win_idx].renderer = SDL_CreateRenderer(extras[win_idx].win, -1, SDL_RENDERER_ACCELERATED);
+		if (!extras[win_idx].renderer) {
+			goto fail_renderer;
+		}
+		extras[win_idx].sdl_texture = SDL_CreateTexture(extras[win_idx].renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
+		if (!extras[win_idx].sdl_texture) {
+			goto fail_texture;
+		}
+#ifndef DISABLE_OPENGL
 	}
-	uint8_t texture_idx = win_idx + FRAMEBUFFER_USER_START;
-	sdl_textures[texture_idx] = SDL_CreateTexture(extra_renderers[win_idx], SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, width, height);
-	if (!sdl_textures[texture_idx]) {
-		goto fail_texture;
-	}
-	close_handlers[win_idx] = close_handler;
-	return texture_idx;
+#endif
+	extras[win_idx].on_close = close_handler;
+	return win_idx + FRAMEBUFFER_USER_START;
 
 fail_texture:
-	SDL_DestroyRenderer(extra_renderers[win_idx]);
+	SDL_DestroyRenderer(extras[win_idx].renderer);
 fail_renderer:
-	SDL_DestroyWindow(extra_windows[win_idx]);
+	SDL_DestroyWindow(extras[win_idx].win);
 fail_window:
-	num_textures--;
 	return 0;
 }
 
 void render_destroy_window(uint8_t which)
 {
 	uint8_t win_idx = which - FRAMEBUFFER_USER_START;
-	//Destroying the renderers also frees the textures
-	SDL_DestroyRenderer(extra_renderers[win_idx]);
-	SDL_DestroyWindow(extra_windows[win_idx]);
+	if (extras[win_idx].renderer) {
+		//Destroying the renderers also frees the textures
+		SDL_DestroyRenderer(extras[win_idx].renderer);
+		extras[win_idx].renderer = NULL;
+		free (extras[win_idx].static_images);
+		extras[win_idx].static_images = NULL;
+	}
+#ifndef DISABLE_OPENGL
+	else {
+		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
+		glDeleteProgram(extras[win_idx].program);
+		glDeleteShader(extras[win_idx].vshader);
+		glDeleteShader(extras[win_idx].fshader);
+		glDeleteBuffers(3, extras[win_idx].gl_buffers);
+		glDeleteTextures(2, extras[win_idx].gl_texture);
+		for (uint8_t i = 0; i < extras[win_idx].num_static; i++)
+		{
+			if (extras[win_idx].gl_static_images[i]) {
+				glDeleteTextures(1, extras[win_idx].gl_static_images + i);
+			}
+		}
+		SDL_GL_DeleteContext(extras[win_idx].gl_context);
+		free(extras[win_idx].image_vertices);
+		extras[win_idx].image_vertices = NULL;
+		free(extras[win_idx].gl_static_images);
+		extras[win_idx].gl_static_images = NULL;
+	}
+#endif
+	SDL_DestroyWindow(extras[win_idx].win);
 
-	extra_renderers[win_idx] = NULL;
-	extra_windows[win_idx] = NULL;
+	extras[win_idx].win = NULL;
+	extras[win_idx].num_static = 0;
 }
 
-SDL_Texture **static_images;
-uint8_t num_static;
+#ifndef DISABLE_OPENGL
+static void extra_draw_quad(extra_window *extra, GLuint texture, float width, float height)
+{
+	glUseProgram(extra->program);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glUniform1i(extra->un_texture, 0);
+	
+	glUniform1f(extra->un_width, width);
+	glUniform1f(extra->un_height, height);
+	
+	glVertexAttribPointer(extra->at_pos, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat[2]), (void *)0);
+	glEnableVertexAttribArray(extra->at_pos);
+	
+	glBindBuffer(GL_ARRAY_BUFFER, extra->gl_buffers[2]);
+	glVertexAttribPointer(extra->at_uv, 2, GL_FLOAT, GL_FALSE, sizeof(GLfloat[2]), (void *)0);
+	glEnableVertexAttribArray(extra->at_uv);
+	
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, extra->gl_buffers[1]);
+	glDrawElements(GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_SHORT, (void *)0);
+}
+#endif
+
 uint8_t render_static_image(uint8_t window, uint8_t *buffer, uint32_t size)
 {
-	
+	window -= FRAMEBUFFER_USER_START;
+	extra_window *extra = extras + window;
 	uint32_t width, height;
 	uint32_t *pixels = load_png(buffer, size, &width, &height);
 	if (!pixels) {
 		return 0xFF;
 	}
 	uint8_t img_index = 0;
-	if (!num_static) {
-		num_static = 8;
-		static_images = calloc(num_static, sizeof(SDL_Texture*));
+	if (!extra->num_static) {
+		extra->num_static = 8;
+#ifndef DISABLE_OPENGL
+		if (render_gl) {
+			extra->gl_static_images = calloc(extra->num_static, sizeof(GLuint));
+			extra->image_vertices = malloc(sizeof(vertex_data_default));
+			memcpy(extra->image_vertices, vertex_data_default, sizeof(vertex_data_default));
+			SDL_GL_MakeCurrent(extra->win, extra->gl_context);
+			glGenBuffers(1, &extra->image_buffer);
+			glBindBuffer(GL_ARRAY_BUFFER, extra->image_buffer);
+			glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data_default), extra->image_vertices, GL_DYNAMIC_DRAW);
+		} else 
+#endif
+		{
+			extra->static_images = calloc(extra->num_static, sizeof(SDL_Texture*));
+		}
 	}
-	for (; img_index < num_static; img_index++)
+	for (; img_index < extra->num_static; img_index++)
 	{
-		if (!static_images[img_index]) {
+#ifndef DISABLE_OPENGL
+		if (render_gl) {
+			if (!extra->gl_static_images[img_index]) {
+				break;
+			}
+		} else
+#endif
+		if (!extra->static_images[img_index]) {
 			break;
 		}
 	}
-	if (img_index == num_static) {
-		num_static *= 2;
-		static_images = realloc(static_images, num_static * sizeof(SDL_Texture*));
+	if (img_index == extra->num_static) {
+		extra->num_static *= 2;
+#ifndef DISABLE_OPENGL
+		if (render_gl) {
+			extra->gl_static_images = realloc(extra->static_images, extra->num_static * sizeof(GLuint));
+		} else 
+#endif
+		{
+			extra->static_images = realloc(extra->static_images, extra->num_static * sizeof(SDL_Texture*));
+		}
 	}
-	static_images[img_index] = SDL_CreateTexture(extra_renderers[window - FRAMEBUFFER_USER_START], SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, width, height);
-	SDL_UpdateTexture(static_images[img_index], NULL, pixels, sizeof(uint32_t) * width);
+#ifndef DISABLE_OPENGL
+	if (render_gl) {
+		SDL_GL_MakeCurrent(extra->win, extra->gl_context);
+		
+		glGenTextures(1, extra->gl_static_images + img_index);
+		glBindTexture(GL_TEXTURE_2D, extra->gl_static_images[img_index]);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		//TODO: maybe make this respect the npot texture setting?
+		glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, width, height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, pixels);
+	} else
+#endif
+	{
+		extra->static_images[img_index] = SDL_CreateTexture(extra->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, width, height);
+		SDL_UpdateTexture(extra->static_images[img_index], NULL, pixels, sizeof(uint32_t) * width);
+	}
 	free(pixels);
 	return img_index;
 }
 
+#ifndef DISABLE_OPENGL
+static void extra_update_verts(extra_window *extra, int x, int y, int width, int height)
+{
+	memcpy(extra->image_vertices, vertex_data_default, sizeof(vertex_data_default));
+	extra->image_vertices[0] = extra->image_vertices[4] = 2.0f * x / (float)extra->width - 1.0f;
+	extra->image_vertices[2] = extra->image_vertices[6] = 2.0f * (x + width) / (float)extra->width - 1.0f;
+	extra->image_vertices[1] = extra->image_vertices[3] = -2.0f * (y + height) / (float)extra->height + 1.0f;
+	extra->image_vertices[5] = extra->image_vertices[7] = -2.0f * y / (float)extra->height + 1.0f;
+	
+	SDL_GL_MakeCurrent(extra->win, extra->gl_context);
+	glBindBuffer(GL_ARRAY_BUFFER, extra->image_buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data_default), extra->image_vertices, GL_DYNAMIC_DRAW);
+}
+#endif
+
 void render_draw_image(uint8_t window, uint8_t image, int x, int y, int width, int height)
 {
-	SDL_Rect dst = {
-		.x = x,
-		.y = y,
-		.w = width,
-		.h = height
-	};
-	SDL_RenderCopy(extra_renderers[window - FRAMEBUFFER_USER_START], static_images[image], NULL, &dst);
+	extra_window *extra = extras + window - FRAMEBUFFER_USER_START;
+	if (extra->renderer) {
+		SDL_Rect dst = {
+			.x = x,
+			.y = y,
+			.w = width,
+			.h = height
+		};
+		SDL_RenderCopy(extra->renderer, extra->static_images[image], NULL, &dst);
+	}
+#ifndef DISABLE_OPENGL
+	else {
+		extra_update_verts(extra, x, y, width, height);
+		extra_draw_quad(extra, extra->gl_static_images[image], 1.0f, 1.0f);
+	}
+#endif
 }
 
 void render_clear_window(uint8_t window, uint8_t r, uint8_t g, uint8_t b)
 {
-	SDL_SetRenderDrawColor(extra_renderers[window - FRAMEBUFFER_USER_START], r, g, b, 255);
-	SDL_RenderClear(extra_renderers[window - FRAMEBUFFER_USER_START]);
+	uint8_t win_idx = window - FRAMEBUFFER_USER_START;
+	if (extras[win_idx].renderer) {
+		SDL_SetRenderDrawColor(extras[win_idx].renderer, r, g, b, 255);
+		SDL_RenderClear(extras[win_idx].renderer);
+	}
+#ifndef DISABLE_OPENGL
+	else {
+		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
+		glClearColor(r / 255.0f, g / 255.0f, b / 255.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	}
+#endif
 }
 
 void render_fill_rect(uint8_t window, uint8_t r, uint8_t g, uint8_t b, int x, int y, int width, int height)
 {
-	SDL_SetRenderDrawColor(extra_renderers[window - FRAMEBUFFER_USER_START], r, g, b, 255);
-	SDL_Rect dst = {
-		.x = x,
-		.y = y,
-		.w = width,
-		.h = height
-	};
-	SDL_RenderFillRect(extra_renderers[window - FRAMEBUFFER_USER_START], &dst);
+	extra_window *extra = extras + window - FRAMEBUFFER_USER_START;
+	if (extra->renderer) {
+		SDL_SetRenderDrawColor(extra->renderer, r, g, b, 255);
+		SDL_Rect dst = {
+			.x = x,
+			.y = y,
+			.w = width,
+			.h = height
+		};
+		SDL_RenderFillRect(extra->renderer, &dst);
+	}
+#ifndef DISABLE_OPENGL
+	else {
+		extra_update_verts(extra, x, y, width, height);
+		extra->color[0] = b;
+		extra->color[1] = g;
+		extra->color[2] = r;
+		glBindTexture(GL_TEXTURE_2D, extra->gl_texture[1]);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, SRC_FORMAT, GL_UNSIGNED_BYTE, extra->color);
+		extra_draw_quad(extra, extra->gl_texture[1], 1.0f, 1.0f);
+	}
+#endif
 }
 
 void render_window_refresh(uint8_t window)
 {
-	SDL_RenderPresent(extra_renderers[window - FRAMEBUFFER_USER_START]);
+	uint8_t win_idx = window - FRAMEBUFFER_USER_START;
+	if (extras[win_idx].renderer) {
+		SDL_RenderPresent(extras[win_idx].renderer);
+	}
+#ifndef DISABLE_OPENGL
+	else {
+		SDL_GL_SwapWindow(extras[win_idx].win);
+	}
+#endif
 }
 
 uint32_t *locked_pixels;
@@ -1620,17 +1872,28 @@ uint32_t *render_get_framebuffer(uint8_t which, int *pitch)
 	if (render_gl && which <= FRAMEBUFFER_EVEN) {
 		*pitch = LINEBUF_SIZE * sizeof(uint32_t);
 		return texture_buf;
+	} else if (render_gl && which >= FRAMEBUFFER_USER_START) {
+		uint8_t win_idx = which - FRAMEBUFFER_USER_START;
+		*pitch = extras[win_idx].width * sizeof(uint32_t);
+		return extras[win_idx].texture_buf;
 	} else {
 #endif
 		if (which == FRAMEBUFFER_UI && !sdl_textures[which]) {
 			sdl_textures[which] = SDL_CreateTexture(main_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, main_width, main_height);
 		}
-		if (which >= num_textures) {
-			warning("Request for invalid framebuffer number %d\n", which);
-			return NULL;
+		SDL_Texture *tex;
+		if (which >= FRAMEBUFFER_USER_START) {
+			uint8_t win_idx = which - FRAMEBUFFER_USER_START;
+			if (win_idx >= num_extras || !extras[win_idx].renderer) {
+				warning("Request for invalid framebuffer number %d\n", which);
+				return NULL;
+			}
+			tex = extras[win_idx].sdl_texture;
+		} else {
+			tex = sdl_textures[which];
 		}
 		uint8_t *pixels;
-		if (SDL_LockTexture(sdl_textures[which], NULL, (void **)&pixels, pitch) < 0) {
+		if (SDL_LockTexture(tex, NULL, (void **)&pixels, pitch) < 0) {
 			warning("Failed to lock texture: %s\n", SDL_GetError());
 			return NULL;
 		}
@@ -1684,28 +1947,30 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 		return;
 	}
 
-	last_width = width;
 	uint32_t height = which <= FRAMEBUFFER_EVEN
 		? (video_standard == VID_PAL ? 294 : 243) - (overscan_top[video_standard] + overscan_bot[video_standard])
 		: 240;
 	FILE *screenshot_file = NULL;
 	char *ext;
-	width -= overscan_left[video_standard] + overscan_right[video_standard];
-	if (screenshot_path && which == FRAMEBUFFER_ODD) {
-		screenshot_file = fopen(screenshot_path, "wb");
-		if (screenshot_file) {
+	if (which < FRAMEBUFFER_UI) {
+		last_width = width;
+		width -= overscan_left[video_standard] + overscan_right[video_standard];
+		if (screenshot_path && which == FRAMEBUFFER_ODD) {
+			screenshot_file = fopen(screenshot_path, "wb");
+			if (screenshot_file) {
 #ifndef DISABLE_ZLIB
-			ext = path_extension(screenshot_path);
+				ext = path_extension(screenshot_path);
 #endif
-			debug_message("Saving screenshot to %s\n", screenshot_path);
-		} else {
-			warning("Failed to open screenshot file %s for writing\n", screenshot_path);
+				debug_message("Saving screenshot to %s\n", screenshot_path);
+			} else {
+				warning("Failed to open screenshot file %s for writing\n", screenshot_path);
+			}
+			free(screenshot_path);
+			screenshot_path = NULL;
 		}
-		free(screenshot_path);
-		screenshot_path = NULL;
+		interlaced = last_field != which;
+		buffer += overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard];
 	}
-	interlaced = last_field != which;
-	buffer += overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard];
 #ifndef DISABLE_OPENGL
 	if (render_gl && which <= FRAMEBUFFER_EVEN) {
 		SDL_GL_MakeCurrent(main_window, main_context);
@@ -1735,6 +2000,11 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 			save_png24_frame(apng_file, buffer, apng, width, height, LINEBUF_SIZE*sizeof(uint32_t));
 		}
 #endif
+	} else if (render_gl && which >= FRAMEBUFFER_USER_START) {
+		uint8_t win_idx = which - FRAMEBUFFER_USER_START;
+		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
+		glBindTexture(GL_TEXTURE_2D, extras[win_idx].gl_texture[0]);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, extras[win_idx].width, extras[win_idx].height, SRC_FORMAT, GL_UNSIGNED_BYTE, buffer);
 	} else {
 #endif
 		uint32_t shot_height = height;
@@ -1778,8 +2048,8 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 #ifndef DISABLE_OPENGL
 	}
 #endif
-	last_height = height;
 	if (which <= FRAMEBUFFER_EVEN) {
+		last_height = height;
 		render_update_display();
 	} else if (which == FRAMEBUFFER_UI) {
 		SDL_RenderCopy(main_renderer, sdl_textures[which], NULL, NULL);
@@ -1792,8 +2062,27 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 			need_ui_fb_resize = 0;
 		}
 	} else {
-		SDL_RenderCopy(extra_renderers[which - FRAMEBUFFER_USER_START], sdl_textures[which], NULL, NULL);
-		SDL_RenderPresent(extra_renderers[which - FRAMEBUFFER_USER_START]);
+		uint8_t win_idx = which - FRAMEBUFFER_USER_START;
+		if (extras[win_idx].renderer) {
+			SDL_RenderCopy(extras[win_idx].renderer, extras[win_idx].sdl_texture, NULL, NULL);
+			SDL_RenderPresent(extras[win_idx].renderer);
+		}
+#ifndef DISABLE_OPENGL
+		else {
+			glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			
+			glBindBuffer(GL_ARRAY_BUFFER, extras[win_idx].gl_buffers[0]);
+			extra_draw_quad(
+				extras + win_idx,
+				extras[win_idx].gl_texture[0], 
+				(float)extras[win_idx].width / (float)extras[win_idx].tex_width,
+				(float)extras[win_idx].height / (float)extras[win_idx].tex_height
+			);
+			
+			SDL_GL_SwapWindow(extras[win_idx].win);
+		}
+#endif
 	}
 	if (screenshot_file) {
 		fclose(screenshot_file);
@@ -1920,7 +2209,7 @@ void render_framebuffer_updated(uint8_t which, int width)
 		return;
 	}
 	//TODO: Maybe fixme for render API
-	process_framebuffer(texture_buf, which, width);
+	process_framebuffer(which < FRAMEBUFFER_USER_START ? texture_buf : extras[which - FRAMEBUFFER_USER_START].texture_buf, which, width);
 }
 
 void render_video_loop(void)
@@ -2263,9 +2552,9 @@ uint8_t render_get_active_framebuffer(void)
 	if (SDL_GetWindowFlags(main_window) & SDL_WINDOW_INPUT_FOCUS) {
 		return FRAMEBUFFER_ODD;
 	}
-	for (int i = 0; i < num_textures - 2; i++)
+	for (int i = 0; i < num_extras; i++)
 	{
-		if (extra_windows[i] && (SDL_GetWindowFlags(extra_windows[i]) & SDL_WINDOW_INPUT_FOCUS)) {
+		if (extras[i].win && (SDL_GetWindowFlags(extras[i].win) & SDL_WINDOW_INPUT_FOCUS)) {
 			return FRAMEBUFFER_USER_START + i;
 		}
 	}

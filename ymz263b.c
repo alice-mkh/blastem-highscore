@@ -88,6 +88,16 @@ void ymz263b_init(ymz263b *ymz, uint32_t master_clock, uint32_t clock_divider)
 	ymz->pcm_counter = PCM_BASE_DIVIDER;
 }
 
+void ymz263b_free(ymz263b *ymz)
+{
+	render_free_source(ymz->audio);
+}
+
+void ymz263b_adjust_master_clock(ymz263b *ymz, uint32_t master_clock)
+{
+	render_audio_adjust_clock(ymz->audio, master_clock, ymz->clock_inc * PCM_BASE_DIVIDER);
+}
+
 static uint8_t fifo_empty(ymz_midi_fifo *fifo)
 {
 	return fifo->read == FIFO_EMPTY;

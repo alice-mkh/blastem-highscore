@@ -209,6 +209,18 @@ char *sfnt_name(sfnt_table *sfnt, uint16_t name_type)
 	}
 }
 
+uint8_t sfnt_has_truetype_glyphs(sfnt_table *sfnt)
+{
+	uint32_t table_size;
+	uint8_t *table = sfnt_find_table(sfnt, "glyf", &table_size);
+	if (!table) {
+		return 0;
+	}
+	table = sfnt_find_table(sfnt, "loca", &table_size);
+	return table != NULL;
+	
+}
+
 uint8_t *sfnt_flatten(sfnt_table *sfnt, uint32_t *size_out)
 {
 	uint8_t *ret = NULL;;

@@ -33,7 +33,6 @@ uint32_t MCLKS_PER_68K;
 #define DEFAULT_SYNC_INTERVAL MCLKS_LINE
 #define DEFAULT_LOWPASS_CUTOFF 3390
 
-//TODO: Figure out the exact value for this
 #define LINES_NTSC 262
 #define LINES_PAL 313
 
@@ -1877,14 +1876,24 @@ static void set_speed_percent(system_header * system, uint32_t percent)
 	genesis_context *context = (genesis_context *)system;
 	uint32_t old_clock = context->master_clock;
 	context->master_clock = ((uint64_t)context->normal_clock * (uint64_t)percent) / 100;
-	while (context->ym->current_cycle != context->psg->cycles) {
-		sync_sound(context, context->psg->cycles + MCLKS_PER_PSG);
+	if (context->header.type != SYSTEM_PICO && context->header.type != SYSTEM_COPERA) {
+		while (context->ym->current_cycle != context->psg->cycles) {
+			sync_sound(context, context->psg->cycles + MCLKS_PER_PSG);
+		}
+		if (context->expansion) {
+			segacd_context *cd = context->expansion;
+			segacd_set_speed_percent(cd, percent);
+		}
+		ym_adjust_master_clock(context->ym, context->master_clock);
+	} else {
+		while (context->adpcm->cycle != context->psg->cycles) {
+			sync_sound_pico(context, context->psg->cycles + MCLKS_PER_PSG);
+		}
+		if (context->ymz) {
+			ymz263b_adjust_master_clock(context->ymz, context->master_clock);
+		}
+		pico_pcm_adjust_master_clock(context->adpcm, context->master_clock);
 	}
-	if (context->expansion) {
-		segacd_context *cd = context->expansion;
-		segacd_set_speed_percent(cd, percent);
-	}
-	ym_adjust_master_clock(context->ym, context->master_clock);
 	psg_adjust_master_clock(context->psg, context->master_clock);
 }
 
@@ -2212,7 +2221,7 @@ static void free_genesis(system_header *system)
 		pico_pcm_free(gen->adpcm);
 		free(gen->adpcm);
 		if (gen->ymz) {
-			//TODO: call cleanup function once it exists
+			ymz263b_free(gen->ymz);
 			free(gen->ymz);
 		}
 	} else {
@@ -2448,9 +2457,11 @@ static void start_vgm_log(system_header *system, char *filename)
 	vgm_writer *vgm = vgm_write_open(filename, gen->version_reg & HZ50 ? 50 : 60, gen->normal_clock, gen->m68k->current_cycle);
 	if (vgm) {
 		printf("Started logging VGM to %s\n", filename);
-		sync_sound(gen, vgm->last_cycle);
 		if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
+			sync_sound(gen, vgm->last_cycle);
 			ym_vgm_log(gen->ym, gen->normal_clock, vgm);
+		} else {
+			sync_sound_pico(gen, vgm->last_cycle);
 		}
 		psg_vgm_log(gen->psg, gen->normal_clock, vgm);
 		gen->header.vgm_logging = 1;
@@ -2463,7 +2474,7 @@ static void stop_vgm_log(system_header *system)
 {
 	puts("Stopped VGM log");
 	genesis_context *gen = (genesis_context *)system;
-	vgm_close(gen->ym->vgm);
+	vgm_close(gen->psg->vgm);
 	if (gen->header.type != SYSTEM_PICO && gen->header.type != SYSTEM_COPERA) {
 		gen->ym->vgm = NULL;
 	}

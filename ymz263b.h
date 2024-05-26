@@ -46,6 +46,8 @@ typedef struct {
 } ymz263b;
 
 void ymz263b_init(ymz263b *ymz, uint32_t master_clock, uint32_t clock_divider);
+void ymz263b_free(ymz263b *ymz);
+void ymz263b_adjust_master_clock(ymz263b *ymz, uint32_t master_clock);
 void ymz263b_run(ymz263b *ymz, uint32_t target_cycle);
 uint32_t ymz263b_next_int(ymz263b *ymz);
 void ymz263b_address_write(ymz263b *ymz, uint8_t value);

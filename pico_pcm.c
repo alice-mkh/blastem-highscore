@@ -23,16 +23,21 @@ void pico_pcm_reset(pico_pcm *pcm)
 
 void pico_pcm_init(pico_pcm *pcm, uint32_t master_clock, uint32_t divider)
 {
-	pcm->audio = render_audio_source("PICO ADPCM", master_clock, divider * 4, 1);
+	pcm->clock_inc = divider * 4;
+	pcm->audio = render_audio_source("PICO ADPCM", master_clock, pcm->clock_inc, 1);
 	pcm->scope = NULL;
 	pcm->scope_channel = 0;
-	pcm->clock_inc = divider * 4;
 	pico_pcm_reset(pcm);
 }
 
 void pico_pcm_free(pico_pcm *pcm)
 {
 	render_free_source(pcm->audio);
+}
+
+void pico_pcm_adjust_master_clock(pico_pcm *pcm, uint32_t master_clock)
+{
+	render_audio_adjust_clock(pcm->audio, master_clock, pcm->clock_inc);
 }
 
 void pico_pcm_enable_scope(pico_pcm *pcm, oscilloscope *scope, uint32_t master_clock)
