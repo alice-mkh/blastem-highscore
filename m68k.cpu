@@ -1021,6 +1021,82 @@ m68k_save_dst
 	update_flags XNZV0C
 	m68k_save_dst 0
 	m68k_prefetch
+
+1110CCC0ZZ000RRR asri
+	invalid Z 3
+	switch C
+	case 0
+		meta shift 8
+	default
+		meta shift C
+	end
+	asr dregs.R shift dregs.R Z
+	update_flags XNZV0C
+	local cyc 32
+	cyc = shift + shift
+	switch Z
+	case 2
+		cyc += 4
+	default
+		cyc += 2
+	end
+	cycles cyc
+	#TODO: should this happen before or after the majority of the shift?
+	m68k_prefetch
+	
+1110CCC0ZZ100RRR asr_dn
+	invalid Z 3
+	local shift 32
+	local shift_cycles 32
+	and dregs.C 63 shift
+	shift_cycles = shift
+	if shift = 0
+		cmp 0 dregs.R Z
+		update_flags NZV0C0
+	else
+		switch Z
+		case 0
+			if shift >=U 9
+				shift = 8
+			end
+		case 1
+			if shift >=U 17
+				shift = 16
+			end
+		case 2
+			if shift >=U 33
+				shift = 32
+			end
+		end
+		asr dregs.R shift dregs.R Z
+		update_flags XNZV0C
+	end
+	shift_cycles += shift_cycles
+	switch Z
+	case 2
+		shift_cycles += 4
+	default
+		shift_cycles += 2
+	end
+	cycles shift_cycles
+	#TODO: should this happen before or after the majority of the shift?
+	m68k_prefetch
+
+1110000011MMMRRR asr_ea
+	invalid M 0
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 0
+	asr dst 1 dst
+	update_flags XNZV0C
+	m68k_save_dst 0
+	m68k_prefetch
 	
 1110CCC1ZZ001RRR lsli
 	invalid Z 3
@@ -1062,6 +1138,61 @@ m68k_save_dst
 	m68k_prefetch
 	
 1110001111MMMRRR lsl_ea
+	invalid M 0
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 0
+	lsl dst 1 dst
+	update_flags XNZV0C
+	m68k_save_dst 0
+	m68k_prefetch
+
+1110CCC1ZZ000RRR asli
+	invalid Z 3
+	switch C
+	case 0
+		meta shift 8
+	default
+		meta shift C
+	end
+	lsl dregs.R shift dregs.R Z
+	update_flags XNZV0C
+	local cyc 32
+	cyc = shift + shift
+	switch Z
+	case 2
+		cyc += 4
+	default
+		cyc += 2
+	end
+	cycles cyc
+	#TODO: should this happen before or after the majority of the shift?
+	m68k_prefetch
+	
+1110CCC1ZZ100RRR asl_dn
+	invalid Z 3
+	local shift 8
+	and dregs.C 63 shift
+	lsl dregs.R shift dregs.R Z
+	update_flags XNZV0C
+	add shift shift shift
+	switch Z
+	case 2
+		add 4 shift shift
+	default
+		add 2 shift shift
+	end
+	cycles shift
+	#TODO: should this happen before or after the majority of the shift?
+	m68k_prefetch
+
+1110000111MMMRRR asl_ea
 	invalid M 0
 	invalid M 1
 	invalid M 7 R 2

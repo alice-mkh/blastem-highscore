@@ -502,8 +502,7 @@ def _updateFlagsCImpl(prog, params, rawParams):
 					if type(prog.lastB) is int:
 						resultBit = prog.lastB - 1
 					else:
-						#FIXME!!!!!
-						resultBit = 0
+						resultBit = f'({prog.lastB} - 1)'
 					myRes = prog.lastA
 				elif prog.lastOp.op == 'neg':
 					if prog.carryFlowDst:
@@ -554,10 +553,17 @@ def _updateFlagsCImpl(prog, params, rawParams):
 			else:
 				reg = prog.resolveParam(storage, None, {})
 				maxBit = prog.paramSize(storage) - 1
-				if resultBit > maxBit:
-					output.append('\n\t{reg} = {res} >> {shift} & {mask}U;'.format(reg=reg, res=myRes, shift = resultBit - maxBit, mask = 1 << maxBit))
+				if type(resultBit) is int:
+					mask = f'{1 << resultBit}U'
 				else:
-					output.append('\n\t{reg} = {res} & {mask}U;'.format(reg=reg, res=myRes, mask = 1 << resultBit))
+					mask = f'(1 << {resultBit})'
+				if not type(resultBit) is int:
+					output.append(f'\n\t{reg} = !!({myRes} & {mask});')
+				elif resultBit > maxBit:
+					mask = f'{1 << maxBit}U'
+					output.append('\n\t{reg} = {res} >> {shift} & {mask};'.format(reg=reg, res=myRes, shift = resultBit - maxBit, mask = mask))
+				else:
+					output.append('\n\t{reg} = {res} & {mask};'.format(reg=reg, res=myRes, mask = mask))
 		elif calc == 'zero':
 			if prog.carryFlowDst:
 				realSize = prog.getLastSize()
@@ -694,14 +700,41 @@ def _asrCImpl(prog, params, rawParams, flagUpdates):
 			if calc == 'carry':
 				needsCarry = True
 	decl = ''
-	size = prog.paramSize(rawParams[2])
+	needsSizeAdjust = False
+	destSize = prog.paramSize(rawParams[2])
+	if len(params) > 3:
+		size = params[3]
+		if size == 0:
+			size = 8
+		elif size == 1:
+			size = 16
+		else:
+			size = 32
+		prog.lastSize = size
+		if destSize > size:
+			needsSizeAdjust = True
+			prog.sizeAdjust = size
+	else:
+		size = destSize
+	mask = 1 << (size - 1)
 	if needsCarry:
-		decl,name = prog.getTemp(size * 2)
+		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
 		prog.lastA = params[0]
+		prog.lastB = params[1]
+		if needsSizeAdjust:
+			sizeMask = (1 << size) - 1
+			return decl + '\n\t{name} = (({a} & {sizeMask}) >> ({b} & {sizeMask})) | ({a} & {mask} ? 0xFFFFFFFFU << ({size} - ({b} & {sizeMask})) : 0);'.format(
+				name = name, a = params[0], b = params[1], dst = dst, mask = mask, size=size, sizeMask=sizeMask)
+	elif needsSizeAdjust:
+		decl,name = prog.getTemp(size)
+		sizeMask = (1 << size) - 1
+		return decl + ('\n\t{name} = (({a} & {sizeMask}) >> ({b} & {sizeMask})) | ({a} & {mask} ? 0xFFFFFFFFU << ({size} - ({b} & {sizeMask})) : 0);' +
+			'\n\t{dst} = ({dst} & ~{sizeMask}) | {name};').format(
+			name = name, a = params[0], b = params[1], dst = dst, mask = mask, size=size, sizeMask=sizeMask)
 	else:
 		dst = params[2]
-	mask = 1 << (size - 1)
+	
 	return decl + '\n\t{dst} = ({a} >> {b}) | ({a} & {mask} ? 0xFFFFFFFFU << ({size} - {b}) : 0);'.format(
 		a = params[0], b = params[1], dst = dst, mask = mask, size=size)
 	
