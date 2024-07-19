@@ -34,7 +34,7 @@ blastem_core_load_rom (HsCore      *core,
   char *data;
   gsize length;
 
-  g_assert (n_rom_paths == 0);
+  g_assert (n_rom_paths == 1);
 
   if (!g_file_get_contents (rom_paths[0], &data, &length, error))
     return FALSE;
