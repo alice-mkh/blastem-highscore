@@ -25,7 +25,8 @@ G_DEFINE_FINAL_TYPE (BlastemCore, blastem_core, HS_TYPE_CORE)
 
 static gboolean
 blastem_core_load_rom (HsCore      *core,
-                       const char  *rom_path,
+                       const char **rom_paths,
+                       int          n_rom_paths,
                        const char  *save_path,
                        GError     **error)
 {
@@ -33,7 +34,9 @@ blastem_core_load_rom (HsCore      *core,
   char *data;
   gsize length;
 
-  if (!g_file_get_contents (rom_path, &data, &length, error))
+  g_assert (n_rom_paths == 0);
+
+  if (!g_file_get_contents (rom_paths[0], &data, &length, error))
     return FALSE;
 
   disable_stdout_messages ();
