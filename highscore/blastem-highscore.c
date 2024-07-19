@@ -41,9 +41,9 @@ blastem_core_load_rom (HsCore      *core,
 
   disable_stdout_messages ();
 
-  media.dir = path_dirname (rom_path);
-  media.name = basename_no_extension (rom_path);
-  media.extension = path_extension (rom_path);
+  media.dir = path_dirname (rom_paths[0]);
+  media.name = basename_no_extension (rom_paths[0]);
+  media.extension = path_extension (rom_paths[0]);
 
   media.buffer = malloc (nearest_pow2 (length));
   memcpy (media.buffer, data, length);
