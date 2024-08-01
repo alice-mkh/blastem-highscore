@@ -486,27 +486,28 @@ static void render_sprite_cells_mode4(vdp_context * context)
 		int x = d->x_pos & 0xFF;
 		for (int i = 28; i >= 0; i -= 4, x++)
 		{
-			if (context->linebuf[x] && (pixels >> i & 0xF)) {
-				if (
+			uint8_t pixel = pixels >> i & 0xF;
+			if (pixel) {
+				if (!context->linebuf[x]) {
+					context->linebuf[x] = pixel;
+				} else if(
 					((context->regs[REG_MODE_1] & BIT_SPRITE_8PX) && x > 8)
 					|| ((!(context->regs[REG_MODE_1] & BIT_SPRITE_8PX)) && x < 256)
 				) {
 					context->flags2 |= FLAG2_SPRITE_COLLIDE;
 				}
-			} else {
-				context->linebuf[x] = pixels >> i & 0xF;
 			}
 			if (zoom) {
 				x++;
-				if (context->linebuf[x] && (pixels >> i & 0xF)) {
-					if (
+				if (pixel) {
+					if (!context->linebuf[x]) {
+						context->linebuf[x] = pixel;
+					} else if(
 						((context->regs[REG_MODE_1] & BIT_SPRITE_8PX) && x > 8)
 						|| ((!(context->regs[REG_MODE_1] & BIT_SPRITE_8PX)) && x < 256)
 					) {
 						context->flags2 |= FLAG2_SPRITE_COLLIDE;
 					}
-				} else {
-					context->linebuf[x] = pixels >> i & 0xF;
 				}
 			}
 		}
