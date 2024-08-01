@@ -2438,7 +2438,7 @@ static void advance_output_line(vdp_context *context)
 			output_line = 0;
 			context->output_lines = 1;
 			context->pushed_frame = 0;
-		} else {
+		} else if (!context->pushed_frame) {
 			context->output_lines = output_line + 1;
 		}
 	} else if (output_line >= 0x200 - context->border_top) {
