@@ -4497,7 +4497,7 @@ static uint8_t cmd_step_z80(debug_root *root, parsed_command *cmd)
 #endif
 		}
 #ifndef NEW_CORE
-	} else if (inst->op == Z80_JPCC) {
+	} else if (inst->op == Z80_JPCC || inst->op == Z80_CALLCC) {
 		uint8_t invert = 0;
 		uint8_t flag = 0;
 		switch (inst->reg)
@@ -4551,6 +4551,10 @@ static uint8_t cmd_step_z80(debug_root *root, parsed_command *cmd)
 		if (flag) {
 			after += inst->immed;
 		}
+	} else if (inst->op == Z80_DJNZ) {
+		if (context->regs[Z80_B] != 1) {
+			after += inst->immed;
+		}
 #endif
 	} else if(inst->op == Z80_JR) {
 		after += inst->immed;
@@ -4571,33 +4575,11 @@ static uint8_t cmd_step_z80(debug_root *root, parsed_command *cmd)
 static uint8_t cmd_next_z80(debug_root *root, parsed_command *cmd)
 {
 	z80inst *inst = root->inst;
+	if (inst->op != Z80_CALL && inst->op != Z80_CALLCC && inst->op != Z80_RST) {
+		return cmd_step_z80(root, cmd);
+	}
 	z80_context *context = root->cpu_context;
 	uint32_t after = root->after;
-	//TODO: handle conditional branches
-	if (inst->op == Z80_JP) {
-		if (inst->addr_mode == Z80_IMMED) {
-			after = inst->immed;
-		} else if (inst->ea_reg == Z80_HL) {
-#ifndef NEW_CORE
-			after = context->regs[Z80_H] << 8 | context->regs[Z80_L];
-		} else if (inst->ea_reg == Z80_IX) {
-			after = context->regs[Z80_IXH] << 8 | context->regs[Z80_IXL];
-		} else if (inst->ea_reg == Z80_IY) {
-			after = context->regs[Z80_IYH] << 8 | context->regs[Z80_IYL];
-#endif
-		}
-	} else if(inst->op == Z80_JR) {
-		after += inst->immed;
-	} else if(inst->op == Z80_RET) {
-		uint8_t *sp = get_native_pointer(context->sp, (void **)context->mem_pointers, &context->Z80_OPTS->gen);
-		if (sp) {
-			after = *sp;
-			sp = get_native_pointer((context->sp + 1) & 0xFFFF, (void **)context->mem_pointers, &context->Z80_OPTS->gen);
-			if (sp) {
-				after |= *sp << 8;
-			}
-		}
-	}
 	zinsert_breakpoint(context, after, (uint8_t *)zdebugger);
 	return 0;
 }
@@ -4613,7 +4595,7 @@ static uint8_t cmd_over_z80(debug_root *root, parsed_command *cmd)
 			zinsert_breakpoint(context, inst->immed, (uint8_t *)zdebugger);
 			return 0;
 		}
-	} else if (inst->op == Z80_JRCC) {
+	} else if (inst->op == Z80_JRCC || inst->op == Z80_DJNZ) {
 		after += inst->immed;
 		if (after < root->after) {
 			zinsert_breakpoint(context, after, (uint8_t *)zdebugger);
