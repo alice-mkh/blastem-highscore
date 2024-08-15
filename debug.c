@@ -3828,6 +3828,10 @@ static uint8_t cmd_ym_channel(debug_root *root, parsed_command *cmd)
 	m68k_context *context = root->cpu_context;
 	genesis_context * gen = context->system;
 	if (cmd->num_args) {
+		if (cmd->args[0].value.v.u32 < 1 || cmd->args[0].value.v.u32 > 6) {
+			printf("%d is not a valid YM2612 channel number. Valid values are 1-6\n", cmd->args[0].value.v.u32);
+			return 1;
+		}
 		ym_print_channel_info(gen->ym, cmd->args[0].value.v.u32 - 1);
 	} else {
 		for (int i = 0; i < 6; i++) {
@@ -4492,6 +4496,62 @@ static uint8_t cmd_step_z80(debug_root *root, parsed_command *cmd)
 			after = context->regs[Z80_IYH] << 8 | context->regs[Z80_IYL];
 #endif
 		}
+#ifndef NEW_CORE
+	} else if (inst->op == Z80_JPCC) {
+		uint8_t invert = 0;
+		uint8_t flag = 0;
+		switch (inst->reg)
+		{
+		case Z80_CC_NZ:
+			invert = 1;
+		case Z80_CC_Z:
+			flag = context->flags[ZF_Z];
+			break;
+		case Z80_CC_NC:
+			invert = 1;
+		case Z80_CC_C:
+			flag = context->flags[ZF_C];
+			break;
+		case Z80_CC_PO:
+			invert = 1;
+		case Z80_CC_PE:
+			flag = context->flags[ZF_PV];
+			break;
+		case Z80_CC_P:
+			invert = 1;
+		case Z80_CC_M:
+			flag = context->flags[ZF_S];
+			break;
+		}
+		if (invert) {
+			flag = !flag;
+		}
+		if (flag) {
+			after = inst->immed;
+		}
+	} else if (inst->op == Z80_JRCC) {
+		uint8_t invert = 0;
+		uint8_t flag = 0;
+		switch (inst->reg)
+		{
+		case Z80_CC_NZ:
+			invert = 1;
+		case Z80_CC_Z:
+			flag = context->flags[ZF_Z];
+			break;
+		case Z80_CC_NC:
+			invert = 1;
+		case Z80_CC_C:
+			flag = context->flags[ZF_C];
+			break;
+		}
+		if (invert) {
+			flag = !flag;
+		}
+		if (flag) {
+			after += inst->immed;
+		}
+#endif
 	} else if(inst->op == Z80_JR) {
 		after += inst->immed;
 	} else if(inst->op == Z80_RET) {
@@ -4506,12 +4566,6 @@ static uint8_t cmd_step_z80(debug_root *root, parsed_command *cmd)
 	}
 	zinsert_breakpoint(context, after, (uint8_t *)zdebugger);
 	return 0;
-}
-
-static uint8_t cmd_over_z80(debug_root *root, parsed_command *cmd)
-{
-	fputs("not implemented yet\n", stderr);
-	return 1;
 }
 
 static uint8_t cmd_next_z80(debug_root *root, parsed_command *cmd)
@@ -4546,6 +4600,28 @@ static uint8_t cmd_next_z80(debug_root *root, parsed_command *cmd)
 	}
 	zinsert_breakpoint(context, after, (uint8_t *)zdebugger);
 	return 0;
+}
+
+static uint8_t cmd_over_z80(debug_root *root, parsed_command *cmd)
+{
+	z80inst *inst = root->inst;
+	z80_context *context = root->cpu_context;
+	uint32_t after = root->after;
+#ifndef NEW_CORE
+	if (inst->op == Z80_JPCC) {
+		if (inst->immed < after) {
+			zinsert_breakpoint(context, inst->immed, (uint8_t *)zdebugger);
+			return 0;
+		}
+	} else if (inst->op == Z80_JRCC) {
+		after += inst->immed;
+		if (after < root->after) {
+			zinsert_breakpoint(context, after, (uint8_t *)zdebugger);
+			return 0;
+		}
+	}
+#endif
+	return cmd_next_z80(root, cmd);
 }
 
 static uint8_t cmd_backtrace_z80(debug_root *root, parsed_command *cmd)
@@ -4634,6 +4710,24 @@ static uint8_t cmd_gen_m68k(debug_root *root, parsed_command *cmd)
 		gen->header.enter_debugger = 1;
 		return 0;
 	}
+}
+
+static uint8_t cmd_ym_channel_z80(debug_root *root, parsed_command *cmd)
+{
+	z80_context *context = root->cpu_context;
+	genesis_context * gen = context->system;
+	if (cmd->num_args) {
+		if (cmd->args[0].value.v.u32 < 1 || cmd->args[0].value.v.u32 > 6) {
+			printf("%d is not a valid YM2612 channel number. Valid values are 1-6\n", cmd->args[0].value.v.u32);
+			return 1;
+		}
+		ym_print_channel_info(gen->ym, cmd->args[0].value.v.u32 - 1);
+	} else {
+		for (int i = 0; i < 6; i++) {
+			ym_print_channel_info(gen->ym, i);
+		}
+	}
+	return 1;
 }
 
 static uint8_t cmd_vdp_sprites_sms(debug_root *root, parsed_command *cmd)
@@ -4760,6 +4854,16 @@ command_def gen_z80_commands[] = {
 		.min_args = 0,
 		.max_args = -1,
 		.raw_args = 1
+	},
+	{
+		.names = (const char *[]){
+			"ymchannel", NULL
+		},
+		.usage = "ymchannel [CHANNEL]",
+		.desc = "Print YM-2612 channel and operator params. Limited to CHANNEL if specified",
+		.impl = cmd_ym_channel_z80,
+		.min_args = 0,
+		.max_args = 1
 	}
 };
 
@@ -5264,7 +5368,6 @@ debug_root *find_z80_root(z80_context *context)
 		sms_context *sms;
 		coleco_context *coleco;
 		debug_var *var;
-		//TODO: populate names
 		switch (current_system->type)
 		{
 		case SYSTEM_GENESIS:
@@ -5272,7 +5375,14 @@ debug_root *find_z80_root(z80_context *context)
 			gen = context->system;
 			add_commands(root, gen_z80_commands, NUM_GEN_Z80);
 			root->other_roots = tern_insert_ptr(root->other_roots, "m68k", find_m68k_root(gen->m68k));
-			//root->resolve = resolve_z80;
+			root->other_roots = tern_insert_ptr(root->other_roots, "io", find_io_root(&gen->io));
+			root->other_roots = tern_insert_ptr(root->other_roots, "vdp", find_vdp_root(gen->vdp));
+			root->other_roots = tern_insert_ptr(root->other_roots, "psg", find_psg_root(gen->psg));
+			root->other_roots = tern_insert_ptr(root->other_roots, "ym", find_ym2612_root(gen->ym));
+			var = calloc(1, sizeof(debug_var));
+			var->get = debug_frame_get;
+			var->ptr = gen->vdp;
+			root->variables = tern_insert_ptr(root->variables, "frame", var);
 			break;
 		case SYSTEM_SMS:
 			sms = context->system;
@@ -5289,8 +5399,6 @@ debug_root *find_z80_root(z80_context *context)
 			root->other_roots = tern_insert_ptr(root->other_roots, "vdp", find_vdp_root(coleco->vdp));
 			root->other_roots = tern_insert_ptr(root->other_roots, "psg", find_psg_root(coleco->psg));
 			break;
-		//default:
-			//root->resolve = resolve_z80;
 		}
 		root->read_mem = read_z80;
 		root->write_mem = write_z80;
