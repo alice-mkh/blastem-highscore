@@ -98,7 +98,7 @@ struct m68k_context {
 	uint32_t        dregs[8];
 	uint32_t        aregs[9];
 	uint32_t		target_cycle; //cycle at which the next synchronization or interrupt occurs
-	uint32_t		current_cycle;
+	uint32_t		cycles;
 	uint32_t        sync_cycle;
 	uint32_t        int_cycle;
 	uint32_t        int_num;
@@ -108,7 +108,7 @@ struct m68k_context {
 	uint16_t        *mem_pointers[NUM_MEM_AREAS];
 	code_ptr        resume_pc;
 	code_ptr        reset_handler;
-	m68k_options    *options;
+	m68k_options    *opts;
 	void            *system;
 	void            *host_sp_entry;
 	void            *stack_storage[M68K_STACK_STORAGE];

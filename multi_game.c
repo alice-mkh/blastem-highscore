@@ -7,12 +7,12 @@ void *write_multi_game_b(uint32_t address, void *vcontext, uint8_t value)
 	gen->bank_regs[0] = address;
 	uint32_t base = (address & 0x3F) << 16, start = 0, end = 0x400000;
 	//find the memmap chunk, so we can properly mask the base value
-	for (int i = 0; i < context->options->gen.memmap_chunks; i++)
+	for (int i = 0; i < context->opts->gen.memmap_chunks; i++)
 	{
-		if (context->options->gen.memmap[i].flags & MMAP_PTR_IDX) {
-			base &= context->options->gen.memmap[i].mask;
-			start = context->options->gen.memmap[i].start;
-			end = context->options->gen.memmap[i].end;
+		if (context->opts->gen.memmap[i].flags & MMAP_PTR_IDX) {
+			base &= context->opts->gen.memmap[i].mask;
+			start = context->opts->gen.memmap[i].start;
+			end = context->opts->gen.memmap[i].end;
 			break;
 		}
 	}

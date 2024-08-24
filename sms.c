@@ -478,6 +478,7 @@ static void run_sms(system_header *system)
 				}
 			}
 		}
+#ifndef NEW_CORE
 		if ((system->enter_debugger || sms->z80->wp_hit) && sms->z80->pc) {
 			if (!sms->z80->wp_hit) {
 				system->enter_debugger = 0;
@@ -486,6 +487,7 @@ static void run_sms(system_header *system)
 			zdebugger(sms->z80, sms->z80->pc);
 #endif
 		}
+#endif
 #ifdef NEW_CORE
 		if (sms->z80->nmi_cycle == CYCLE_NEVER) {
 #else
@@ -497,9 +499,11 @@ static void run_sms(system_header *system)
 			}
 		}
 
+#ifndef NEW_CORE
 		if (system->enter_debugger || sms->z80->wp_hit) {
 			target_cycle = sms->z80->Z80_CYCLE + 1;
 		}
+#endif
 		z80_run(sms->z80, target_cycle);
 		if (sms->z80->reset) {
 			z80_clear_reset(sms->z80, sms->z80->Z80_CYCLE + 128*15);

@@ -1785,7 +1785,7 @@ static uint32_t divu(uint32_t dividend, m68k_context *context, uint32_t divisor_
 		}
 	}
 	cycles += force ? 6 : bit ? 4 : 2;
-	context->current_cycle += cycles * context->options->gen.clock_divider;
+	context->cycles += cycles * context->opts->gen.clock_divider;
 	quotient = quotient << 1 | bit;
 	return dividend | quotient;
 }
@@ -1808,7 +1808,7 @@ static uint32_t divs(uint32_t dividend, m68k_context *context, uint32_t divisor_
 		context->flags[FLAG_N] = 1;
 		context->flags[FLAG_Z] = 0;
 		cycles += 4;
-		context->current_cycle += cycles * context->options->gen.clock_divider;
+		context->cycles += cycles * context->opts->gen.clock_divider;
 		return orig_dividend;
 	}
 	uint16_t quotient = 0;
@@ -1845,7 +1845,7 @@ static uint32_t divs(uint32_t dividend, m68k_context *context, uint32_t divisor_
 				context->flags[FLAG_V] = 1;
 				context->flags[FLAG_N] = 1;
 				context->flags[FLAG_Z] = 0;
-				context->current_cycle += cycles * context->options->gen.clock_divider;
+				context->cycles += cycles * context->opts->gen.clock_divider;
 				return orig_dividend;
 			} else {
 				dividend = -dividend;
@@ -1873,13 +1873,13 @@ static uint32_t divs(uint32_t dividend, m68k_context *context, uint32_t divisor_
 	if (context->flags[FLAG_V]) {
 		context->flags[FLAG_N] = 1;
 		context->flags[FLAG_Z] = 0;
-		context->current_cycle += cycles * context->options->gen.clock_divider;
+		context->cycles += cycles * context->opts->gen.clock_divider;
 		return orig_dividend;
 	}
 	context->flags[FLAG_N] = (quotient & 0x8000) ? 1 : 0;
 	context->flags[FLAG_Z] = quotient == 0;
 	//V was cleared above, C is cleared by the generated machine code
-	context->current_cycle += cycles * context->options->gen.clock_divider;
+	context->cycles += cycles * context->opts->gen.clock_divider;
 	return dividend | quotient;
 }
 
@@ -2055,7 +2055,7 @@ void translate_m68k_mul(m68k_options *opts, m68kinst *inst, host_ea *src_op, hos
 		pop_r(code, opts->gen.context_reg);
 		//turn 68K cycles into master clock cycles and add to the current cycle count
 		imul_irr(code, opts->gen.clock_divider, RAX, RAX, SZ_D);
-		add_rrdisp(code, RAX, opts->gen.context_reg, offsetof(m68k_context, current_cycle), SZ_D);
+		add_rrdisp(code, RAX, opts->gen.context_reg, offsetof(m68k_context, cycles), SZ_D);
 		//restore context and scratch1
 		call(code, opts->gen.load_context);
 		pop_r(code, opts->gen.scratch1);
@@ -2511,10 +2511,10 @@ void nop_fill_or_jmp_next(code_info *code, code_ptr old_end, code_ptr next_inst)
 
 m68k_context * m68k_handle_code_write(uint32_t address, m68k_context * context)
 {
-	m68k_options * options = context->options;
+	m68k_options * options = context->opts;
 	uint32_t inst_start = get_instruction_start(options, address);
 	while (inst_start && (address - inst_start) < M68K_MAX_INST_SIZE) {
-		code_ptr dst = get_native_address(context->options, inst_start);
+		code_ptr dst = get_native_address(context->opts, inst_start);
 		patch_for_retranslate(&options->gen, dst, options->retrans_stub);
 		inst_start = get_instruction_start(options, inst_start - 2);
 	}
@@ -2523,7 +2523,7 @@ m68k_context * m68k_handle_code_write(uint32_t address, m68k_context * context)
 
 void m68k_invalidate_code_range(m68k_context *context, uint32_t start, uint32_t end)
 {
-	m68k_options *opts = context->options;
+	m68k_options *opts = context->opts;
 	native_map_slot *native_code_map = opts->gen.native_code_map;
 	if (start > M68K_MAX_INST_SIZE - 2) {
 		start -= M68K_MAX_INST_SIZE - 2;
@@ -2564,9 +2564,9 @@ void m68k_invalidate_code_range(m68k_context *context, uint32_t start, uint32_t 
 
 void m68k_breakpoint_patch(m68k_context *context, uint32_t address, m68k_debug_handler bp_handler, code_ptr native_addr)
 {
-	m68k_options * opts = context->options;
+	m68k_options * opts = context->opts;
 	code_info native;
-	native.cur = native_addr ? native_addr : get_native_address(context->options, address);
+	native.cur = native_addr ? native_addr : get_native_address(context->opts, address);
 
 	if (!native.cur) {
 		return;
@@ -2669,7 +2669,7 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 			mov_rrdisp(code, opts->aregs[i], opts->gen.context_reg, offsetof(m68k_context, aregs) + sizeof(uint32_t) * i, SZ_D);
 		}
 	}
-	mov_rrdisp(code, opts->gen.cycles, opts->gen.context_reg, offsetof(m68k_context, current_cycle), SZ_D);
+	mov_rrdisp(code, opts->gen.cycles, opts->gen.context_reg, offsetof(m68k_context, cycles), SZ_D);
 	retn(code);
 
 	opts->load_context_scratch = code->cur;
@@ -2691,7 +2691,7 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 			mov_rdispr(code, opts->gen.context_reg, offsetof(m68k_context, aregs) + sizeof(uint32_t) * i, opts->aregs[i], SZ_D);
 		}
 	}
-	mov_rdispr(code, opts->gen.context_reg, offsetof(m68k_context, current_cycle), opts->gen.cycles, SZ_D);
+	mov_rdispr(code, opts->gen.context_reg, offsetof(m68k_context, cycles), opts->gen.cycles, SZ_D);
 	mov_rdispr(code, opts->gen.context_reg, offsetof(m68k_context, target_cycle), opts->gen.limit, SZ_D);
 	retn(code);
 

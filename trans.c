@@ -31,12 +31,12 @@ m68k_context *int_ack(m68k_context *context)
 m68k_context * sync_components(m68k_context * context, uint32_t address)
 {
 #ifndef NEW_CORE
-	if (context->current_cycle >= context->target_cycle) {
+	if (context->cycles >= context->target_cycle) {
 		puts("hit cycle limit");
 		exit(0);
 	}
 	if (context->status & M68K_STATUS_TRACE || context->trace_pending) {
-		context->target_cycle = context->current_cycle;
+		context->target_cycle = context->cycles;
 	}
 #endif
 	return context;
@@ -45,11 +45,7 @@ m68k_context * sync_components(m68k_context * context, uint32_t address)
 m68k_context *reset_handler(m68k_context *context)
 {
 	m68k_print_regs(context);
-#ifdef NEW_CORE
 	printf("cycles: %d\n", context->cycles);
-#else
-	printf("cycles: %d\n", context->current_cycle);
-#endif
 	exit(0);
 	//unreachable
 	return context;
@@ -94,7 +90,7 @@ int main(int argc, char ** argv)
 #ifdef NEW_CORE
 	context->cycles = 20;
 #else
-	context->current_cycle = 40;
+	context->cycles = 40;
 	context->target_cycle = context->sync_cycle = 8000;
 #endif
 	m68k_reset(context);

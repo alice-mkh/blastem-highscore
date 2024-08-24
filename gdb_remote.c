@@ -107,35 +107,43 @@ void gdb_send_command(char * command)
 uint32_t calc_status(m68k_context * context)
 {
 	uint32_t status = context->status << 3;
+#ifdef NEW_CORE
+	//TODO: implement me
+#else
 	for (int i = 0; i < 5; i++)
 	{
 		status <<= 1;
 		status |= context->flags[i];
 	}
+#endif
 	return status;
 }
 
 void update_status(m68k_context * context, uint16_t value)
 {
 	context->status = value >> 8;
+#ifdef NEW_CORE
+	//TODO: implement me
+#else
 	for (int i = 4; i >= 0; i--)
 	{
 		context->flags[i] = value & 1;
 		value >>= 1;
 	}
+#endif
 }
 
 static uint8_t m68k_read_byte(m68k_context *context, uint32_t address)
 {
 	//TODO: share this implementation with builtin debugger
-	return read_byte(address, (void **)context->mem_pointers, &context->options->gen, context);
+	return read_byte(address, (void **)context->mem_pointers, &context->opts->gen, context);
 }
 
 void m68k_write_byte(m68k_context * context, uint32_t address, uint8_t value)
 {
 	genesis_context *gen = context->system;
 	//TODO: Use generated read/write functions so that memory map is properly respected
-	uint16_t * word = get_native_pointer(address & 0xFFFFFFFE, (void **)context->mem_pointers, &context->options->gen);
+	uint16_t * word = get_native_pointer(address & 0xFFFFFFFE, (void **)context->mem_pointers, &context->opts->gen);
 	if (word) {
 		if (address & 1) {
 			*word = (*word & 0xFF00) | value;
@@ -184,6 +192,7 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 			//TODO: implement resuming at an arbitrary address
 			goto not_impl;
 		}
+#ifndef NEW_CORE
 		m68kinst inst;
 		genesis_context *gen = context->system;
 		uint32_t after = m68k_decode(m68k_instruction_fetch, context, &inst, pc & 0xFFFFFF);
@@ -206,6 +215,7 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 			}
 		}
 		insert_breakpoint(context, after, gdb_debug_enter);
+#endif
 
 		cont = 1;
 		expect_break_response = 1;
@@ -441,6 +451,7 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 				break;
 			case 's':
 			case 'S': {
+#ifndef NEW_CORE
 				m68kinst inst;
 				genesis_context *gen = context->system;
 				uint32_t after = m68k_decode(m68k_instruction_fetch, context, &inst, pc & 0xFFFFFF);
@@ -463,6 +474,7 @@ void gdb_run_command(m68k_context * context, uint32_t pc, char * command)
 					}
 				}
 				insert_breakpoint(context, after, gdb_debug_enter);
+#endif
 
 				cont = 1;
 				expect_break_response = 1;

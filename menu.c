@@ -50,7 +50,7 @@ void copy_string_from_guest(m68k_context *m68k, uint32_t guest_addr, char *buf, 
 	{
 		if (!src || !(guest_addr & 0xFFFF)) {
 			//we may have walked off the end of a memory block, get a fresh native pointer
-			src = get_native_pointer(guest_addr, (void **)m68k->mem_pointers, &m68k->options->gen);
+			src = get_native_pointer(guest_addr, (void **)m68k->mem_pointers, &m68k->opts->gen);
 			if (!src) {
 				break;
 			}
@@ -72,7 +72,7 @@ void copy_to_guest(m68k_context *m68k, uint32_t guest_addr, char *src, size_t to
 	{
 		if (!dst || !(guest_addr & 0xFFFF)) {
 			//we may have walked off the end of a memory block, get a fresh native pointer
-			dst = get_native_pointer(guest_addr, (void **)m68k->mem_pointers, &m68k->options->gen);
+			dst = get_native_pointer(guest_addr, (void **)m68k->mem_pointers, &m68k->opts->gen);
 			if (!dst) {
 				break;
 			}
@@ -86,7 +86,7 @@ void copy_to_guest(m68k_context *m68k, uint32_t guest_addr, char *src, size_t to
 
 uint32_t copy_dir_entry_to_guest(uint32_t dst, m68k_context *m68k, char *name, uint8_t is_dir)
 {
-	uint8_t *dest = get_native_pointer(dst, (void **)m68k->mem_pointers, &m68k->options->gen);
+	uint8_t *dest = get_native_pointer(dst, (void **)m68k->mem_pointers, &m68k->opts->gen);
 	if (!dest) {
 		return 0;
 	}
@@ -106,7 +106,7 @@ uint32_t copy_dir_entry_to_guest(uint32_t dst, m68k_context *m68k, char *name, u
 		dst += 2;
 		if (!(dst & 0xFFFF)) {
 			//we may have walked off the end of a memory block, get a fresh native pointer
-			dest = get_native_pointer(dst, (void **)m68k->mem_pointers, &m68k->options->gen);
+			dest = get_native_pointer(dst, (void **)m68k->mem_pointers, &m68k->opts->gen);
 			if (!dest) {
 				break;
 			}
@@ -158,7 +158,7 @@ void * menu_write_w(uint32_t address, void * context, uint16_t value)
 			}
 			free(ext_list);
 			//terminate list
-			uint8_t *dest = get_native_pointer(dst, (void **)m68k->mem_pointers, &m68k->options->gen);
+			uint8_t *dest = get_native_pointer(dst, (void **)m68k->mem_pointers, &m68k->opts->gen);
 			if (dest) {
 				*dest = dest[1] = 0;
 			}
@@ -256,7 +256,7 @@ void * menu_write_w(uint32_t address, void * context, uint16_t value)
 		menu->state = 1;
 	}
 	if (m68k->should_return) {
-		m68k->target_cycle = m68k->current_cycle;
+		m68k->target_cycle = m68k->cycles;
 	}
 
 	return context;

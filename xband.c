@@ -117,7 +117,7 @@ uint8_t xband_detect(uint8_t *rom, uint32_t rom_size)
 static xband *get_xband(genesis_context *gen)
 {
 	if (!gen->extra) {
-		gen->extra = gen->m68k->options->gen.memmap[0].buffer;
+		gen->extra = gen->m68k->opts->gen.memmap[0].buffer;
 		gen->m68k->mem_pointers[2] = (uint16_t *)gen->save_storage;
 	}
 	return gen->extra;

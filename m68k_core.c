@@ -667,7 +667,7 @@ code_ptr get_native_address(m68k_options *opts, uint32_t address)
 
 code_ptr get_native_from_context(m68k_context * context, uint32_t address)
 {
-	return get_native_address(context->options, address);
+	return get_native_address(context->opts, address);
 }
 
 uint32_t get_instruction_start(m68k_options *opts, uint32_t address)
@@ -700,7 +700,7 @@ uint32_t get_instruction_start(m68k_options *opts, uint32_t address)
 
 static void map_native_address(m68k_context * context, uint32_t address, code_ptr native_addr, uint8_t size, uint8_t native_size)
 {
-	m68k_options * opts = context->options;
+	m68k_options * opts = context->opts;
 	native_map_slot * native_code_map = opts->gen.native_code_map;
 	uint32_t meta_off;
 	memmap_chunk const *mem_chunk = find_map_chunk(address, &opts->gen, MMAP_CODE, &meta_off);
@@ -774,7 +774,7 @@ uint8_t m68k_is_terminal(m68kinst * inst)
 
 static void m68k_handle_deferred(m68k_context * context)
 {
-	m68k_options * opts = context->options;
+	m68k_options * opts = context->opts;
 	process_deferred(&opts->gen.deferred, context, (native_addr_func)get_native_from_context);
 	if (opts->gen.deferred) {
 		translate_m68k_stream(opts->gen.deferred->address, context);
@@ -783,8 +783,8 @@ static void m68k_handle_deferred(m68k_context * context)
 
 uint16_t m68k_get_ir(m68k_context *context)
 {
-	uint32_t inst_addr = get_instruction_start(context->options, context->last_prefetch_address-2);
-	uint16_t *native_addr = get_native_pointer(inst_addr, (void **)context->mem_pointers, &context->options->gen);
+	uint32_t inst_addr = get_instruction_start(context->opts, context->last_prefetch_address-2);
+	uint16_t *native_addr = get_native_pointer(inst_addr, (void **)context->mem_pointers, &context->opts->gen);
 	if (native_addr) {
 		return *native_addr;
 	}
@@ -854,7 +854,7 @@ static void *m68k_watchpoint_check16(uint32_t address, void *vcontext, uint16_t 
 		return vcontext;
 	}
 	if (watch->check_change) {
-		uint16_t old = read_word(address, (void **)context->mem_pointers, &context->options->gen, context);
+		uint16_t old = read_word(address, (void **)context->mem_pointers, &context->opts->gen, context);
 		if (old == value) {
 			return vcontext;
 		}
@@ -865,7 +865,7 @@ static void *m68k_watchpoint_check16(uint32_t address, void *vcontext, uint16_t 
 	context->wp_hit_address = address;
 	context->wp_hit_value = value;
 	context->wp_hit = 1;
-	context->target_cycle = context->sync_cycle = context->current_cycle;
+	context->target_cycle = context->sync_cycle = context->cycles;
 	system_header *system = context->system;
 	return vcontext;
 }
@@ -878,7 +878,7 @@ static void *m68k_watchpoint_check8(uint32_t address, void *vcontext, uint8_t va
 		return vcontext;
 	}
 	if (watch->check_change) {
-		uint8_t old = read_byte(address, (void **)context->mem_pointers, &context->options->gen, context);
+		uint8_t old = read_byte(address, (void **)context->mem_pointers, &context->opts->gen, context);
 		if (old == value) {
 			return vcontext;
 		}
@@ -889,34 +889,34 @@ static void *m68k_watchpoint_check8(uint32_t address, void *vcontext, uint8_t va
 	context->wp_hit_address = address;
 	context->wp_hit_value = value;
 	context->wp_hit = 1;
-	context->target_cycle = context->sync_cycle = context->current_cycle;
+	context->target_cycle = context->sync_cycle = context->cycles;
 	system_header *system = context->system;
 	return vcontext;
 }
 
 static void m68k_enable_watchpoints(m68k_context *context)
 {
-	if (context->options->gen.check_watchpoints_16) {
+	if (context->opts->gen.check_watchpoints_16) {
 		//already enabled
 		return;
 	}
-	context->options->gen.check_watchpoints_16 = m68k_watchpoint_check16;
-	context->options->gen.check_watchpoints_8 = m68k_watchpoint_check8;
+	context->opts->gen.check_watchpoints_16 = m68k_watchpoint_check16;
+	context->opts->gen.check_watchpoints_8 = m68k_watchpoint_check8;
 	//re-generate write handlers with watchpoints enabled
-	code_ptr new_write16 = gen_mem_fun(&context->options->gen, context->options->gen.memmap, context->options->gen.memmap_chunks, WRITE_16, NULL);
-	code_ptr new_write8 = gen_mem_fun(&context->options->gen, context->options->gen.memmap, context->options->gen.memmap_chunks, WRITE_8, NULL);
+	code_ptr new_write16 = gen_mem_fun(&context->opts->gen, context->opts->gen.memmap, context->opts->gen.memmap_chunks, WRITE_16, NULL);
+	code_ptr new_write8 = gen_mem_fun(&context->opts->gen, context->opts->gen.memmap, context->opts->gen.memmap_chunks, WRITE_8, NULL);
 
 	//patch old write handlers to point to the new ones
 	code_info code = {
-		.cur = context->options->write_16,
-		.last = context->options->write_16 + 256
+		.cur = context->opts->write_16,
+		.last = context->opts->write_16 + 256
 	};
 	jmp(&code, new_write16);
-	code.cur = context->options->write_8;
+	code.cur = context->opts->write_8;
 	code.last = code.cur + 256;
 	jmp(&code, new_write8);
-	context->options->write_16 = new_write16;
-	context->options->write_8 = new_write8;
+	context->opts->write_16 = new_write16;
+	context->opts->write_8 = new_write8;
 }
 
 void m68k_add_watchpoint(m68k_context *context, uint32_t address, uint32_t size)
@@ -933,7 +933,7 @@ void m68k_add_watchpoint(m68k_context *context, uint32_t address, uint32_t size)
 		context->wp_storage = context->wp_storage ? context->wp_storage * 2 : 4;
 		context->watchpoints = realloc(context->watchpoints, context->wp_storage * sizeof(m68k_watchpoint));
 	}
-	const memmap_chunk *chunk = find_map_chunk(address, &context->options->gen, 0, NULL);
+	const memmap_chunk *chunk = find_map_chunk(address, &context->opts->gen, 0, NULL);
 	context->watchpoints[context->num_watchpoints++] = (m68k_watchpoint){
 		.start = address,
 		.end = end,
@@ -1077,7 +1077,7 @@ static impl_info m68k_impls[] = {
 
 static void translate_m68k(m68k_context *context, m68kinst * inst)
 {
-	m68k_options * opts = context->options;
+	m68k_options * opts = context->opts;
 	if (inst->address & 1) {
 		translate_m68k_odd(opts, inst);
 		return;
@@ -1135,13 +1135,13 @@ static void translate_m68k(m68k_context *context, m68kinst * inst)
 uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext)
 {
 	m68k_context *context = vcontext;
-	return read_word(address, (void **)context->mem_pointers, &context->options->gen, context);
+	return read_word(address, (void **)context->mem_pointers, &context->opts->gen, context);
 }
 
 void translate_m68k_stream(uint32_t address, m68k_context * context)
 {
 	m68kinst instbuf;
-	m68k_options * opts = context->options;
+	m68k_options * opts = context->opts;
 	code_info *code = &opts->gen.code;
 	if(get_native_address(opts, address)) {
 		return;
@@ -1214,10 +1214,10 @@ void translate_m68k_stream(uint32_t address, m68k_context * context)
 
 void * m68k_retranslate_inst(uint32_t address, m68k_context * context)
 {
-	m68k_options * opts = context->options;
+	m68k_options * opts = context->opts;
 	code_info *code = &opts->gen.code;
 	uint8_t orig_size = get_native_inst_size(opts, address);
-	code_ptr orig_start = get_native_address(context->options, address);
+	code_ptr orig_start = get_native_address(context->opts, address);
 	uint32_t orig = address;
 	code_info orig_code = {orig_start, orig_start + orig_size + 5, 0};
 	m68kinst instbuf;
@@ -1290,10 +1290,10 @@ void * m68k_retranslate_inst(uint32_t address, m68k_context * context)
 
 code_ptr get_native_address_trans(m68k_context * context, uint32_t address)
 {
-	code_ptr ret = get_native_address(context->options, address);
+	code_ptr ret = get_native_address(context->opts, address);
 	if (!ret) {
 		translate_m68k_stream(address, context);
-		ret = get_native_address(context->options, address);
+		ret = get_native_address(context->opts, address);
 	}
 	return ret;
 }
@@ -1310,21 +1310,21 @@ void remove_breakpoint(m68k_context * context, uint32_t address)
 			break;
 		}
 	}
-	code_ptr native = get_native_address(context->options, address);
+	code_ptr native = get_native_address(context->opts, address);
 	if (!native) {
 		return;
 	}
-	code_info tmp = context->options->gen.code;
-	context->options->gen.code.cur = native;
-	context->options->gen.code.last = native + MAX_NATIVE_SIZE;
-	check_cycles_int(&context->options->gen, address);
-	context->options->gen.code = tmp;
+	code_info tmp = context->opts->gen.code;
+	context->opts->gen.code.cur = native;
+	context->opts->gen.code.last = native + MAX_NATIVE_SIZE;
+	check_cycles_int(&context->opts->gen, address);
+	context->opts->gen.code = tmp;
 }
 
 void start_68k_context(m68k_context * context, uint32_t address)
 {
 	code_ptr addr = get_native_address_trans(context, address);
-	m68k_options * options = context->options;
+	m68k_options * options = context->opts;
 	options->start_context(addr, context);
 }
 
@@ -1334,7 +1334,7 @@ void resume_68k(m68k_context *context)
 	if (!context->stack_storage_count) {
 		context->resume_pc = NULL;
 	}
-	m68k_options * options = context->options;
+	m68k_options * options = context->opts;
 	context->should_return = 0;
 	options->start_context(addr, context);
 }
@@ -1342,7 +1342,7 @@ void resume_68k(m68k_context *context)
 void m68k_reset(m68k_context * context)
 {
 	//TODO: Actually execute the M68K reset vector rather than simulating some of its behavior
-	uint16_t *reset_vec = get_native_pointer(0, (void **)context->mem_pointers, &context->options->gen);
+	uint16_t *reset_vec = get_native_pointer(0, (void **)context->mem_pointers, &context->opts->gen);
 	if (!(context->status & 0x20)) {
 		//switching from user to system mode so swap stack pointers
 		context->aregs[8] = context->aregs[7];
@@ -1353,7 +1353,7 @@ void m68k_reset(m68k_context * context)
 	context->aregs[7] = ((uint32_t)reset_vec[0]) << 16 | reset_vec[1];
 	uint32_t address = ((uint32_t)reset_vec[2]) << 16 | reset_vec[3];
 	//interrupt mask may have changed so force a sync
-	context->options->sync_components(context, address);
+	context->opts->sync_components(context, address);
 	start_68k_context(context, address);
 }
 
@@ -1381,7 +1381,7 @@ void m68k_options_free(m68k_options *opts)
 m68k_context * init_68k_context(m68k_options * opts, m68k_reset_handler reset_handler)
 {
 	m68k_context * context = calloc(1, sizeof(m68k_context) + ram_size(&opts->gen) / (1 << opts->gen.ram_flags_shift) / 8);
-	context->options = opts;
+	context->opts = opts;
 	context->int_cycle = CYCLE_NEVER;
 	context->status = 0x27;
 	context->reset_handler = (code_ptr)reset_handler;
@@ -1405,7 +1405,7 @@ void m68k_serialize(m68k_context *context, uint32_t pc, serialize_buffer *buf)
 		sr |= context->flags[flag] != 0;
 	}
 	save_int16(buf, sr);
-	save_int32(buf, context->current_cycle);
+	save_int32(buf, context->cycles);
 	save_int32(buf, context->int_cycle);
 	save_int8(buf, context->int_num);
 	save_int8(buf, context->int_pending);
@@ -1432,7 +1432,7 @@ void m68k_deserialize(deserialize_buffer *buf, void *vcontext)
 		context->flags[flag] = sr & 1;
 		sr >>= 1;
 	}
-	context->current_cycle = load_int32(buf);
+	context->cycles = load_int32(buf);
 	context->int_cycle = load_int32(buf);
 	context->int_num = load_int8(buf);
 	context->int_pending = load_int8(buf);

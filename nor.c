@@ -69,7 +69,7 @@ uint8_t nor_flash_read_b(uint32_t address, void *vcontext)
 		address = address >> 1;
 	}
 	
-	nor_run(state, m68k, m68k->current_cycle);
+	nor_run(state, m68k, m68k->cycles);
 	switch (state->mode)
 	{
 	case NOR_NORMAL:
@@ -142,14 +142,14 @@ void *nor_flash_write_b(uint32_t address, void *vcontext, uint8_t value)
 		address = address >> 1;
 	}
 	
-	nor_run(state, m68k, m68k->current_cycle);
+	nor_run(state, m68k, m68k->cycles);
 	switch (state->cmd_state)
 	{
 	case NOR_CMD_IDLE:
 		if (value == 0xAA && (address & (state->size - 1)) == state->cmd_address1) {
 			state->cmd_state = NOR_CMD_AA;
 		} else {
-			nor_write_byte(state, address, value, m68k->current_cycle);
+			nor_write_byte(state, address, value, m68k->cycles);
 			state->cmd_state = NOR_CMD_IDLE;
 		}
 		break;
@@ -157,8 +157,8 @@ void *nor_flash_write_b(uint32_t address, void *vcontext, uint8_t value)
 		if (value == 0x55 && (address & (state->size - 1)) == state->cmd_address2) {
 			state->cmd_state = NOR_CMD_55;
 		} else {
-			nor_write_byte(state, state->cmd_address1, 0xAA, m68k->current_cycle);
-			nor_write_byte(state, address, value, m68k->current_cycle);
+			nor_write_byte(state, state->cmd_address1, 0xAA, m68k->cycles);
+			nor_write_byte(state, address, value, m68k->cycles);
 			state->cmd_state = NOR_CMD_IDLE;
 		}
 		break;
@@ -200,9 +200,9 @@ void *nor_flash_write_b(uint32_t address, void *vcontext, uint8_t value)
 				}
 			}
 		} else {
-			nor_write_byte(state, state->cmd_address1, 0xAA, m68k->current_cycle);
-			nor_write_byte(state, state->cmd_address2, 0x55, m68k->current_cycle);
-			nor_write_byte(state, address, value, m68k->current_cycle);
+			nor_write_byte(state, state->cmd_address1, 0xAA, m68k->cycles);
+			nor_write_byte(state, state->cmd_address2, 0x55, m68k->cycles);
+			nor_write_byte(state, address, value, m68k->cycles);
 		}
 		state->cmd_state = NOR_CMD_IDLE;
 		break;

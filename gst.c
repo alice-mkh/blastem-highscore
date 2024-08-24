@@ -86,10 +86,14 @@ uint32_t m68k_load_gst(m68k_context * context, FILE * gstfile)
 	uint32_t pc = read_le_32(buffer + GST_68K_PC_OFFSET);
 	uint16_t sr = read_le_16(buffer + GST_68K_SR_OFFSET);
 	context->status = sr >> 8;
+#ifdef NEW_CORE
+	//TODO: implement me
+#else
 	for (int flag = 4; flag >= 0; flag--) {
 		context->flags[flag] = sr & 1;
 		sr >>= 1;
 	}
+#endif
 	if (context->status & (1 << 5)) {
 		context->aregs[8] = read_le_32(buffer + GST_68K_USP_OFFSET);
 	} else {
@@ -113,10 +117,14 @@ uint8_t m68k_save_gst(m68k_context * context, uint32_t pc, FILE * gstfile)
 	}
 	write_le_32(buffer + GST_68K_PC_OFFSET, pc);
 	uint16_t sr = context->status << 3;
+#ifdef NEW_CORE
+	//TODO: implement me
+#else
 	for (int flag = 4; flag >= 0; flag--) {
 		sr <<= 1;
 		sr |= context->flags[flag];
 	}
+#endif
 	write_le_16(buffer + GST_68K_SR_OFFSET, sr);
 	if (context->status & (1 << 5)) {
 		write_le_32(buffer + GST_68K_USP_OFFSET, context->aregs[8]);
@@ -412,7 +420,9 @@ uint8_t ym_save_gst(ym2612_context * context, FILE * gstfile)
 	return 1;
 }
 
+#ifndef NEW_CORE
 #include "m68k_internal.h" //needed for get_native_address_trans, should be eliminated once handling of PC is cleaned up
+#endif
 uint32_t load_gst(genesis_context * gen, char * fname)
 {
 	char buffer[4096];
@@ -462,7 +472,11 @@ uint32_t load_gst(genesis_context * gen, char * fname)
 			i++;
 		}
 	}
+#ifdef NEW_CORE
+	gen->m68k->pc = pc;
+#else
 	gen->m68k->resume_pc = get_native_address_trans(gen->m68k, pc);
+#endif
 	fclose(gstfile);
 	return pc;
 
