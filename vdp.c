@@ -794,13 +794,16 @@ static void scan_sprite_table(uint32_t line, vdp_context * context)
 static void scan_sprite_table_mode4(vdp_context * context)
 {
 	if (context->sprite_index < MAX_SPRITES_FRAME_H32) {
-		uint32_t line = context->vcounter;
+		int16_t line = context->vcounter;
 		line &= 0xFF;
+		if (line > context->inactive_start) {
+			line -= 0x100;
+		}
 
 		uint32_t sat_address = mode4_address_map[(context->regs[REG_SAT] << 7 & 0x3F00) + context->sprite_index];
-		uint32_t y = context->vdpmem[sat_address+1];
+		int16_t y = context->vdpmem[sat_address+1];
 		uint32_t size = (context->regs[REG_MODE_2] & BIT_SPRITE_SZ) ? 16 : 8;
-		uint32_t ysize = size;
+		int16_t ysize = size;
 		uint8_t zoom = context->type != VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_SPRITE_ZM);
 		if (zoom) {
 			ysize *= 2;
@@ -810,6 +813,9 @@ static void scan_sprite_table_mode4(vdp_context * context)
 			context->sprite_index = MAX_SPRITES_FRAME_H32;
 			return;
 		} else {
+			if (y > context->inactive_start) {
+				y -= 0x100;
+			}
 			if (y <= line && line < (y + ysize)) {
 				if (!context->slot_counter) {
 					context->sprite_index = MAX_SPRITES_FRAME_H32;
@@ -829,6 +835,9 @@ static void scan_sprite_table_mode4(vdp_context * context)
 				context->sprite_index = MAX_SPRITES_FRAME_H32;
 				return;
 			} else {
+				if (y > context->inactive_start) {
+					y -= 0x100;
+				}
 				if (y <= line && line < (y + ysize)) {
 					if (!context->slot_counter) {
 						context->sprite_index = MAX_SPRITES_FRAME_H32;
@@ -919,7 +928,11 @@ static void read_sprite_x_mode4(vdp_context * context)
 		if (context->regs[REG_MODE_2] & BIT_SPRITE_SZ) {
 			tile_address &= ~32;
 		}
-		uint16_t y_diff = context->vcounter - context->sprite_info_list[context->cur_slot].y;
+		int16_t line = context->vcounter & 0xFF;
+		if (context->vcounter > context->inactive_start) {
+			line -= 0x100;
+		}
+		uint16_t y_diff = line - context->sprite_info_list[context->cur_slot].y;
 		if (zoom) {
 			y_diff >>= 1;
 		}
