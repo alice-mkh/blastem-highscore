@@ -1591,7 +1591,7 @@ static void render_testreg(vdp_context *context, int32_t col, uint8_t *dst, uint
 			pixel = context->regs[REG_BG_COLOR] & 0x3F;
 			for (int i = 0; i < 16; i++)
 			{
-				*(dst++) = pixel; //TODO: confirm this on hardware
+				*(dst++) = pixel; //Behavior confirmed on hardware by vladikcomper
 				*(debug_dst++) = DBG_SRC_BG;
 			}
 			break;
