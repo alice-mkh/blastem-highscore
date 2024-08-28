@@ -2084,6 +2084,35 @@ static void vdp_advance_line(vdp_context *context)
 			&& line < (context->inactive_start + context->border_bot + context->border_top)
 		) {
 			uint32_t *fb = context->debug_fbs[DEBUG_COMPOSITE] + context->debug_fb_pitch[DEBUG_COMPOSITE] * line / sizeof(uint32_t);
+			if (is_mode_5) {
+				uint32_t left, right;
+				uint16_t top_line, bottom_line;
+				if (context->regs[REG_WINDOW_V] & WINDOW_DOWN) {
+					top_line = ((context->regs[REG_WINDOW_V] & 0x1F) << 3) + context->border_top;
+					bottom_line = context->inactive_start + context->border_top;
+				} else {
+					top_line = context->border_top;
+					bottom_line = ((context->regs[REG_WINDOW_V] & 0x1F) << 3) + context->border_top;
+				}
+				if (line >= top_line && line < bottom_line) {
+					left = 0;
+					right = 320 + BORDER_LEFT + BORDER_RIGHT;
+				} else if (context->regs[REG_WINDOW_H] & WINDOW_RIGHT) {
+					left = (context->regs[REG_WINDOW_H] & 0x1F) * 16 + BORDER_LEFT;
+					right = 320 + BORDER_LEFT + BORDER_RIGHT;
+				} else {
+					left = 0;
+					right = (context->regs[REG_WINDOW_H] & 0x1F) * 16 + BORDER_LEFT;
+				}
+				for (uint32_t i = left; i < right; i++)
+				{
+					uint8_t src = context->layer_debug_buf[i] & DBG_SRC_MASK;
+					if (src == DBG_SRC_A) {
+						context->layer_debug_buf[i] &= ~DBG_SRC_MASK;
+						context->layer_debug_buf[i] |= DBG_SRC_W;
+					}
+				}
+			}
 			for (int i = 0; i < LINEBUF_SIZE; i++)
 			{
 				*(fb++) = context->debugcolors[context->layer_debug_buf[i]];
