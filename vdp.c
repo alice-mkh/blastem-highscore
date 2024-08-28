@@ -1583,13 +1583,15 @@ static void render_highlight(vdp_context *context, int32_t col, uint8_t *dst, ui
 
 static void render_testreg(vdp_context *context, int32_t col, uint8_t *dst, uint8_t *debug_dst, uint8_t *buf_a, int plane_a_off, int plane_a_mask, int plane_b_off, uint8_t output_disabled, uint8_t test_layer)
 {
+	uint8_t pixel;
 	if (output_disabled) {
 		switch (test_layer)
 		{
 		case 0:
+			pixel = context->regs[REG_BG_COLOR] & 0x3F;
 			for (int i = 0; i < 16; i++)
 			{
-				*(dst++) = 0x3F; //TODO: confirm this on hardware
+				*(dst++) = pixel; //TODO: confirm this on hardware
 				*(debug_dst++) = DBG_SRC_BG;
 			}
 			break;
@@ -1622,7 +1624,7 @@ static void render_testreg(vdp_context *context, int32_t col, uint8_t *dst, uint
 		uint8_t *sprite_buf = context->linebuf + col * 8;
 		if (!col && (context->regs[REG_MODE_1] & BIT_COL0_MASK)) {
 			//TODO: Confirm how test register interacts with column 0 blanking
-			uint8_t pixel = 0x3F;
+			pixel = 0x3F;
 			uint8_t src = DBG_SRC_BG;
 			for (int i = 0; i < 8; ++i)
 			{
@@ -1662,7 +1664,7 @@ static void render_testreg(vdp_context *context, int32_t col, uint8_t *dst, uint
 			plane_a = buf_a[plane_a_off & plane_a_mask];
 			plane_b = context->tmp_buf_b[plane_b_off & SCROLL_BUFFER_MASK];
 			sprite = *sprite_buf;
-			uint8_t pixel = composite_normal(context, debug_dst, sprite, plane_a, plane_b, 0x3F) & 0x3F;
+			pixel = composite_normal(context, debug_dst, sprite, plane_a, plane_b, 0x3F) & 0x3F;
 			switch (test_layer)
 			{
 			case 1:
@@ -1744,6 +1746,12 @@ static void render_testreg_highlight(vdp_context *context, int32_t col, uint8_t 
 		}
 		switch (test_layer)
 		{
+		case 0:
+			if (output_disabled) {
+				pixel.index &= context->regs[REG_BG_COLOR];
+				*debug_dst = DBG_SRC_BG;
+			}
+			break;
 		case 1:
 			pixel.index &= sprite;
 			if (pixel.index) {
