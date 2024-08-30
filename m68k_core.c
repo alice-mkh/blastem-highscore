@@ -1278,6 +1278,8 @@ void * m68k_retranslate_inst(uint32_t address, m68k_context * context)
 		code_info tmp = *code;
 		*code = orig_code;
 		translate_m68k(context, &instbuf);
+		// 68K instruction may not be the same size as the one when we initial switched to a new native address
+		map_native_address(context, instbuf.address, orig_start, after_address - orig, MAX_NATIVE_SIZE);
 		orig_code = *code;
 		*code = tmp;
 		if (!m68k_is_terminal(&instbuf)) {
