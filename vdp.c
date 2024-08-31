@@ -3836,6 +3836,9 @@ static void tms_sprite_name(vdp_context *context)
 	address = context->vdpmem[mode4_address_map[address] ^ 1] << 3;
 	address |= context->regs[REG_STILE_BASE] << 11 & 0x3800;
 	uint8_t diff = context->vcounter + 1 - context->sprite_info_list[context->sprite_index].y;
+	if (context->regs[REG_MODE_2] & BIT_SPRITE_ZM) {
+		diff >>= 1;
+	}
 	address += diff;
 	context->sprite_draw_list[context->sprite_index].address = address;
 }
@@ -3897,7 +3900,9 @@ static uint8_t tms_sprite_clock(vdp_context *context, int16_t offset)
 					output = context->sprite_draw_list[i].pal_priority;
 				}
 			}
-			context->sprite_draw_list[i].address <<= 1;
+			if (!(context->regs[REG_MODE_2] & BIT_SPRITE_SZ) || ((x - context->sprite_draw_list[i].x_pos) & 1)) {
+				context->sprite_draw_list[i].address <<= 1;
+			}
 		}
 	}
 	return output;
@@ -4055,7 +4060,12 @@ static void tms_composite(vdp_context *context)
 
 #define TMS_SPRITE_SCAN_SLOT(slot) \
 	case slot:\
-		if (context->hslot >= (520 - BORDER_LEFT) / 2) { tms_border(context); }\
+		if (context->hslot >= (520 - BORDER_LEFT) / 2) {\
+			tms_border(context);\
+		} else {\
+			tms_sprite_clock(context, 0);\
+			tms_sprite_clock(context, 1);\
+		}\
 		tms_sprite_scan(context);\
 		TMS_CHECK_LIMIT
 
