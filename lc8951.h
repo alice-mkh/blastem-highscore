@@ -47,5 +47,6 @@ void lc8951_resume_transfer(lc8951 *context);
 void lc8951_adjust_cycles(lc8951 *context, uint32_t deduction);
 void lc8951_serialize(lc8951 *context, serialize_buffer *buf);
 void lc8951_deserialize(deserialize_buffer *buf, void *vcontext);
+uint8_t lc8951_dtbsy_state(lc8951 *context);
 
 #endif //LC8951_H_

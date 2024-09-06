@@ -484,3 +484,8 @@ void lc8951_deserialize(deserialize_buffer *buf, void *vcontext)
 	context->triggered = load_int8(buf);
 	context->sync_counter = load_int8(buf);
 }
+
+uint8_t lc8951_dtbsy_state(lc8951 *context)
+{
+	return (context->regs[IFSTAT] & BIT_DTBSY) ? 1 : 0;
+}
