@@ -794,13 +794,16 @@ static void scan_sprite_table(uint32_t line, vdp_context * context)
 static void scan_sprite_table_mode4(vdp_context * context)
 {
 	if (context->sprite_index < MAX_SPRITES_FRAME_H32) {
-		uint32_t line = context->vcounter;
+		int16_t line = context->vcounter;
 		line &= 0xFF;
+		if (line > context->inactive_start) {
+			line -= 0x100;
+		}
 
 		uint32_t sat_address = mode4_address_map[(context->regs[REG_SAT] << 7 & 0x3F00) + context->sprite_index];
-		uint32_t y = context->vdpmem[sat_address+1];
+		int16_t y = context->vdpmem[sat_address+1];
 		uint32_t size = (context->regs[REG_MODE_2] & BIT_SPRITE_SZ) ? 16 : 8;
-		uint32_t ysize = size;
+		int16_t ysize = size;
 		uint8_t zoom = context->type != VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_SPRITE_ZM);
 		if (zoom) {
 			ysize *= 2;
@@ -810,6 +813,9 @@ static void scan_sprite_table_mode4(vdp_context * context)
 			context->sprite_index = MAX_SPRITES_FRAME_H32;
 			return;
 		} else {
+			if (y > context->inactive_start) {
+				y -= 0x100;
+			}
 			if (y <= line && line < (y + ysize)) {
 				if (!context->slot_counter) {
 					context->sprite_index = MAX_SPRITES_FRAME_H32;
@@ -829,6 +835,9 @@ static void scan_sprite_table_mode4(vdp_context * context)
 				context->sprite_index = MAX_SPRITES_FRAME_H32;
 				return;
 			} else {
+				if (y > context->inactive_start) {
+					y -= 0x100;
+				}
 				if (y <= line && line < (y + ysize)) {
 					if (!context->slot_counter) {
 						context->sprite_index = MAX_SPRITES_FRAME_H32;
@@ -919,7 +928,11 @@ static void read_sprite_x_mode4(vdp_context * context)
 		if (context->regs[REG_MODE_2] & BIT_SPRITE_SZ) {
 			tile_address &= ~32;
 		}
-		uint16_t y_diff = context->vcounter - context->sprite_info_list[context->cur_slot].y;
+		int16_t line = context->vcounter & 0xFF;
+		if (context->vcounter > context->inactive_start) {
+			line -= 0x100;
+		}
+		uint16_t y_diff = line - context->sprite_info_list[context->cur_slot].y;
 		if (zoom) {
 			y_diff >>= 1;
 		}
@@ -1583,13 +1596,15 @@ static void render_highlight(vdp_context *context, int32_t col, uint8_t *dst, ui
 
 static void render_testreg(vdp_context *context, int32_t col, uint8_t *dst, uint8_t *debug_dst, uint8_t *buf_a, int plane_a_off, int plane_a_mask, int plane_b_off, uint8_t output_disabled, uint8_t test_layer)
 {
+	uint8_t pixel;
 	if (output_disabled) {
 		switch (test_layer)
 		{
 		case 0:
+			pixel = context->regs[REG_BG_COLOR] & 0x3F;
 			for (int i = 0; i < 16; i++)
 			{
-				*(dst++) = 0x3F; //TODO: confirm this on hardware
+				*(dst++) = pixel; //Behavior confirmed on hardware by vladikcomper
 				*(debug_dst++) = DBG_SRC_BG;
 			}
 			break;
@@ -1622,7 +1637,7 @@ static void render_testreg(vdp_context *context, int32_t col, uint8_t *dst, uint
 		uint8_t *sprite_buf = context->linebuf + col * 8;
 		if (!col && (context->regs[REG_MODE_1] & BIT_COL0_MASK)) {
 			//TODO: Confirm how test register interacts with column 0 blanking
-			uint8_t pixel = 0x3F;
+			pixel = 0x3F;
 			uint8_t src = DBG_SRC_BG;
 			for (int i = 0; i < 8; ++i)
 			{
@@ -1662,7 +1677,7 @@ static void render_testreg(vdp_context *context, int32_t col, uint8_t *dst, uint
 			plane_a = buf_a[plane_a_off & plane_a_mask];
 			plane_b = context->tmp_buf_b[plane_b_off & SCROLL_BUFFER_MASK];
 			sprite = *sprite_buf;
-			uint8_t pixel = composite_normal(context, debug_dst, sprite, plane_a, plane_b, 0x3F) & 0x3F;
+			pixel = composite_normal(context, debug_dst, sprite, plane_a, plane_b, 0x3F) & 0x3F;
 			switch (test_layer)
 			{
 			case 1:
@@ -1744,6 +1759,12 @@ static void render_testreg_highlight(vdp_context *context, int32_t col, uint8_t 
 		}
 		switch (test_layer)
 		{
+		case 0:
+			if (output_disabled) {
+				pixel.index &= context->regs[REG_BG_COLOR];
+				*debug_dst = DBG_SRC_BG;
+			}
+			break;
 		case 1:
 			pixel.index &= sprite;
 			if (pixel.index) {
@@ -2076,6 +2097,35 @@ static void vdp_advance_line(vdp_context *context)
 			&& line < (context->inactive_start + context->border_bot + context->border_top)
 		) {
 			uint32_t *fb = context->debug_fbs[DEBUG_COMPOSITE] + context->debug_fb_pitch[DEBUG_COMPOSITE] * line / sizeof(uint32_t);
+			if (is_mode_5) {
+				uint32_t left, right;
+				uint16_t top_line, bottom_line;
+				if (context->regs[REG_WINDOW_V] & WINDOW_DOWN) {
+					top_line = ((context->regs[REG_WINDOW_V] & 0x1F) << 3) + context->border_top;
+					bottom_line = context->inactive_start + context->border_top;
+				} else {
+					top_line = context->border_top;
+					bottom_line = ((context->regs[REG_WINDOW_V] & 0x1F) << 3) + context->border_top;
+				}
+				if (line >= top_line && line < bottom_line) {
+					left = 0;
+					right = 320 + BORDER_LEFT + BORDER_RIGHT;
+				} else if (context->regs[REG_WINDOW_H] & WINDOW_RIGHT) {
+					left = (context->regs[REG_WINDOW_H] & 0x1F) * 16 + BORDER_LEFT;
+					right = 320 + BORDER_LEFT + BORDER_RIGHT;
+				} else {
+					left = 0;
+					right = (context->regs[REG_WINDOW_H] & 0x1F) * 16 + BORDER_LEFT;
+				}
+				for (uint32_t i = left; i < right; i++)
+				{
+					uint8_t src = context->layer_debug_buf[i] & DBG_SRC_MASK;
+					if (src == DBG_SRC_A) {
+						context->layer_debug_buf[i] &= ~DBG_SRC_MASK;
+						context->layer_debug_buf[i] |= DBG_SRC_W;
+					}
+				}
+			}
 			for (int i = 0; i < LINEBUF_SIZE; i++)
 			{
 				*(fb++) = context->debugcolors[context->layer_debug_buf[i]];
@@ -3786,6 +3836,9 @@ static void tms_sprite_name(vdp_context *context)
 	address = context->vdpmem[mode4_address_map[address] ^ 1] << 3;
 	address |= context->regs[REG_STILE_BASE] << 11 & 0x3800;
 	uint8_t diff = context->vcounter + 1 - context->sprite_info_list[context->sprite_index].y;
+	if (context->regs[REG_MODE_2] & BIT_SPRITE_ZM) {
+		diff >>= 1;
+	}
 	address += diff;
 	context->sprite_draw_list[context->sprite_index].address = address;
 }
@@ -3847,7 +3900,9 @@ static uint8_t tms_sprite_clock(vdp_context *context, int16_t offset)
 					output = context->sprite_draw_list[i].pal_priority;
 				}
 			}
-			context->sprite_draw_list[i].address <<= 1;
+			if (!(context->regs[REG_MODE_2] & BIT_SPRITE_SZ) || ((x - context->sprite_draw_list[i].x_pos) & 1)) {
+				context->sprite_draw_list[i].address <<= 1;
+			}
 		}
 	}
 	return output;
@@ -4005,7 +4060,12 @@ static void tms_composite(vdp_context *context)
 
 #define TMS_SPRITE_SCAN_SLOT(slot) \
 	case slot:\
-		if (context->hslot >= (520 - BORDER_LEFT) / 2) { tms_border(context); }\
+		if (context->hslot >= (520 - BORDER_LEFT) / 2) {\
+			tms_border(context);\
+		} else {\
+			tms_sprite_clock(context, 0);\
+			tms_sprite_clock(context, 1);\
+		}\
 		tms_sprite_scan(context);\
 		TMS_CHECK_LIMIT
 

@@ -1827,6 +1827,11 @@ void render_fill_rect(uint8_t window, uint8_t r, uint8_t g, uint8_t b, int x, in
 	}
 #ifndef DISABLE_OPENGL
 	else {
+		if (!extra->image_vertices) {
+			extra->image_vertices = malloc(sizeof(vertex_data_default));
+			SDL_GL_MakeCurrent(extra->win, extra->gl_context);
+			glGenBuffers(1, &extra->image_buffer);
+		}
 		extra_update_verts(extra, x, y, width, height);
 		extra->color[0] = b;
 		extra->color[1] = g;

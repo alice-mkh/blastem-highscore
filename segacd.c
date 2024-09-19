@@ -856,7 +856,7 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		lc8951_ar_write(&cd->cdc, value);
 		//cd->gate_array[reg] &= 0xC000;
 		uint16_t old_dest = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
-		//apparently this clears EDT, should it also clear DSR?
+		//clears both EDT and DSR
 		cd->gate_array[reg] = value & 0x0700;
 		uint16_t dest = cd->gate_array[GA_CDC_CTRL] >> 8 & 0x7;
 		if (dest != old_dest) {
@@ -878,11 +878,18 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cdd_run(cd, m68k->cycles);
 		printf("CDC write %X: %X @ %u\n", cd->cdc.ar, value, m68k->cycles);
 		if (cd->cdc.ar == 6) {
+			//this next bit needs hardware confirmation
 			cd->cdc_dst_low = 0;
-			//TODO: Confirm if DSR is cleared here on hardware
-			cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
 		}
 		lc8951_reg_write(&cd->cdc, value);
+		if (!lc8951_dtbsy_state(&cd->cdc)) {
+			//new transfer has started, this clears EDT
+			cd->gate_array[GA_CDC_CTRL] &= ~BIT_EDT;
+			//DSR does not seem to be cleared on hardware
+			//but doing this seems to fix Penn & Teller's Smoke and Mirrors
+			//needs more research
+			cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
+		}
 		calculate_target_cycle(m68k);
 		break;
 	case GA_CDC_HOST_DATA:
@@ -893,8 +900,6 @@ static void *sub_gate_write16(uint32_t address, void *vcontext, uint16_t value)
 		cdd_run(cd, m68k->cycles);
 		cd->gate_array[reg] = value;
 		cd->cdc_dst_low = 0;
-		//TODO: Confirm if DSR is cleared here on hardware
-		cd->gate_array[GA_CDC_CTRL] &= ~BIT_DSR;
 		break;
 	case GA_STOP_WATCH:
 		//docs say you should only write zero to reset
