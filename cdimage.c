@@ -98,46 +98,37 @@ static uint8_t bin_seek(system_media *media, uint32_t sector)
 	media->cur_sector = sector;
 	uint32_t lba = sector;
 	uint32_t track;
+	uint32_t rel;
 	for (track = 0; track < media->num_tracks; track++)
 	{
-		if (lba < media->tracks[track].fake_pregap) {
+		rel = lba - media->tracks[track].pregap_lba;
+		if (rel < media->tracks[track].fake_pregap) {
 			media->in_fake_pregap = media->tracks[track].type == TRACK_DATA ? FAKE_DATA : FAKE_AUDIO;
-			break;
-		}
-		lba -= media->tracks[track].fake_pregap;
-		if (lba < media->tracks[track].start_lba) {
-			if (media->tracks[track].fake_pregap) {
-				media->in_fake_pregap = media->tracks[track].type == TRACK_DATA ? FAKE_DATA : FAKE_AUDIO;
-			} else {
-				media->in_fake_pregap = 0;
-			}
 			break;
 		}
 		if (lba < media->tracks[track].end_lba) {
 			media->in_fake_pregap = 0;
+			rel -= media->tracks[track].fake_pregap;
 			break;
 		}
 	}
 	if (track < media->num_tracks) {
 		media->cur_track = track;
 		if (!media->in_fake_pregap) {
-			if (track) {
-				lba -= media->tracks[track - 1].end_lba;
-			}
 			if (media->tracks[track].flac) {
-				flac_seek(media->tracks[track].flac, (media->tracks[track].file_offset + lba * media->tracks[track].sector_bytes) / 4);
+				flac_seek(media->tracks[track].flac, (media->tracks[track].file_offset + rel * media->tracks[track].sector_bytes) / 4);
 			} else {
 				if (media->tracks[track].has_subcodes) {
 					if (!media->tmp_buffer) {
 						media->tmp_buffer = calloc(1, 96);
 					}
-					fseek(media->tracks[track].f, media->tracks[track].file_offset + (lba + 1) * media->tracks[track].sector_bytes - 96, SEEK_SET);
+					fseek(media->tracks[track].f, media->tracks[track].file_offset + (rel + 1) * media->tracks[track].sector_bytes - 96, SEEK_SET);
 					int bytes = fread(media->tmp_buffer, 1, 96, media->tracks[track].f);
 					if (bytes != 96) {
 						fprintf(stderr, "Only read %d subcode bytes\n", bytes);
 					}
 				}
-				fseek(media->tracks[track].f, media->tracks[track].file_offset + lba * media->tracks[track].sector_bytes, SEEK_SET);
+				fseek(media->tracks[track].f, media->tracks[track].file_offset + rel * media->tracks[track].sector_bytes, SEEK_SET);
 			}
 		}
 		if (media->tracks[track].type == TRACK_DATA) {
@@ -214,6 +205,25 @@ static uint8_t bin_subcode_read(system_media *media, uint32_t offset)
 	return media->tmp_buffer[offset];
 }
 
+static void print_toc(system_media *media)
+{
+	track_info * tracks = media->tracks;
+	for (uint32_t i = 0; i < media->num_tracks; i++)
+	{
+		uint32_t m,s,f;
+		f = tracks[i].pregap_lba % 75;
+		s = tracks[i].pregap_lba / 75;
+		m = s / 60;
+		s = s % 60;
+		printf("Track %02u - Index 0 %02u:%02u:%02u, Index 1 ", i + 1, m, s, f);
+		f = tracks[i].start_lba % 75;
+		s = tracks[i].start_lba / 75;
+		m = s / 60;
+		s = s % 60;
+		printf("%02u:%02u:%02u, Fake Pregap: %u\n", m, s, f, tracks[i].fake_pregap);
+	}
+}
+
 uint8_t parse_cue(system_media *media)
 {
 	char *line = media->buffer;
@@ -254,7 +264,6 @@ uint8_t parse_cue(system_media *media)
 				}
 				tracks[track].f = f;
 				tracks[track].flac = flac;
-
 
 				cmd = cmd_start(end);
 				if (*cmd) {
@@ -297,6 +306,17 @@ uint8_t parse_cue(system_media *media)
 							fname[dirlen] = PATH_SEP[0];
 							memcpy(fname + dirlen + 1, cmd, end-cmd);
 							fname[dirlen + 1 + (end-cmd)] = 0;
+						}
+						
+						if (track_of_file >= 0) {
+							long track_size = 0;
+							if (flac) {
+								track_size = flac->total_samples * 4;
+							} else if (f) {
+								track_size = file_size(f);
+							}
+							track_size -= tracks[track].file_offset;
+							tracks[track].end_lba = tracks[track].pregap_lba + tracks[track].fake_pregap + track_size / tracks[track].sector_bytes;
 						}
 						flac = NULL;
 						f = fopen(fname, "rb");
@@ -348,32 +368,63 @@ uint8_t parse_cue(system_media *media)
 					char *after;
 					int index = strtol(cmd + 6, &after, 10);
 					uint8_t has_start_lba = 0;
-					uint32_t start_lba;
+					uint32_t start_lba = timecode_to_lba(after);
 					if (!index) {
-						tracks[track].pregap_lba = start_lba = timecode_to_lba(after);
+						tracks[track].file_offset = start_lba * tracks[track].sector_bytes + extra_offset;
+						if (track > 0) {
+							if (track_of_file > 0) {
+								//Previous track end is implicit based on this index position
+								uint32_t last_track_size = tracks[track].file_offset - tracks[track-1].file_offset;
+								last_track_size /= tracks[track-1].sector_bytes;
+								tracks[track-1].end_lba = tracks[track-1].pregap_lba + tracks[track-1].fake_pregap + last_track_size;
+							}
+							tracks[track].pregap_lba = tracks[track-1].end_lba;
+						} else {
+							tracks[track].pregap_lba = 0;
+						}
 						has_index_0 = 1;
 						has_start_lba = 1;
 					} else if (index == 1) {
-						tracks[track].start_lba = timecode_to_lba(after);
-						if (!has_index_0) {
-							start_lba = tracks[track].start_lba;
-							if (!tracks[track].fake_pregap) {
-								tracks[track].pregap_lba = start_lba;
-							}
-							has_start_lba = 1;
-						}
-					}
-					if (has_start_lba) {
-						if (track > 0) {
-							tracks[track-1].end_lba = start_lba;
-						}
-						if (track_of_file > 0) {
-							tracks[track].file_offset = tracks[track-1].file_offset + tracks[track-1].end_lba * tracks[track-1].sector_bytes;
-							if (track_of_file > 1) {
-								tracks[track].file_offset -= tracks[track-2].end_lba * tracks[track-1].sector_bytes;
-							}
+						if (has_index_0) {
+							uint32_t real_pregap_size = start_lba * tracks[track].sector_bytes + extra_offset - tracks[track].file_offset;
+							real_pregap_size /= tracks[track].sector_bytes;
+							tracks[track].start_lba = tracks[track].pregap_lba + tracks[track].fake_pregap + real_pregap_size;
 						} else {
-							tracks[track].file_offset = extra_offset;
+							tracks[track].file_offset = start_lba * tracks[track].sector_bytes + extra_offset;
+							if (track > 0) {
+								if (track_of_file > 0) {
+									//Previous track end is implicit based on this index position
+									uint32_t last_track_size = tracks[track].file_offset - tracks[track-1].file_offset;
+									last_track_size /= tracks[track-1].sector_bytes;
+									tracks[track-1].end_lba = tracks[track-1].pregap_lba + tracks[track-1].fake_pregap + last_track_size;
+								}
+								tracks[track].pregap_lba = tracks[track-1].end_lba;
+								tracks[track].start_lba = tracks[track].pregap_lba + tracks[track].fake_pregap;
+							} else {
+								tracks[track].pregap_lba = 0;
+								if (!tracks[track].fake_pregap) {
+									if (tracks[track].type == TRACK_DATA && tracks[track].sector_bytes == 2352) {
+										//Infer pregap from position in sector header
+										fseek(f, start_lba + 12, SEEK_SET);
+										uint8_t timecode[3];
+										if (sizeof(timecode) == fread(timecode, 1, sizeof(timecode), f)) {
+											tracks[track].fake_pregap = (timecode[0] >> 4) * 600;
+											tracks[track].fake_pregap += (timecode[0] & 0xF) * 60;
+											tracks[track].fake_pregap += (timecode[1] >> 4) * 10;
+											tracks[track].fake_pregap += timecode[1] & 0xF;
+											tracks[track].fake_pregap *= 75;
+											tracks[track].fake_pregap += (timecode[2] >> 4) * 10;
+											tracks[track].fake_pregap += timecode[2] & 0xF;
+										} else {
+											fatal_error("Failed to read from CD image");
+										}
+									} else {
+										//Just assume a 2-second pre-gap for first track
+										tracks[track].fake_pregap = 2 * 75;
+									}
+								}
+								tracks[track].start_lba = tracks[track].fake_pregap;
+							}
 						}
 					}
 				}
@@ -388,56 +439,28 @@ uint8_t parse_cue(system_media *media)
 		}
 	} while (line);
 	if (media->num_tracks > 0 && media->tracks[0].f) {
-		//end of last track in a file is implictly based on the size
-		f = tracks[0].f;
-		uint32_t offset = 0;
-		for (int track = 0; track < media->num_tracks; track++) {
-			if (track == media->num_tracks - 1 && tracks[track].f) {
-				uint32_t start_lba =tracks[track].fake_pregap ? tracks[track].start_lba : tracks[track].pregap_lba;
-				uint32_t fsize;
-				if (tracks[track].flac) {
-					fsize = tracks[track].flac->total_samples * 4;
-				} else {
-					fsize = file_size(tracks[track].f);
-				}
-				tracks[track].end_lba = start_lba + (fsize - tracks[track].file_offset)/ tracks[track].sector_bytes;
-			} else if (tracks[track].f != f) {
-				uint32_t start_lba =tracks[track-1].fake_pregap ? tracks[track-1].start_lba : tracks[track-1].pregap_lba;
-				uint32_t fsize;
-				if (tracks[track-1].flac) {
-					fsize = tracks[track-1].flac->total_samples * 4;
-				} else {
-					fsize = file_size(tracks[track-1].f);
-				}
-				tracks[track-1].end_lba = start_lba + (fsize - tracks[track-1].file_offset)/ tracks[track-1].sector_bytes;
-				offset = tracks[track-1].end_lba;
-			}
-			if (!tracks[track].fake_pregap) {
-				tracks[track].pregap_lba += offset;
-			}
-			tracks[track].start_lba += offset;
-			tracks[track].end_lba += offset;
+		//end of last track in a file is implictly based on file size
+		long track_size = 0;
+		if (flac) {
+			track_size = flac->total_samples * 4;
+		} else if (f) {
+			track_size = file_size(f);
 		}
-		//replace cue sheet with first sector
-		free(media->buffer);
-		media->buffer = calloc(2048, 1);
-		if (tracks[0].type == TRACK_DATA && tracks[0].sector_bytes == 2352 && !tracks[0].flac) {
-			// if the first track is a data track, don't trust the CUE sheet and look at the MM:SS:FF from first sector
-			uint8_t msf[3];
-			fseek(tracks[0].f, 12, SEEK_SET);
-			if (sizeof(msf) == fread(msf, 1, sizeof(msf), tracks[0].f)) {
-				tracks[0].fake_pregap = msf[2] + (msf[0] * 60 + msf[1]) * 75;
-			}
-		} else if (!tracks[0].start_lba && !tracks[0].fake_pregap) {
-			tracks[0].fake_pregap = 2 * 75;
+		track_size -= tracks[track].file_offset;
+		tracks[track].end_lba = tracks[track].pregap_lba + tracks[track].fake_pregap + track_size / tracks[track].sector_bytes;
+		
+		if (tracks[0].type == TRACK_DATA) {
+			//replace cue sheet with first sector
+			free(media->buffer);
+			media->buffer = calloc(2048, 1);
+			fseek(tracks[0].f, tracks[0].sector_bytes >= 2352 ? 16 : 0, SEEK_SET);
+			media->size = fread(media->buffer, 1, 2048, tracks[0].f);
 		}
-
-		fseek(tracks[0].f, tracks[0].sector_bytes >= 2352 ? 16 : 0, SEEK_SET);
-		media->size = fread(media->buffer, 1, 2048, tracks[0].f);
 		media->seek = bin_seek;
 		media->read = bin_read;
 		media->read_subcodes = bin_subcode_read;
 	}
+	print_toc(media);
 	uint8_t valid = media->num_tracks > 0 && media->tracks[0].f != NULL;
 	media->type = valid ? MEDIA_CDROM : MEDIA_CART;
 	return valid;
@@ -553,7 +576,7 @@ uint8_t parse_toc(system_media *media)
 									if (isdigit(*cmd)) {
 										uint32_t start = timecode_to_lba(cmd);
 										tracks[track].file_offset += start * tracks[track].sector_bytes;
-										cmd = cmd_start_sameline(cmd);
+										cmd = cmd_start_sameline(word_end(cmd));
 									}
 								}
 								if (isdigit(*cmd)) {
@@ -561,14 +584,16 @@ uint8_t parse_toc(system_media *media)
 									tracks[track].end_lba += length;
 								} else {
 									long fsize = file_size(f);
-									tracks[track].end_lba += fsize - tracks[track].file_offset;
+									tracks[track].end_lba += (fsize - tracks[track].file_offset) / tracks[track].sector_bytes;
 								}
 							}
 						}
 					}
 				} else if (startswith(cmd, "SILENCE")) {
 					cmd = cmd_start_sameline(cmd + 7);
-					tracks[track].fake_pregap += timecode_to_lba(cmd);
+					uint32_t length = timecode_to_lba(cmd);
+					tracks[track].fake_pregap += length;
+					tracks[track].end_lba += length;
 				} else if (startswith(cmd, "START")) {
 					cmd = cmd_start_sameline(cmd + 5);
 					tracks[track].start_lba = tracks[track].pregap_lba + timecode_to_lba(cmd);
@@ -587,6 +612,7 @@ uint8_t parse_toc(system_media *media)
 		//replace cue sheet with first sector
 		free(media->buffer);
 		media->buffer = calloc(2048, 1);
+		uint32_t old_fake_pregap = tracks[0].fake_pregap;
 		if (tracks[0].type == TRACK_DATA && tracks[0].sector_bytes == 2352) {
 			// if the first track is a data track, don't trust the TOC file and look at the MM:SS:FF from first sector
 			uint8_t msf[3];
@@ -594,8 +620,21 @@ uint8_t parse_toc(system_media *media)
 			if (sizeof(msf) == fread(msf, 1, sizeof(msf), tracks[0].f)) {
 				tracks[0].fake_pregap = msf[2] + (msf[0] * 60 + msf[1]) * 75;
 			}
-		} else if (!tracks[0].start_lba && !tracks[0].fake_pregap) {
+		} else if (!tracks[0].fake_pregap) {
 			tracks[0].fake_pregap = 2 * 75;
+		}
+		if (tracks[0].fake_pregap != old_fake_pregap) {
+			if (!tracks[0].start_lba) {
+				tracks[0].start_lba = tracks[0].fake_pregap;
+			}
+			uint32_t diff = tracks[0].fake_pregap - old_fake_pregap;
+			tracks[0].end_lba += diff;
+			for (uint32_t i = 1; i < media->num_tracks; i++)
+			{
+				tracks[i].pregap_lba += diff;
+				tracks[i].start_lba += diff;
+				tracks[i].end_lba += diff;
+			}
 		}
 
 		fseek(tracks[0].f, tracks[0].sector_bytes == 2352 ? 16 : 0, SEEK_SET);
@@ -604,6 +643,7 @@ uint8_t parse_toc(system_media *media)
 		media->read = bin_read;
 		media->read_subcodes = bin_subcode_read;
 	}
+	print_toc(media);
 	uint8_t valid = media->num_tracks > 0 && media->tracks[0].f != NULL;
 	media->type = valid ? MEDIA_CDROM : MEDIA_CART;
 	return valid;

@@ -221,7 +221,7 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 				if (context->head_pba > 3*(context->media->num_tracks + 2)) {
 					context->toc_valid = 1;
 					context->seeking = 1;
-					context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].start_lba + context->media->tracks[0].fake_pregap;
+					context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].start_lba;
 					context->status = DS_PAUSE;
 				}
 
@@ -267,15 +267,6 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 				for (uint32_t i = 0; i < context->media->num_tracks; i++)
 				{
 					if (lba < context->media->tracks[i].end_lba) {
-						if (context->media->tracks[i].fake_pregap) {
-							if (lba > context->media->tracks[i].fake_pregap) {
-								lba -= context->media->tracks[i].fake_pregap;
-							} else {
-								//relative time counts down to 0 in pregap
-								lba = context->media->tracks[i].fake_pregap - lba;
-								break;
-							}
-						}
 						if (lba < context->media->tracks[i].start_lba) {
 							//relative time counts down to 0 in pregap
 							lba = context->media->tracks[i].start_lba - lba;
@@ -283,8 +274,6 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 							lba -= context->media->tracks[i].start_lba;
 						}
 						break;
-					} else if (context->media->tracks[i].fake_pregap) {
-						lba -= context->media->tracks[i].fake_pregap;
 					}
 				}
 				lba_to_status(context, lba);
@@ -300,24 +289,7 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 				for (i = 0; i < context->media->num_tracks; i++)
 				{
 					if (lba < context->media->tracks[i].end_lba) {
-						if (context->media->tracks[i].fake_pregap) {
-							if (lba > context->media->tracks[i].fake_pregap) {
-								lba -= context->media->tracks[i].fake_pregap;
-							} else {
-								//relative time counts down to 0 in pregap
-								lba = context->media->tracks[i].fake_pregap - lba;
-								break;
-							}
-						}
-						if (lba < context->media->tracks[i].start_lba) {
-							//relative time counts down to 0 in pregap
-							lba = context->media->tracks[i].start_lba - lba;
-						} else {
-							lba -= context->media->tracks[i].start_lba;
-						}
 						break;
-					} else if (context->media->tracks[i].fake_pregap) {
-						lba -= context->media->tracks[i].fake_pregap;
 					}
 				}
 				context->status_buffer.b.track.track_high = (i + 1) / 10;
@@ -337,12 +309,7 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 			break;
 		case SF_TOCO:
 			if (context->toc_valid) {
-				uint32_t total_fake_pregap = 0;
-				for (uint32_t i = 0; i < context->media->num_tracks; i++)
-				{
-					total_fake_pregap += context->media->tracks[i].fake_pregap;
-				}
-				lba_to_status(context, context->media->tracks[context->media->num_tracks - 1].end_lba + total_fake_pregap);
+				lba_to_status(context, context->media->tracks[context->media->num_tracks - 1].end_lba);
 				context->status_buffer.format = SF_TOCO;
 			} else {
 				context->status_buffer.format = SF_NOTREADY;
@@ -367,9 +334,6 @@ static void update_status(cdd_mcu *context, uint16_t *gate_array)
 					exit(0);
 				}
 				uint32_t lba = context->media->tracks[context->requested_track - 1].start_lba;
-				for (uint32_t i = 0; i < context->requested_track; i++) {
-					lba += context->media->tracks[i].fake_pregap;
-				}
 				lba_to_status(context, lba);
 				if (context->media->tracks[context->requested_track - 1].type == TRACK_DATA) {
 					context->status_buffer.b.tocn.frame_high |= 0x8;
@@ -462,7 +426,7 @@ static void run_command(cdd_mcu *context)
 			context->cmd_buffer.b.time.sec_high, context->cmd_buffer.b.time.sec_low,
 			context->cmd_buffer.b.time.frame_high, context->cmd_buffer.b.time.frame_low
 		);
-		if (lba >= context->media->tracks[0].fake_pregap + context->media->tracks[context->media->num_tracks - 1].end_lba) {
+		if (lba >= context->media->tracks[context->media->num_tracks - 1].end_lba) {
 			context->error_status = DS_CMD_ERROR;
 			break;
 		}
@@ -534,7 +498,7 @@ static void run_command(cdd_mcu *context)
 		}
 		if (context->status == DS_STOP) {
 			context->seeking = 1;
-			context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].fake_pregap + context->media->tracks[0].start_lba;
+			context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].start_lba;
 			printf("CDD CMD: PAUSE, seeking to %u\n", context->seek_pba);
 		} else {
 			uint32_t lba = context->head_pba - LEADIN_SECTORS;
@@ -572,7 +536,7 @@ static void run_command(cdd_mcu *context)
 		}
 		if (context->status == DS_STOP || context->status == DS_TOC_READ) {
 			context->seeking = 1;
-			context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].fake_pregap + context->media->tracks[0].start_lba - 4;
+			context->seek_pba = LEADIN_SECTORS + context->media->tracks[0].start_lba - 4;
 			printf("CDD CMD: PLAY, seeking to %u\n", context->seek_pba);
 		} else {
 			puts("CDD CMD: PLAY");
