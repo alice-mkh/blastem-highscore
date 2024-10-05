@@ -1210,10 +1210,12 @@ void ym_print_channel_info(ym2612_context *context, int channel)
 		   "Feedback:  %d\n"
 		   "Pan:       %s\n"
 		   "AMS:       %d\n"
-		   "PMS:       %d\n",
+		   "PMS:       %d\n"
+		   "Block:     %d\n"
+		   "F-Num:     %d\n",
 		   channel+1, chan->algorithm, chan->feedback,
 		   chan->lr == 0xC0 ? "LR" : chan->lr == 0x80 ? "L" : chan->lr == 0x40 ? "R" : "",
-		   chan->ams, chan->pms);
+		   chan->ams, chan->pms, chan->block, chan->fnum);
 	if (channel == 2) {
 		printf(
 		   "Mode:      %X: %s\n",
