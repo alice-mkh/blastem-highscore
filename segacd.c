@@ -1177,7 +1177,7 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 
 	scd_peripherals_run(cd, context->cycles);
 	if (address) {
-		if (cd->enter_debugger) {
+		if (cd->enter_debugger || context->wp_hit) {
 			genesis_context *gen = cd->genesis;
 			cd->enter_debugger = 0;
 #ifndef IS_LIB

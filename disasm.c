@@ -257,6 +257,15 @@ void add_segacd_subcpu_labels(disasm_context *context)
 	weak_label(context, "_slevel3Address", 0x5F84);
 	weak_label(context, "WORD_RAM_2M", 0x80000);
 	weak_label(context, "WORD_RAM_1M", 0xC0000);
+	weak_label(context, "PCM_ENV", 0xFF0001);
+	weak_label(context, "PCM_PAN", 0xFF0003);
+	weak_label(context, "PCM_FDL", 0xFF0005);
+	weak_label(context, "PCM_FDH", 0xFF0007);
+	weak_label(context, "PCM_LSL", 0xFF0009);
+	weak_label(context, "PCM_LSH", 0xFF000B);
+	weak_label(context, "PCM_ST", 0xFF000D);
+	weak_label(context, "PCM_CTRL", 0xFF000F);
+	weak_label(context, "PCM_CHAN_ENABLE", 0xFF0011);
 	weak_label(context, "LED_CONTROL", 0xFFFF8000);
 	weak_label(context, "VERSION_RESET", 0xFFFF8001);
 	weak_label(context, "MEM_MODE_WORD", 0xFFFF8002);
