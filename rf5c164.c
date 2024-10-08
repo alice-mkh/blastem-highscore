@@ -107,6 +107,11 @@ void rf5c164_run(rf5c164* pcm, uint32_t cycle)
 			} else {
 				pcm->channels[pcm->cur_channel].trigger = 0;
 			}
+		} else if (pcm->flags & FLAG_SOUNDING) {
+			//Final Fight CD seems to expect this to get updated to some non-terminal value while the channel is not enabled
+			//Ares seems to keep the current pointer and ST in sync at all times for this state
+			//TODO: confirm exact behavior on hardware
+			pcm->channels[pcm->cur_channel].cur_ptr = pcm->channels[pcm->cur_channel].regs[ST] << 19;
 		}
 		write_if_not_sounding(pcm);
 		CHECK;
