@@ -79,15 +79,16 @@ void render_framebuffer_updated(uint8_t which, int width)
   }
 
   unsigned game_height = video_standard == VID_NTSC ? 243 : 294;
+  unsigned height_multiplier = 1;
 
   if (which != last_fb) {
-    game_height *= 2;
+    height_multiplier = 2;
     last_fb = which;
   }
 
-  HsRectangle area = HS_RECTANGLE_INIT (overscan_left, overscan_top,
+  HsRectangle area = HS_RECTANGLE_INIT (overscan_left, overscan_top * height_multiplier,
                                         width - overscan_left - overscan_right,
-                                        game_height - overscan_top - overscan_bot);
+                                        (game_height - overscan_top - overscan_bot) * height_multiplier);
 
   hs_software_context_set_area (self->context, &area);
 
