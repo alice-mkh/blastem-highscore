@@ -53,16 +53,18 @@ uint32_t *render_get_framebuffer(uint8_t which, int *pitch)
   BlastemCore *self = BLASTEM_CORE (core);
 
   g_assert (which == FRAMEBUFFER_ODD || which == FRAMEBUFFER_EVEN);
- 
+
   if (!self->context)
     return NULL;
- 
+
   uint *fb = hs_software_context_get_framebuffer (self->context);
 
   *pitch = LINEBUF_SIZE * sizeof(uint32_t);
+  if (which != last_fb)
+    *pitch *= 2;
 
   if (which == FRAMEBUFFER_EVEN)
-    fb += *pitch * 294;
+    return fb + LINEBUF_SIZE;
 
   return fb;
 }
@@ -70,16 +72,20 @@ uint32_t *render_get_framebuffer(uint8_t which, int *pitch)
 void render_framebuffer_updated(uint8_t which, int width)
 {
   BlastemCore *self = BLASTEM_CORE (core);
-  
+
   if (!self->context) {
     system_request_exit (current_system, 0);
     return;
   }
 
   unsigned game_height = video_standard == VID_NTSC ? 243 : 294;
-  unsigned start_line = (which == FRAMEBUFFER_EVEN) ? 294 : 0;
-  
-  HsRectangle area = HS_RECTANGLE_INIT (overscan_left, start_line + overscan_top,
+
+  if (which != last_fb) {
+    game_height *= 2;
+    last_fb = which;
+  }
+
+  HsRectangle area = HS_RECTANGLE_INIT (overscan_left, overscan_top,
                                         width - overscan_left - overscan_right,
                                         game_height - overscan_top - overscan_bot);
 
@@ -111,7 +117,7 @@ uint32_t render_overscan_bot()
 void process_events()
 {
   BlastemCore *self = BLASTEM_CORE (core);
-  
+
   static const uint8_t button_map[] = {
     DPAD_UP, DPAD_DOWN, DPAD_LEFT, DPAD_RIGHT,
     BUTTON_A, BUTTON_B, BUTTON_C,
@@ -121,7 +127,7 @@ void process_events()
 
   // TODO: handle other input device types
   // TODO: handle more than 2 ports when appropriate
-  
+
   for (int player = 0; player < 2; player++) {
     for (int button = 0; button < HS_SEGA_GENESIS_BUTTON_MODE; button++) {
       gboolean old_state = self->prev_input_state[player] & 1 << button;

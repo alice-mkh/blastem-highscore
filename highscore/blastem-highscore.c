@@ -66,7 +66,7 @@ blastem_core_load_rom (HsCore      *core,
 
   self->context = hs_core_create_software_context (core,
                                                    LINEBUF_SIZE,
-                                                   294 * 2, /* Double buffering */
+                                                   294 * 2,
                                                    HS_PIXEL_FORMAT_B8G8R8X8);
 
   g_free (data);
