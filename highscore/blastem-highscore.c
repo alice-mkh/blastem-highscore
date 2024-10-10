@@ -204,10 +204,16 @@ static double
 blastem_core_get_aspect_ratio (HsCore *core)
 {
   guint game_height = video_standard == VID_NTSC ? 243 : 294;
-  guint width = LINEBUF_SIZE - overscan_left - overscan_right;
+  guint width = 256; // Same between 320 and 256 modes
   guint height = game_height - overscan_top - overscan_bot;
+  double par;
 
-  return (double) width / height;
+  if (video_standard == VID_NTSC)
+    par = 8.0 / 7.0;
+  else
+    par = 2950000.0 / 2128137.0;
+
+  return (double) width / height * par;
 }
 
 static double
