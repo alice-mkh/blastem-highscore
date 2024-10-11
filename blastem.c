@@ -130,7 +130,7 @@ uint8_t is_smd_format(const char *filename, uint8_t *header)
 
 uint32_t load_media_zip(const char *filename, system_media *dst)
 {
-	static const char *valid_exts[] = {"bin", "md", "gen", "sms", "gg", "rom", "smd", "sg"};
+	static const char *valid_exts[] = {"bin", "md", "gen", "sms", "gg", "rom", "smd", "sg", "sc", "sf7"};
 	const uint32_t num_exts = sizeof(valid_exts)/sizeof(*valid_exts);
 	zip_file *z = zip_open(filename);
 	if (!z) {
