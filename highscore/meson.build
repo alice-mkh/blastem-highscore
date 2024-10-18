@@ -7,6 +7,15 @@ version = meson.project_version()
 
 cc = meson.get_compiler('c')
 
+new_core = get_option('new_core')
+
+rom_db = custom_target('rom.db.c',
+  output: 'rom.db.c',
+  input: meson.project_source_root() / '../rom.db',
+  command: [ 'gen-db.sh', '@INPUT@' ],
+  capture: true
+)
+
 blastem_source = [
   'blastem-highscore.c',
 
@@ -64,24 +73,9 @@ blastem_source = [
   '../ym2612.c',
   '../ymf262.c',
   '../ymz263b.c',
-  '../z80inst.c',
-]
 
-blastem_source += [
-  '../backend_x86.c',
-  '../gen_x86.c',
-  '../m68k_core.c',
-  '../m68k_core_x86.c',
-  '../z80inst.c',
-  '../z80_to_x86.c',
+  rom_db,
 ]
-
-blastem_source += custom_target('rom.db.c',
-  output: 'rom.db.c',
-  input: meson.project_source_root() / '../rom.db',
-  command: [ 'gen-db.sh', '@INPUT@' ],
-  capture: true
-)
 
 blastem_deps = [
   dependency('highscore-1'),
@@ -94,6 +88,7 @@ blastem_c_args = [
   '-fvisibility=hidden',
   '-DIS_LIB',
   '-Wno-implicit-fallthrough',
+  '-Wno-incompatible-pointer-types',
   '-Wno-missing-field-initializers',
   '-Wno-parentheses',
   '-Wno-pedantic',
@@ -107,6 +102,48 @@ blastem_c_args = [
   '-Wno-unused-value',
   '-Wno-unused-variable',
 ]
+
+if new_core
+  m68k_source = custom_target('m68k',
+    output: ['m68k.c', 'm68k.h'],
+    input: '../m68k.cpu',
+    command: [ 'gen-cpu.sh', '@SOURCE_ROOT@', '@INPUT@', 'call', '@OUTPUT0@' ],
+    console: true
+  )
+
+  z80_source = custom_target('z80',
+    output: ['z80.c', 'z80.h'],
+    input: '../z80.cpu',
+    command: [ 'gen-cpu.sh', '@SOURCE_ROOT@', '@INPUT@', 'goto', '@OUTPUT0@' ],
+    console: true
+  )
+
+  m68k_dep = declare_dependency(sources: m68k_source)
+  z80_dep = declare_dependency(sources: z80_source)
+
+  blastem_source += [
+    m68k_source[0],
+    z80_source[0],
+  ]
+
+  blastem_deps += [
+    m68k_dep,
+    z80_dep,
+  ]
+
+  blastem_c_args += [
+    '-DNEW_CORE'
+  ]
+else
+  blastem_source += [
+    '../backend_x86.c',
+    '../gen_x86.c',
+    '../m68k_core.c',
+    '../m68k_core_x86.c',
+    '../z80inst.c',
+    '../z80_to_x86.c',
+  ]
+endif
 
 cpu = target_machine.cpu()
 
@@ -136,6 +173,11 @@ shared_library('blastem-highscore',
 descriptor = configuration_data()
 descriptor.set('version', version)
 descriptor.set('commit', commit)
+if new_core
+  descriptor.set('states', '1')
+else
+  descriptor.set('states', '0')
+endif
 configure_file(
   input: 'blastem.highscore.in',
   output: 'blastem.highscore',

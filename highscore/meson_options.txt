@@ -1,0 +1,1 @@
+option ('new_core', type: 'boolean', value: false)
