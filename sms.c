@@ -126,6 +126,41 @@ static uint8_t io_read(uint32_t location, void *vcontext)
 	return 0xFF;
 }
 
+static void i8255_output_updated(i8255 *ppi, uint32_t cycle, uint32_t port, uint8_t data)
+{
+	if (port == 2) {
+		sms_context *sms = ppi->system;
+		sms->kb_mux = data & 0x7;
+	}
+}
+
+static uint8_t i8255_input_poll(i8255 *ppi, uint32_t cycle, uint32_t port)
+{
+	if (port > 1) {
+		return 0xFF;
+	}
+	sms_context *sms = ppi->system;
+	if (sms->kb_mux == 7) {
+		if (port) {
+			//TODO: cassette-in
+			//TODO: printer port BUSY/FAULT
+			uint8_t port_b = io_data_read(sms->io.ports+1, cycle);
+			return (port_b >> 2 & 0xF) | 0x10;
+		} else {
+			uint8_t port_a = io_data_read(sms->io.ports, cycle);
+			uint8_t port_b = io_data_read(sms->io.ports+1, cycle);
+			return (port_a & 0x3F) | (port_b << 6);
+		}
+	}
+	//TODO: keyboard matrix ghosting
+	if (port) {
+		//TODO: cassette-in
+		//TODO: printer port BUSY/FAULT
+		return (sms->keystate[sms->kb_mux] >> 8) | 0x10;
+	}
+	return sms->keystate[sms->kb_mux];
+}
+
 static void update_mem_map(uint32_t location, sms_context *sms, uint8_t value)
 {
 	z80_context *z80 = sms->z80;
@@ -249,6 +284,54 @@ static void *psg_pan_write(uint32_t location, void *vcontext, uint8_t value)
 	sms->psg->pan = value;
 	return vcontext;
 }
+
+static void *ppi_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	z80_context *z80 = vcontext;
+	sms_context *sms = z80->system;
+	i8255_write(location, sms->i8255, value, z80->Z80_CYCLE);
+	return vcontext;
+}
+
+static uint8_t ppi_read(uint32_t location, void *vcontext)
+{
+	z80_context *z80 = vcontext;
+	sms_context *sms = z80->system;
+	return i8255_read(location, sms->i8255, z80->Z80_CYCLE);
+}
+
+static void *all_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	vdp_write(location, vcontext, value);
+	sms_psg_write(location, vcontext, value);
+	return ppi_write(location, vcontext, value);
+}
+
+static uint8_t ppi_vdp_read(uint32_t location, void *vcontext)
+{
+	//TODO: "corrupt" PPI value by VDP value
+	vdp_read(location, vcontext);
+	return ppi_read(location, vcontext);
+}
+
+static void *vdp_psg_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	vdp_write(location, vcontext, value);
+	return sms_psg_write(location, vcontext, value);
+}
+
+static void *ppi_psg_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	vdp_write(location, vcontext, value);
+	return ppi_write(location, vcontext, value);
+}
+
+static void *ppi_vdp_write(uint32_t location, void *vcontext, uint8_t value)
+{
+	vdp_write(location, vcontext, value);
+	return ppi_write(location, vcontext, value);
+}
+
 static memmap_chunk io_map[] = {
 	{0x00, 0x40, 0xFF, .write_8 = memory_io_write},
 	{0x40, 0x80, 0xFF, .read_8 = hv_read, .write_8 = sms_psg_write},
@@ -263,6 +346,16 @@ static memmap_chunk io_gg[] = {
 	{0x40, 0x80, 0xFF, .read_8 = hv_read, .write_8 = sms_psg_write},
 	{0x80, 0xC0, 0xFF, .read_8 = vdp_read, .write_8 = vdp_write},
 	{0xC0, 0x100,0xFF, .read_8 = io_read}
+};
+
+static memmap_chunk io_sc[] = {
+	{0x00, 0x20, 0x03, .read_8 = ppi_vdp_read, .write_8 = all_write},
+	{0x20, 0x40, 0xFF, .read_8 = vdp_read, .write_8 = vdp_psg_write},
+	{0x40, 0x60, 0x03, .read_8 = ppi_read, .write_8 = ppi_psg_write},
+	{0x60, 0x80, 0xFF, .write_8 = sms_psg_write},
+	{0x80, 0xA0, 0x03, .read_8 = ppi_vdp_read, .write_8 = ppi_vdp_write},
+	{0xA0, 0xC0, 0xFF, .read_8 = vdp_read, .write_8 = vdp_write},
+	{0xD0, 0x100, 0x03, .read_8 = ppi_read, .write_8 = ppi_write}
 };
 
 static void set_speed_percent(system_header * system, uint32_t percent)
@@ -589,6 +682,7 @@ static void free_sms(system_header *system)
 	z80_options_free(sms->z80->Z80_OPTS);
 	free(sms->z80);
 	psg_free(sms->psg);
+	free(sms->i8255);
 	free(sms);
 }
 
@@ -670,16 +764,92 @@ static void mouse_motion_relative(system_header *system, uint8_t mouse_num, int3
 	io_mouse_motion_relative(&sms->io, mouse_num, x, y);
 }
 
+uint16_t scancode_map[0x90] = {
+	[0x1C] = 0x0004,//A
+	[0x32] = 0x4008,//B
+	[0x21] = 0x2008,//C
+	[0x23] = 0x2004,//D
+	[0x24] = 0x2002,//E
+	[0x2B] = 0x3004,//F
+	[0x34] = 0x4004,//G
+	[0x33] = 0x5004,//H
+	[0x43] = 0x0080,//I
+	[0x3B] = 0x6004,//J
+	[0x42] = 0x0040,//K
+	[0x4B] = 0x1040,//L
+	[0x3A] = 0x6008,//M
+	[0x31] = 0x5008,//N
+	[0x44] = 0x1080,//O
+	[0x4D] = 0x2080,//P
+	[0x15] = 0x0002,//Q
+	[0x2D] = 0x3002,//R
+	[0x1B] = 0x1004,//S
+	[0x2C] = 0x4002,//T
+	[0x3C] = 0x6002,//U
+	[0x2A] = 0x3008,//V
+	[0x1D] = 0x1002,//W
+	[0x22] = 0x1008,//X
+	[0x35] = 0x5002,//Y
+	[0x1A] = 0x0008,//Z
+	[0x16] = 0x0001,//1
+	[0x1E] = 0x1001,//2
+	[0x26] = 0x2001,//3
+	[0x25] = 0x3001,//4
+	[0x2E] = 0x4001,//5
+	[0x36] = 0x5001,//6
+	[0x3D] = 0x6001,//7
+	[0x3E] = 0x0100,//8
+	[0x46] = 0x1100,//9
+	[0x45] = 0x2100,//0
+	[0x5A] = 0x5040,//return
+	[0x29] = 0x1010,//space
+	[0x0D] = 0x5800,//tab mapped to FUNC
+	[0x66] = 0x3010,//backspace mapped to INS/DEL
+	[0x4E] = 0x3100,// -
+	[0x55] = 0x4100,// = mapped to ^ based on position
+	[0x54] = 0x4080,// [
+	[0x5B] = 0x4040,// ]
+	[0x5D] = 0x5100,// \ mapped to Yen based on position/correspondence on PC keyboards
+	[0x4C] = 0x2040,// ;
+	[0x52] = 0x3040,// ' mapped to : based on position
+	[0x0E] = 0x3020,// ` mapped to PI because of lack of good options
+	[0x41] = 0x0020,// ,
+	[0x49] = 0x1020,// .
+	[0x4A] = 0x2020,// /
+	[0x14] = 0x6400,//lctrl mapped to ctrl
+	//rctrl is default keybind for toggle keyboard capture
+	//[0x18] = 0x6400,//rctrl mapped to ctrl
+	[0x12] = 0x6800,//lshift mapped to shift
+	[0x59] = 0x6800,//lshift mapped to shift
+	[0x11] = 0x6200,//lalt mapped to GRAPH
+	[0x17] = 0x6200,//ralt mapped to GRAPH
+	[0x81] = 0x0010,//insert mapped to kana/dieresis key
+	[0x86] = 0x5020,//left arrow
+	[0x87] = 0x2010,//home mapped to HOME/CLR
+	[0x88] = 0x6100,//end mapped to BREAK
+	[0x89] = 0x6040,//up arrow
+	[0x8A] = 0x4020,//down arrow
+	[0x8D] = 0x6020,//right arrow
+};
+
 static void keyboard_down(system_header *system, uint8_t scancode)
 {
 	sms_context *sms = (sms_context *)system;
 	io_keyboard_down(&sms->io, scancode);
+	if (sms->keystate && scancode < 0x90 && scancode_map[scancode]) {
+		uint16_t row = scancode_map[scancode] >> 12;
+		sms->keystate[row] &= ~(scancode_map[scancode] & 0xFFF);
+	}
 }
 
 static void keyboard_up(system_header *system, uint8_t scancode)
 {
 	sms_context *sms = (sms_context *)system;
 	io_keyboard_up(&sms->io, scancode);
+	if (sms->keystate && scancode < 0x90 && scancode_map[scancode]) {
+		uint16_t row = scancode_map[scancode] >> 12;
+		sms->keystate[row] |= scancode_map[scancode] & 0xFFF;
+	}
 }
 
 static void set_gain_config(sms_context *sms)
@@ -728,15 +898,18 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	z80_options *zopts = malloc(sizeof(z80_options));
 	tern_node *model_def;
 	uint8_t is_gamegear = !strcasecmp(media->extension, "gg");
+	uint8_t is_sc3000 = !strcasecmp(media->extension, "sc");
 	if (is_gamegear) {
 		model_def = tern_find_node(get_systems_config(), "gg");
 	} else if (!strcasecmp(media->extension, "sg")) {
 		model_def = tern_find_node(get_systems_config(), "sg1000");
+	} else if (is_sc3000) {
+		model_def = tern_find_node(get_systems_config(), "sc3000");
 	} else {
 		model_def = get_model(config, SYSTEM_SMS);
 	}
 	char *vdp_str = tern_find_ptr(model_def, "vdp");
-	uint8_t vdp_type = is_gamegear ? VDP_GENESIS : VDP_GAMEGEAR;
+	uint8_t vdp_type = is_gamegear ? VDP_GAMEGEAR : is_sc3000 ? VDP_TMS9918A : VDP_SMS2;
 	if (vdp_str) {
 		if (!strcmp(vdp_str, "sms1")) {
 			vdp_type = VDP_SMS;
@@ -759,9 +932,27 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 			chunk->buffer = sms->ram + ((chunk->start - 0xC000) & 0x1FFF);
 		}
 	}
+	char *io_type = tern_find_ptr(model_def, "io");
+	if (io_type) {
+		if (!strcmp(io_type, "gamegear")) {
+			is_gamegear = 1;
+			is_sc3000 = 0;
+		} else if (!strcmp(io_type, "i8255")) {
+			is_gamegear = 0;
+			is_sc3000 = 1;
+		}
+	}
 	if (is_gamegear) {
 		init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_gg, 6, 15, 0xFF);
 		sms->start_button_region = 0xC0;
+	} else if (is_sc3000) {
+		sms->keystate = calloc(sizeof(uint16_t), 7);
+		memset(sms->keystate, 0xFF, sizeof(uint16_t) * 7);
+		sms->i8255 = calloc(1, sizeof(i8255));
+		i8255_init(sms->i8255, i8255_output_updated, i8255_input_poll);
+		sms->i8255->system = sms;
+		sms->kb_mux = 7;
+		init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_sc, 7, 15, 0xFF);
 	} else {
 		init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_map, 4, 15, 0xFF);
 	}
@@ -803,7 +994,7 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 		}
 	}
 	setup_io_devices(io_config_root, &sms->header.info, &sms->io);
-	sms->header.has_keyboard = io_has_keyboard(&sms->io);
+	sms->header.has_keyboard = io_has_keyboard(&sms->io) || sms->keystate;
 
 	sms->header.set_speed_percent = set_speed_percent;
 	sms->header.start_context = start_sms;

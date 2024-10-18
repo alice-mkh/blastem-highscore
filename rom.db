@@ -1689,3 +1689,31 @@ MK-49037-18 {
 	#German version of this game has 8G in the region field
 	regions E
 }
+a43aef367857a681decea52377c2e7a992c2ac68 {
+	name Level III BASIC
+	map {
+		0 {
+			device ROM
+			last 7FFF
+		}
+		8000 {
+			device RAM
+			size 8000
+			last FFFF
+		}
+	}
+}
+f1e1e7e9687cf4f9f498779a44134c2d70bb8d4b {
+	name Home BASIC
+	map {
+		0 {
+			device ROM
+			last 7FFF
+		}
+		8000 {
+			device RAM
+			size 4000
+			last BFFF
+		}
+	}
+}

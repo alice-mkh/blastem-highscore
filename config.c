@@ -316,7 +316,7 @@ static void update_pad_menu_binding(char *key, tern_val val, uint8_t valtype, vo
 	*pads = tern_insert_node(*pads, key, val.ptrval);
 }
 
-#define CONFIG_VERSION 9
+#define CONFIG_VERSION 10
 static tern_node *migrate_config(tern_node *config, int from_version)
 {
 	tern_node *def_config = parse_bundled_config("default.cfg");
@@ -479,6 +479,43 @@ static tern_node *migrate_config(tern_node *config, int from_version)
 		}
 		free(exts[0]);//All extensions in this list share an allocation, first one is a pointer to the buffer
 		free(exts);
+		break;
+	}
+	case 9: {
+		//Add pre-SMS 8-bit image formats to ui.extensions
+		uint32_t num_exts;
+		char **ext_list = get_extension_list(config, &num_exts);
+		char *old = num_exts ? ext_list[0] : NULL;
+		uint32_t new_size = num_exts + 3;
+		uint8_t need_sc = 1, need_sg = 1, need_sf7 = 1;
+		for (uint32_t i = 0; i < num_exts; i++)
+		{
+			if (!strcmp(ext_list[i], "sc")) {
+				need_sc = 0;
+				new_size--;
+			} else if (!strcmp(ext_list[i], "sg")) {
+				need_sg = 0;
+				new_size--;
+			} else if (!strcmp(ext_list[i], "sf7")) {
+				need_sf7 = 0;
+				new_size--;
+			}
+		}
+		if (new_size != num_exts) {
+			ext_list = realloc(ext_list, sizeof(char*) * new_size);
+			if (need_sc) {
+				ext_list[num_exts++] = "sc";
+			}
+			if (need_sg) {
+				ext_list[num_exts++] = "sg";
+			}
+			if (need_sf7) {
+				ext_list[num_exts++] = "sf7";
+			}
+		}
+		char *combined = alloc_join(new_size, (char const **)ext_list, ' ');
+		config = tern_insert_path(config, "ui\0extensions\0", (tern_val){.ptrval = combined}, TVAL_PTR);
+		break;
 	}
 	}
 	char buffer[16];

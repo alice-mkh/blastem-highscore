@@ -10,6 +10,7 @@
 #include "z80_to_x86.h"
 #endif
 #include "io.h"
+#include "i8255.h"
 
 #define SMS_RAM_SIZE (8*1024)
 #define SMS_CART_RAM_SIZE (32*1024)
@@ -20,6 +21,8 @@ typedef struct {
 	vdp_context   *vdp;
 	psg_context   *psg;
 	sega_io       io;
+	i8255         *i8255;
+	uint16_t      *keystate;
 	uint8_t       *rom;
 	uint32_t      rom_size;
 	uint32_t      master_clock;
@@ -30,6 +33,7 @@ typedef struct {
 	uint8_t       ram[SMS_RAM_SIZE];
 	uint8_t       bank_regs[4];
 	uint8_t       cart_ram[SMS_CART_RAM_SIZE];
+	uint8_t       kb_mux;
 } sms_context;
 
 sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t force_region);

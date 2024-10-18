@@ -86,7 +86,8 @@ system_type detect_system_type(system_media *media)
 		if (!strcmp("md", media->extension) || !strcmp("gen", media->extension)) {
 			return SYSTEM_GENESIS;
 		}
-		if (!strcmp("sms", media->extension) || !strcmp("sg", media->extension) || !strcmp("gg", media->extension)) {
+		if (!strcmp("sms", media->extension) || !strcmp("sg", media->extension) || !strcmp("gg", media->extension)
+			|| !strcmp("sc", media->extension) || !strcmp("sf7", media->extension)) {
 			return SYSTEM_SMS;
 		}
 		if (!strcmp("j64", media->extension)) {
