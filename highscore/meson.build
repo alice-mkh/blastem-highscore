@@ -25,6 +25,7 @@ blastem_source = [
   '../gst.c',
   '../hash.c',
   '../i2c.c',
+  '../i8255.c',
   '../io.c',
   '../jcart.c',
   '../lc8951.c',
