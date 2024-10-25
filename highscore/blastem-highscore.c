@@ -78,7 +78,7 @@ blastem_core_load_rom (HsCore      *core,
 }
 
 static void
-blastem_core_reset (HsCore *core)
+blastem_core_reset (HsCore *core, gboolean hard)
 {
   current_system->soft_reset (current_system);
 }
