@@ -224,6 +224,12 @@ blastem_core_get_sample_rate (HsCore *core)
   return master_clock / (7 * 6 * 24); //sample rate of YM2612
 }
 
+static HsRegion
+blastem_core_get_region (HsCore *core)
+{
+  return video_standard == VID_NTSC ? HS_REGION_NTSC : HS_REGION_PAL;
+}
+
 static void
 blastem_core_finalize (GObject *object)
 {
@@ -256,6 +262,8 @@ blastem_core_class_init (BlastemCoreClass *klass)
   core_class->get_aspect_ratio = blastem_core_get_aspect_ratio;
 
   core_class->get_sample_rate = blastem_core_get_sample_rate;
+
+  core_class->get_region = blastem_core_get_region;
 }
 
 static void
