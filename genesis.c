@@ -1478,16 +1478,16 @@ static uint8_t io_read(uint32_t location, m68k_context * context)
 				value = io_rx_read(gen->io.ports + 1, context->cycles);
 				break;
 			case 0xC:
-				value = io_sctrl_read(gen->io.ports, context->cycles);
+				value = io_sctrl_read(gen->io.ports + 1, context->cycles);
 				break;
 			case 0xD:
 				value = gen->io.ports[2].serial_out;
 				break;
 			case 0xE:
-				value = io_rx_read(gen->io.ports + 1, context->cycles);
+				value = io_rx_read(gen->io.ports + 2, context->cycles);
 				break;
 			case 0xF:
-				value = io_sctrl_read(gen->io.ports, context->cycles);
+				value = io_sctrl_read(gen->io.ports + 2, context->cycles);
 				break;
 			default:
 				value = get_open_bus_value(&gen->header) >> 8;
