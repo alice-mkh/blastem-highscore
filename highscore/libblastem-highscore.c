@@ -250,7 +250,7 @@ char *read_bundled_file(char *name, uint32_t *sizeret)
     memcpy(ret, rom_db_data, *sizeret + 1);
     return ret;
   }
-  
+
   return NULL;
 }
 

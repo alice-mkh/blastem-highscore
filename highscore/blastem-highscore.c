@@ -21,7 +21,10 @@ struct _BlastemCore
 
 #include "libblastem-highscore.c"
 
-G_DEFINE_FINAL_TYPE (BlastemCore, blastem_core, HS_TYPE_CORE)
+static void blastem_sega_genesis_core_init (HsSegaGenesisCoreInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE (BlastemCore, blastem_core, HS_TYPE_CORE,
+                               G_IMPLEMENT_INTERFACE (HS_TYPE_SEGA_GENESIS_CORE, blastem_sega_genesis_core_init))
 
 static gboolean
 blastem_core_load_rom (HsCore      *core,
@@ -272,6 +275,11 @@ blastem_core_init (BlastemCore *self)
   g_assert (!core);
 
   core = self;
+}
+
+static void
+blastem_sega_genesis_core_init (HsSegaGenesisCoreInterface *iface)
+{
 }
 
 GType
