@@ -60,6 +60,8 @@ uint32_t *render_get_framebuffer(uint8_t which, int *pitch)
   uint *fb = hs_software_context_get_framebuffer (self->context);
 
   *pitch = LINEBUF_SIZE * sizeof(uint32_t);
+  if (which != last_fb)
+    *pitch *= 2;
 
   if (which == FRAMEBUFFER_EVEN)
     return fb + LINEBUF_SIZE;
@@ -77,17 +79,16 @@ void render_framebuffer_updated(uint8_t which, int width)
   }
 
   unsigned game_height = video_standard == VID_NTSC ? 243 : 294;
-  unsigned line_start = 0;
+  unsigned height_multiplier = 1;
 
-  if (which != last_fb)
+  if (which != last_fb) {
+    height_multiplier = 2;
     last_fb = which;
+  }
 
-  if (which == FRAMEBUFFER_EVEN)
-    line_start++;
-
-  HsRectangle area = HS_RECTANGLE_INIT (overscan_left, line_start + overscan_top,
+  HsRectangle area = HS_RECTANGLE_INIT (overscan_left, overscan_top * height_multiplier,
                                         width - overscan_left - overscan_right,
-                                        game_height - overscan_top - overscan_bot);
+                                        (game_height - overscan_top - overscan_bot) * height_multiplier);
 
   hs_software_context_set_area (self->context, &area);
 
