@@ -282,6 +282,9 @@ static void *psg_pan_write(uint32_t location, void *vcontext, uint8_t value)
 	sms_context *sms = z80->system;
 	psg_run(sms->psg, z80->Z80_CYCLE);
 	sms->psg->pan = value;
+	if (sms->psg->vgm) {
+		vgm_gg_pan_write(sms->psg->vgm, sms->psg->cycles, sms->psg->pan);
+	}
 	return vcontext;
 }
 
