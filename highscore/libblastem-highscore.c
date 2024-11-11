@@ -130,7 +130,7 @@ void process_events()
   // TODO: handle more than 2 ports when appropriate
 
   for (int player = 0; player < 2; player++) {
-    for (int button = 0; button < HS_SEGA_GENESIS_BUTTON_MODE; button++) {
+    for (int button = 0; button < HS_MEGA_DRIVE_BUTTON_MODE; button++) {
       gboolean old_state = self->prev_input_state[player] & 1 << button;
       gboolean new_state = self->input_state[player] & 1 << button;
 

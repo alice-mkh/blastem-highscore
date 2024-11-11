@@ -21,10 +21,10 @@ struct _BlastemCore
 
 #include "libblastem-highscore.c"
 
-static void blastem_sega_genesis_core_init (HsSegaGenesisCoreInterface *iface);
+static void blastem_mega_drive_core_init (HsMegaDriveCoreInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE (BlastemCore, blastem_core, HS_TYPE_CORE,
-                               G_IMPLEMENT_INTERFACE (HS_TYPE_SEGA_GENESIS_CORE, blastem_sega_genesis_core_init))
+                               G_IMPLEMENT_INTERFACE (HS_TYPE_MEGA_DRIVE_CORE, blastem_mega_drive_core_init))
 
 static gboolean
 blastem_core_load_rom (HsCore      *core,
@@ -91,8 +91,8 @@ blastem_core_poll_input (HsCore *core, HsInputState *input_state)
 {
   BlastemCore *self = BLASTEM_CORE (core);
 
-  self->input_state[0] = input_state->sega_genesis.pad_buttons[0];
-  self->input_state[1] = input_state->sega_genesis.pad_buttons[1];
+  self->input_state[0] = input_state->mega_drive.pad_buttons[0];
+  self->input_state[1] = input_state->mega_drive.pad_buttons[1];
 }
 
 static void
@@ -278,7 +278,7 @@ blastem_core_init (BlastemCore *self)
 }
 
 static void
-blastem_sega_genesis_core_init (HsSegaGenesisCoreInterface *iface)
+blastem_mega_drive_core_init (HsMegaDriveCoreInterface *iface)
 {
 }
 

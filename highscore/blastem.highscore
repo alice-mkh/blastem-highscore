@@ -5,4 +5,4 @@ Authors=Michael Pavone;
 Copyright=Copyright (C) 2013-2024 Michael Pavone;
 Website=https://www.retrodev.com/blastem/
 License=GPL-3.0-or-later
-Platforms=SegaGenesis;
+Platforms=MegaDrive;
