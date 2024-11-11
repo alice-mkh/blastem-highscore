@@ -622,6 +622,9 @@ static void run_sms(system_header *system)
 			z80_adjust_cycles(sms->z80, adjust);
 			vdp_adjust_cycles(sms->vdp, adjust);
 			sms->psg->cycles -= adjust;
+			if (sms->psg->vgm) {
+				vgm_adjust_cycles(sms->psg->vgm, adjust);
+			}
 			target_cycle -= adjust;
 		}
 	}
@@ -886,6 +889,30 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 #endif
 }
 
+static void start_vgm_log(system_header *system, char *filename)
+{
+	sms_context *sms = (sms_context *)system;
+	//TODO: 50 Hz support
+	vgm_writer *vgm = vgm_write_open(filename, 60, sms->normal_clock, sms->z80->Z80_CYCLE);
+	if (vgm) {
+		printf("Started logging VGM to %s\n", filename);
+		psg_run(sms->psg, sms->z80->Z80_CYCLE);
+		psg_vgm_log(sms->psg, sms->normal_clock, vgm);
+		sms->header.vgm_logging = 1;
+	} else {
+		printf("Failed to start logging to %s\n", filename);
+	}
+}
+
+static void stop_vgm_log(system_header *system)
+{
+	puts("Stopped VGM log");
+	sms_context *sms = (sms_context *)system;
+	vgm_close(sms->psg->vgm);
+	sms->psg->vgm = NULL;
+	sms->header.vgm_logging = 0;
+}
+
 sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t force_region)
 {
 	sms_context *sms = calloc(1, sizeof(sms_context));
@@ -1018,6 +1045,8 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.config_updated = config_updated;
 	sms->header.serialize = serialize;
 	sms->header.deserialize = deserialize;
+	sms->header.start_vgm_log = start_vgm_log;
+	sms->header.stop_vgm_log = stop_vgm_log;
 	sms->header.toggle_debug_view = toggle_debug_view;
 	sms->header.type = SYSTEM_SMS;
 
