@@ -1554,7 +1554,9 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 		extras[win_idx].gl_context = SDL_GL_CreateContext(extras[win_idx].win);
 		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
 		glEnable(GL_DEBUG_OUTPUT);
-		glDebugMessageCallback(gl_message_callback, NULL);
+		if (glDebugMessageCallback) {
+			glDebugMessageCallback(gl_message_callback, NULL);
+		}
 		glGenTextures(2, extras[win_idx].gl_texture);
 		for (int i = 0; i < 2; i++)
 		{

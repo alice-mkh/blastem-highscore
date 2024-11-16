@@ -1822,9 +1822,7 @@ uint8_t io_sctrl_read(io_port *port, uint32_t current_cycle)
 
 uint32_t io_next_interrupt(io_port *port, uint32_t current_cycle)
 {
-	if (!(port->control & 0x80)) {
-		return CYCLE_NEVER;
-	}
+	
 	if (port->serial_ctrl & SCTRL_BIT_RX_INTEN) {
 		if (port->serial_ctrl & SCTRL_BIT_RX_READY) {
 			return current_cycle;
@@ -1833,7 +1831,9 @@ uint32_t io_next_interrupt(io_port *port, uint32_t current_cycle)
 			return port->receive_end;
 		}
 	}
-	//TODO: handle external interrupts from TH transitions
+	/*if (port->control & 0x80) {
+		//TODO: handle external interrupts from TH transitions
+	}*/
 	return CYCLE_NEVER;
 }
 
