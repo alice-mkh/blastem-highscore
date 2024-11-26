@@ -524,13 +524,13 @@ void view_key_bindings(struct nk_context *context)
 	};
 	static const char *general_binds[] = {
 		"ui.menu", "ui.save_state", "ui.load_state", "ui.toggle_fullscreen", "ui.soft_reset", "ui.reload",
-		"ui.screenshot", "ui.vgm_log", "ui.sms_pause", "ui.toggle_keyboard_captured", "ui.release_mouse", "ui.exit",
-		"cassette.play", "cassette.stop", "cassette.rewind"
+		"ui.screenshot", "ui.vgm_log", "ui.record_video", "ui.sms_pause", "ui.toggle_keyboard_captured", 
+		"ui.release_mouse", "ui.exit", "cassette.play", "cassette.stop", "cassette.rewind"
 	};
 	static const char *general_names[] = {
 		"Show Menu", "Quick Save", "Quick Load", "Toggle Fullscreen", "Soft Reset", "Reload Media",
-		"Internal Screenshot", "Toggle VGM Log", "SMS Pause", "Capture Keyboard", "Release Mouse", "Exit",
-		"Cassette Play", "Cassette Stop", "Cassette Rewind"
+		"Internal Screenshot", "Toggle VGM Log", "Toggle Video Recording", "SMS Pause", "Capture Keyboard", 
+		"Release Mouse", "Exit", "Cassette Play", "Cassette Stop", "Cassette Rewind"
 	};
 	static const char *speed_binds[] = {
 		"ui.next_speed", "ui.prev_speed",
@@ -544,11 +544,11 @@ void view_key_bindings(struct nk_context *context)
 	};
 	static const char *debug_binds[] = {
 		"ui.enter_debugger", "ui.plane_debug", "ui.vram_debug", "ui.cram_debug",
-		"ui.compositing_debug", "ui.vdp_debug_mode"
+		"ui.compositing_debug", "ui.vdp_debug_mode", "ui.oscilloscope"
 	};
 	const char *debug_names[] = {
 		"CPU Debugger", "Plane Debugger", "VRAM Debugger", "CRAM Debugger",
-		"Layer Debugger", "Cycle Mode/Pal"
+		"Layer Debugger", "Cycle Mode/Pal", "Oscilloscope"
 	};
 	const uint32_t NUM_C1_BINDS = sizeof(controller1_binds)/sizeof(*controller1_binds);
 	const uint32_t NUM_C2_BINDS = sizeof(controller2_binds)/sizeof(*controller2_binds);
@@ -676,6 +676,11 @@ const char *translate_binding_option(const char *option)
 		conf_names = tern_insert_ptr(conf_names, "ui.vdp_debug_mode", "VDP Debug Mode");
 		conf_names = tern_insert_ptr(conf_names, "ui.vdp_debug_pal", "VDP Debug Palette");
 		conf_names = tern_insert_ptr(conf_names, "ui.enter_debugger", "Enter CPU Debugger");
+		conf_names = tern_insert_ptr(conf_names, "ui.plane_debug", "Plane Debugger");
+		conf_names = tern_insert_ptr(conf_names, "ui.vram_debug", "VRAM Debugger");
+		conf_names = tern_insert_ptr(conf_names, "ui.cram_debug", "CRAM Debugger");
+		conf_names = tern_insert_ptr(conf_names, "ui.composite_debug", "Layer Debugger");
+		conf_names = tern_insert_ptr(conf_names, "ui.oscilloscope", "Oscilloscope");
 		conf_names = tern_insert_ptr(conf_names, "ui.screenshot", "Take Screenshot");
 		conf_names = tern_insert_ptr(conf_names, "ui.vgm_log", "Toggle VGM Log");
 		conf_names = tern_insert_ptr(conf_names, "ui.menu", "Show Menu");
@@ -755,6 +760,7 @@ static void view_button_binding(struct nk_context *context)
 		"ui.exit",
 		"ui.release_mouse",
 		"ui.toggle_keyboard_captured",
+		"ui.vgm_log",
 		"cassette.play",
 		"cassette.stop",
 		"cassette.rewind",
@@ -762,7 +768,12 @@ static void view_button_binding(struct nk_context *context)
 	static const char *debugger[] = {
 		"ui.vdp_debug_mode",
 		"ui.vdp_debug_pal",
-		"ui.enter_debugger"
+		"ui.enter_debugger",
+		"ui.plane_debug",
+		"ui.vram_debug",
+		"ui.cram_debug",
+		"ui.composite_debug",
+		"ui.oscilloscope"
 	};
 	static const char *speeds[] = {
 		"ui.next_speed",
