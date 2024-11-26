@@ -328,7 +328,7 @@ static const char** label_source(controller_info *info)
 const char *get_button_label(controller_info *info, int button)
 {
 #ifndef USE_FBDEV
-#if SDL_VERSION_ATLEAST(2,0,12)
+#if SDL_VERSION_ATLEAST(2,0,14)
 	if (info->subtype == SUBTYPE_XBOX_ELITE && button >= SDL_CONTROLLER_BUTTON_PADDLE1 && button <= SDL_CONTROLLER_BUTTON_PADDLE4) {
 		static char const * names[] = {"Paddle 1", "Paddle 2", "Paddle 3", "Paddle 4"};
 		return names[button - SDL_CONTROLLER_BUTTON_PADDLE1];

@@ -198,6 +198,9 @@ void psg_vgm_log(psg_context *context, uint32_t master_clock, vgm_writer *vgm)
 			vgm_sn76489_write(context->vgm, context->cycles, context->counter_load[chan] >> 4 & 0x3F);
 		}
 	}
+	if (context->pan != 0xFF) {
+		vgm_gg_pan_write(context->vgm, context->cycles, context->pan);
+	}
 }
 
 void psg_serialize(psg_context *context, serialize_buffer *buf)

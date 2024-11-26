@@ -81,12 +81,17 @@ static void add_wait(vgm_writer *writer, uint32_t cycle)
 	wait_commands(writer, delta);
 }
 
-static uint8_t last_cmd;
 void vgm_sn76489_write(vgm_writer *writer, uint32_t cycle, uint8_t value)
 {
 	add_wait(writer, cycle);
 	uint8_t cmd[2] = {CMD_PSG, value};
-	last_cmd = CMD_PSG;
+	fwrite(cmd, 1, sizeof(cmd), writer->f);
+}
+
+void vgm_gg_pan_write(vgm_writer *writer, uint32_t cycle, uint8_t value)
+{
+	add_wait(writer, cycle);
+	uint8_t cmd[2] = {CMD_PSG_STEREO, value};
 	fwrite(cmd, 1, sizeof(cmd), writer->f);
 }
 
@@ -99,7 +104,6 @@ void vgm_ym2612_part1_write(vgm_writer *writer, uint32_t cycle, uint8_t reg, uin
 {
 	add_wait(writer, cycle);
 	uint8_t cmd[3] = {CMD_YM2612_0, reg, value};
-	last_cmd = CMD_YM2612_0;
 	fwrite(cmd, 1, sizeof(cmd), writer->f);
 }
 
@@ -107,7 +111,6 @@ void vgm_ym2612_part2_write(vgm_writer *writer, uint32_t cycle, uint8_t reg, uin
 {
 	add_wait(writer, cycle);
 	uint8_t cmd[3] = {CMD_YM2612_1, reg, value};
-	last_cmd = CMD_YM2612_1;
 	fwrite(cmd, 1, sizeof(cmd), writer->f);
 }
 
