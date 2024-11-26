@@ -1042,7 +1042,7 @@ tern_node *get_binding_node_for_pad(int padnum, controller_info *info)
 	if (!pads) {
 		return NULL;
 	}
-	char numstr[11];
+	char numstr[12];
 	sprintf(numstr, "%d", padnum);
 	tern_node * pad = tern_find_node(pads, numstr);
 	if (!pad) {

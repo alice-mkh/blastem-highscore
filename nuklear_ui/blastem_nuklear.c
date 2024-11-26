@@ -83,7 +83,7 @@ void view_play(struct nk_context *context)
 			seconds %= 60;
 			uint32_t hours = minutes / 60;
 			minutes %= 60;
-			char buffer[10];
+			char buffer[22];
 			sprintf(buffer, "%02d:%02d:%02d", hours, minutes, seconds);
 			nk_label(context, buffer, NK_TEXT_LEFT);
 
