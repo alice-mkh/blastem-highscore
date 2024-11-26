@@ -524,11 +524,13 @@ void view_key_bindings(struct nk_context *context)
 	};
 	static const char *general_binds[] = {
 		"ui.menu", "ui.save_state", "ui.load_state", "ui.toggle_fullscreen", "ui.soft_reset", "ui.reload",
-		"ui.screenshot", "ui.vgm_log", "ui.sms_pause", "ui.toggle_keyboard_captured", "ui.release_mouse", "ui.exit"
+		"ui.screenshot", "ui.vgm_log", "ui.sms_pause", "ui.toggle_keyboard_captured", "ui.release_mouse", "ui.exit",
+		"cassette.play", "cassette.stop", "cassette.rewind"
 	};
 	static const char *general_names[] = {
 		"Show Menu", "Quick Save", "Quick Load", "Toggle Fullscreen", "Soft Reset", "Reload Media",
-		"Internal Screenshot", "Toggle VGM Log", "SMS Pause", "Capture Keyboard", "Release Mouse", "Exit"
+		"Internal Screenshot", "Toggle VGM Log", "SMS Pause", "Capture Keyboard", "Release Mouse", "Exit",
+		"Cassette Play", "Cassette Stop", "Cassette Rewind"
 	};
 	static const char *speed_binds[] = {
 		"ui.next_speed", "ui.prev_speed",
@@ -697,6 +699,9 @@ const char *translate_binding_option(const char *option)
 		conf_names = tern_insert_ptr(conf_names, "ui.reload", "Reload ROM");
 		conf_names = tern_insert_ptr(conf_names, "ui.sms_pause", "SMS Pause");
 		conf_names = tern_insert_ptr(conf_names, "ui.toggle_keyboard_captured", "Toggle Keyboard Capture");
+		conf_names = tern_insert_ptr(conf_names, "cassette.play", "Cassette Play");
+		conf_names = tern_insert_ptr(conf_names, "cassette.stop", "Cassette Stop");
+		conf_names = tern_insert_ptr(conf_names, "cassette.rewind", "Cassette Rewind");
 	}
 	return tern_find_ptr_default(conf_names, option, (void *)option);
 }
@@ -749,7 +754,10 @@ static void view_button_binding(struct nk_context *context)
 		"ui.screenshot",
 		"ui.exit",
 		"ui.release_mouse",
-		"ui.toggle_keyboard_captured"
+		"ui.toggle_keyboard_captured",
+		"cassette.play",
+		"cassette.stop",
+		"cassette.rewind",
 	};
 	static const char *debugger[] = {
 		"ui.vdp_debug_mode",

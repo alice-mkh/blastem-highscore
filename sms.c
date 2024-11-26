@@ -19,6 +19,13 @@
 #define Z80_OPTS options
 #endif
 
+enum {
+	TAPE_NONE,
+	TAPE_STOPPED,
+	TAPE_PLAYING,
+	TAPE_RECORDING
+};
+
 static void *memory_io_write(uint32_t location, void *vcontext, uint8_t value)
 {
 	z80_context *z80 = vcontext;
@@ -134,6 +141,94 @@ static void i8255_output_updated(i8255 *ppi, uint32_t cycle, uint32_t port, uint
 	}
 }
 
+static void cassette_run(sms_context *sms, uint32_t cycle)
+{
+	if (!sms->cassette) {
+		return;
+	}
+	if (cycle > sms->cassette_cycle) {
+		uint64_t diff = cycle - sms->cassette_cycle;
+		diff *= sms->cassette_wave.sample_rate;
+		diff /= sms->normal_clock;
+		if (sms->cassette_state == TAPE_PLAYING) {
+			uint64_t bytes_per_sample = sms->cassette_wave.num_channels * sms->cassette_wave.bits_per_sample / 8;
+			uint64_t offset = diff * bytes_per_sample + sms->cassette_offset;
+			if (offset > UINT32_MAX || offset > sms->cassette->size - bytes_per_sample) {
+				sms->cassette_offset = sms->cassette->size - bytes_per_sample;
+			} else {
+				sms->cassette_offset = offset;
+			}
+			static uint32_t last_displayed_seconds;
+			uint32_t seconds = (sms->cassette_offset - (sms->cassette_wave.format_header.size + offsetof(wave_header, audio_format))) / (bytes_per_sample * sms->cassette_wave.sample_rate);
+			if (seconds != last_displayed_seconds) {
+				last_displayed_seconds = seconds;
+				printf("Cassette: %02d:%02d\n", seconds / 60, seconds % 60);
+			}
+		}
+		diff *= sms->normal_clock;
+		diff /= sms->cassette_wave.sample_rate;
+		sms->cassette_cycle += diff;
+	}
+}
+
+static uint8_t cassette_read(sms_context *sms, uint32_t cycle)
+{
+	cassette_run(sms, cycle);
+	if (sms->cassette_state != TAPE_PLAYING) {
+		return 0;
+	}
+	int64_t sample = 0;
+	for (uint16_t i = 0; i < sms->cassette_wave.num_channels; i++)
+	{
+		if (sms->cassette_wave.audio_format == 3) {
+			if (sms->cassette_wave.bits_per_sample == 64) {
+				sample += 32767.0 * ((double *)(((char *)sms->cassette->buffer) + sms->cassette_offset))[i];
+			} else if (sms->cassette_wave.bits_per_sample == 32) {
+				sample += 32767.0f * ((float *)(((char *)sms->cassette->buffer) + sms->cassette_offset))[i];
+			}
+		} else if (sms->cassette_wave.audio_format == 1) {
+			if (sms->cassette_wave.bits_per_sample == 32) {
+				sample += ((int32_t *)(((char *)sms->cassette->buffer) + sms->cassette_offset))[i];
+			} else if (sms->cassette_wave.bits_per_sample == 16) {
+				sample += ((int16_t *)(((char *)sms->cassette->buffer) + sms->cassette_offset))[i];
+			} else if (sms->cassette_wave.bits_per_sample == 8) {
+				sample += ((uint8_t *)sms->cassette->buffer)[sms->cassette_offset + i] - 0x80;
+			}
+		}
+	}
+	uint32_t bytes_per_sample = sms->cassette_wave.num_channels * sms->cassette_wave.bits_per_sample / 8;
+	if (sms->cassette_offset == sms->cassette->size - bytes_per_sample) {
+		sms->cassette_state = TAPE_STOPPED;
+		puts("Cassette reached end of file, playback stoped");
+	}
+	return sample > 0 ? 0x80 : 0;
+}
+
+static void cassette_action(system_header *header, uint8_t action)
+{
+	sms_context *sms = (sms_context*)header;
+	if (!sms->cassette) {
+		return;
+	}
+	cassette_run(sms, sms->z80->Z80_CYCLE);
+	switch(action)
+	{
+	case CASSETTE_PLAY:
+		sms->cassette_state = TAPE_PLAYING;
+		puts("Cassette playback started");
+		break;
+	case CASSETTE_RECORD:
+		break;
+	case CASSETTE_STOP:
+		sms->cassette_state = TAPE_STOPPED;
+		puts("Cassette playback stoped");
+		break;
+	case CASSETTE_REWIND:
+		sms->cassette_offset = sms->cassette_wave.format_header.size + offsetof(wave_header, audio_format);
+		break;
+	}
+}
+
 static uint8_t i8255_input_poll(i8255 *ppi, uint32_t cycle, uint32_t port)
 {
 	if (port > 1) {
@@ -142,10 +237,9 @@ static uint8_t i8255_input_poll(i8255 *ppi, uint32_t cycle, uint32_t port)
 	sms_context *sms = ppi->system;
 	if (sms->kb_mux == 7) {
 		if (port) {
-			//TODO: cassette-in
 			//TODO: printer port BUSY/FAULT
 			uint8_t port_b = io_data_read(sms->io.ports+1, cycle);
-			return (port_b >> 2 & 0xF) | 0x10;
+			return (port_b >> 2 & 0xF) | 0x10 | cassette_read(sms, cycle);
 		} else {
 			uint8_t port_a = io_data_read(sms->io.ports, cycle);
 			uint8_t port_b = io_data_read(sms->io.ports+1, cycle);
@@ -154,9 +248,8 @@ static uint8_t i8255_input_poll(i8255 *ppi, uint32_t cycle, uint32_t port)
 	}
 	//TODO: keyboard matrix ghosting
 	if (port) {
-		//TODO: cassette-in
 		//TODO: printer port BUSY/FAULT
-		return (sms->keystate[sms->kb_mux] >> 8) | 0x10;
+		return (sms->keystate[sms->kb_mux] >> 8) | 0x10 | cassette_read(sms, cycle);
 	}
 	return sms->keystate[sms->kb_mux];
 }
@@ -604,6 +697,7 @@ static void run_sms(system_header *system)
 		target_cycle = sms->z80->Z80_CYCLE;
 		vdp_run_context(sms->vdp, target_cycle);
 		psg_run(sms->psg, target_cycle);
+		cassette_run(sms, target_cycle);
 
 		if (system->save_state) {
 			while (!sms->z80->pc) {
@@ -622,6 +716,7 @@ static void run_sms(system_header *system)
 			z80_adjust_cycles(sms->z80, adjust);
 			vdp_adjust_cycles(sms->vdp, adjust);
 			sms->psg->cycles -= adjust;
+			sms->cassette_cycle -= adjust;
 			target_cycle -= adjust;
 		}
 	}
@@ -886,6 +981,36 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 #endif
 }
 
+void load_cassette(sms_context *sms, system_media *media)
+{
+	sms->cassette = NULL;
+	sms->cassette_state = TAPE_NONE;
+	memcpy(&sms->cassette_wave, media->buffer, offsetof(wave_header, data_header));
+	if (memcmp(sms->cassette_wave.chunk.format, "WAVE", 4)) {
+		return;
+	}
+	if (sms->cassette_wave.chunk.size < offsetof(wave_header, data_header)) {
+		return;
+	}
+	if (memcmp(sms->cassette_wave.format_header.id, "fmt ", 4)) {
+		return;
+	}
+	if (sms->cassette_wave.format_header.size < offsetof(wave_header, data_header) - offsetof(wave_header, audio_format)) {
+		return;
+	}
+	if (sms->cassette_wave.bits_per_sample != 8 && sms->cassette_wave.bits_per_sample != 16) {
+		return;
+	}
+	uint32_t data_sub_chunk = sms->cassette_wave.format_header.size + offsetof(wave_header, audio_format);
+	if (data_sub_chunk > media->size || media->size - data_sub_chunk < sizeof(riff_sub_chunk)) {
+		return;
+	}
+	memcpy(&sms->cassette_wave.data_header, ((uint8_t *)media->buffer) + data_sub_chunk, sizeof(riff_sub_chunk));
+	sms->cassette_state = TAPE_STOPPED;
+	sms->cassette_offset = data_sub_chunk;
+	sms->cassette = media;
+}
+
 sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t force_region)
 {
 	sms_context *sms = calloc(1, sizeof(sms_context));
@@ -947,7 +1072,10 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 		sms->start_button_region = 0xC0;
 	} else if (is_sc3000) {
 		sms->keystate = calloc(sizeof(uint16_t), 7);
-		memset(sms->keystate, 0xFF, sizeof(uint16_t) * 7);
+		for (int i = 0; i < 7; i++)
+		{
+			sms->keystate[i] = 0xFFF;
+		}
 		sms->i8255 = calloc(1, sizeof(i8255));
 		i8255_init(sms->i8255, i8255_output_updated, i8255_input_poll);
 		sms->i8255->system = sms;
@@ -955,6 +1083,9 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 		init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_sc, 7, 15, 0xFF);
 	} else {
 		init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_map, 4, 15, 0xFF);
+	}
+	if (is_sc3000 && media->chain) {
+		load_cassette(sms, media->chain);
 	}
 	sms->z80 = init_z80_context(zopts);
 	sms->z80->system = sms;
@@ -1019,6 +1150,7 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.serialize = serialize;
 	sms->header.deserialize = deserialize;
 	sms->header.toggle_debug_view = toggle_debug_view;
+	sms->header.cassette_action = cassette_action;
 	sms->header.type = SYSTEM_SMS;
 
 	return sms;

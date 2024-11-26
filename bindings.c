@@ -19,7 +19,8 @@ enum {
 	BIND_NONE,
 	BIND_UI,
 	BIND_GAMEPAD,
-	BIND_MOUSE
+	BIND_MOUSE,
+	BIND_CASSETTE
 };
 
 typedef enum {
@@ -312,6 +313,11 @@ void handle_binding_up(keybinding * binding)
 	case BIND_MOUSE:
 		if (allow_content_binds && current_system->mouse_up) {
 			current_system->mouse_up(current_system, binding->subtype_a, binding->subtype_b);
+		}
+		break;
+	case BIND_CASSETTE:
+		if (allow_content_binds && current_system->cassette_action) {
+			current_system->cassette_action(current_system, binding->subtype_a);
 		}
 		break;
 	case BIND_UI:
@@ -649,6 +655,20 @@ int parse_binding_target(int device_num, const char * target, tern_node * padbut
 		} else {
 			warning("Gamepad mapping string '%s' refers to an invalid mouse number %c\n", target, target[mouselen]);
 		}
+	} else if (startswith(target, "cassette.")) {
+		if (!strcmp(target + 9, "play")) {
+			*subtype_a = CASSETTE_PLAY;
+		} else if (!strcmp(target + 9, "record")) {
+			*subtype_a = CASSETTE_RECORD;
+		} else if (!strcmp(target + 9, "stop")) {
+			*subtype_a = CASSETTE_STOP;
+		} else if (!strcmp(target + 9, "rewind")) {
+			*subtype_a = CASSETTE_REWIND;
+		} else {
+			warning("Cassette mapping string '%s' refers to an invalid action\n", target);
+			return BIND_NONE;
+		}
+		return BIND_CASSETTE;
 	} else if(startswith(target, "ui.")) {
 		if (!strcmp(target + 3, "vdp_debug_mode")) {
 			*subtype_a = UI_DEBUG_MODE_INC;

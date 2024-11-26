@@ -38,6 +38,13 @@ enum {
 	NUM_DEBUG_TYPES
 };
 
+enum {
+	CASSETTE_PLAY,
+	CASSETTE_RECORD,
+	CASSETTE_STOP,
+	CASSETTE_REWIND
+};
+
 typedef void (*system_fun)(system_header *);
 typedef uint16_t (*system_fun_r16)(system_header *);
 typedef void (*system_str_fun)(system_header *, char *);
@@ -82,6 +89,7 @@ struct system_header {
 	system_str_fun          start_vgm_log;
 	system_fun              stop_vgm_log;
 	system_u8_fun           toggle_debug_view;
+	system_u8_fun           cassette_action;
 	rom_info          info;
 	arena             *arena;
 	char              *next_rom;
