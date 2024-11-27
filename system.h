@@ -94,6 +94,8 @@ struct system_header {
 	arena             *arena;
 	char              *next_rom;
 	char              *save_dir;
+	char              *paste_buffer;
+	uint32_t          paste_cur_char;
 	int               enter_debugger_frames;
 	uint8_t           enter_debugger;
 	uint8_t           should_exit;

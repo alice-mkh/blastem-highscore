@@ -30,12 +30,14 @@ typedef struct {
 	uint32_t      master_clock;
 	uint32_t      normal_clock;
 	uint32_t      last_frame;
+	uint32_t      last_paste_cycle;
 	uint8_t       should_return;
 	uint8_t       start_button_region;
 	uint8_t       ram[SMS_RAM_SIZE];
 	uint8_t       bank_regs[4];
 	uint8_t       cart_ram[SMS_CART_RAM_SIZE];
 	uint8_t       kb_mux;
+	uint8_t       paste_toggle;
 	uint8_t       cassette_state;
 	uint32_t      cassette_offset;
 	uint32_t      cassette_cycle;

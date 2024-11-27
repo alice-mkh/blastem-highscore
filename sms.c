@@ -26,6 +26,8 @@ enum {
 	TAPE_RECORDING
 };
 
+#define PASTE_DELAY 3420 * 16
+
 static void *memory_io_write(uint32_t location, void *vcontext, uint8_t value)
 {
 	z80_context *z80 = vcontext;
@@ -229,6 +231,177 @@ static void cassette_action(system_header *header, uint8_t action)
 	}
 }
 
+typedef struct {
+	uint8_t main;
+	uint8_t mod1;
+	uint8_t mod2;
+} cp_keys;
+
+static cp_keys cp_to_keys(int cp)
+{
+	uint8_t shift = 0;
+	if (cp >= 'a' && cp <= 'z') {
+		shift = 0x12;
+		cp -= 'a' - 'A';
+	} else if (cp >= '!' && cp <= ')') {
+		shift = 0x12;
+		cp += '1' - '!';
+	} else if (cp >= 0xE0 && cp <= 0xFC) {
+		//accented latin letters only have a single case
+		cp -= 0xE0 - 0xC0;
+	}
+	switch (cp)
+	{
+	case '0': return (cp_keys){0x45, 0, 0};
+	case '1': return (cp_keys){0x16, shift, 0};
+	case '2': return (cp_keys){0x1E, shift, 0};
+	case '3': return (cp_keys){0x26, shift, 0};
+	case '4': return (cp_keys){0x25, shift, 0};
+	case '5': return (cp_keys){0x2E, shift, 0};
+	case '6': return (cp_keys){0x36, shift, 0};
+	case '7': return (cp_keys){0x3D, shift, 0};
+	case '8': return (cp_keys){0x3E, shift, 0};
+	case '9': return (cp_keys){0x46, shift, 0};
+	case 'A': return (cp_keys){0x1C, shift, 0};
+	case 'B': return (cp_keys){0x32, shift, 0};
+	case 'C': return (cp_keys){0x21, shift, 0};
+	case 'D': return (cp_keys){0x23, shift, 0};
+	case 'E': return (cp_keys){0x24, shift, 0};
+	case 'F': return (cp_keys){0x2B, shift, 0};
+	case 'G': return (cp_keys){0x34, shift, 0};
+	case 'H': return (cp_keys){0x33, shift, 0};
+	case 'I': return (cp_keys){0x43, shift, 0};
+	case 'J': return (cp_keys){0x3B, shift, 0};
+	case 'K': return (cp_keys){0x42, shift, 0};
+	case 'L': return (cp_keys){0x4B, shift, 0};
+	case 'M': return (cp_keys){0x3A, shift, 0};
+	case 'N': return (cp_keys){0x31, shift, 0};
+	case 'O': return (cp_keys){0x44, shift, 0};
+	case 'P': return (cp_keys){0x4D, shift, 0};
+	case 'Q': return (cp_keys){0x15, shift, 0};
+	case 'R': return (cp_keys){0x2D, shift, 0};
+	case 'S': return (cp_keys){0x1B, shift, 0};
+	case 'T': return (cp_keys){0x2C, shift, 0};
+	case 'U': return (cp_keys){0x3C, shift, 0};
+	case 'V': return (cp_keys){0x2A, shift, 0};
+	case 'W': return (cp_keys){0x1D, shift, 0};
+	case 'X': return (cp_keys){0x22, shift, 0};
+	case 'Y': return (cp_keys){0x35, shift, 0};
+	case 'Z': return (cp_keys){0x1A, shift, 0};
+	case '-': return (cp_keys){0x4E, 0, 0};
+	case '=': return (cp_keys){0x4E, 0x12, 0};
+	case ';': return (cp_keys){0x4C, 0, 0};
+	case '+': return (cp_keys){0x4C, 0x12, 0};
+	case ':': return (cp_keys){0x52, 0, 0};
+	case '*': return (cp_keys){0x52, 0x12, 0};
+	case ',': return (cp_keys){0x41, 0, 0};
+	case '<': return (cp_keys){0x41, 0x12, 0};
+	case '.': return (cp_keys){0x49, 0, 0};
+	case '>': return (cp_keys){0x49, 0x12, 0};
+	case '/': return (cp_keys){0x4A, 0, 0};
+	case '?': return (cp_keys){0x4A, 0x12, 0};
+	case '^': return (cp_keys){0x55, 0, 0};
+	case '~': return (cp_keys){0x55, 0x12, 0};
+	case '[': return (cp_keys){0x54, 0, 0};
+	case '{': return (cp_keys){0x54, 0x12, 0};
+	case ']': return (cp_keys){0x5B, 0, 0};
+	case '}': return (cp_keys){0x5B, 0x12, 0};
+	case '@': return (cp_keys){0x85, 0, 0};
+	case '`': return (cp_keys){0x85, 0x12, 0};
+	case '\n': return (cp_keys){0x5A, 0, 0};
+	case ' ': return (cp_keys){0x29, 0, 0};
+	case 0xA5: return (cp_keys){0x5D, 0, 0};//¥
+	//Accented latin letters will only work right with export BASIC
+	case 0xA1: return (cp_keys){0x32, 0x81, 0};//¡
+	case 0xA3: return (cp_keys){0x5D, 0x81, 0};//£
+	case 0xBF: return (cp_keys){0x2A, 0x81, 0};//¿
+	case 0xC0: return (cp_keys){0x1D, 0x81, 0};//À
+	case 0xC1: return (cp_keys){0x15, 0x81, 0};//Á
+	case 0xC2: return (cp_keys){0x16, 0x81, 0};//Â
+	case 0xC3: return (cp_keys){0x23, 0x81, 0};//Ã
+	case 0xC4: return (cp_keys){0x1C, 0x81, 0};//Ä
+	case 0xC5: return (cp_keys){0x1B, 0x81, 0};//Å
+	case 0xC7: return (cp_keys){0x21, 0x81, 0};//Ç
+	case 0xC8: return (cp_keys){0x2D, 0x81, 0};//È
+	case 0xC9: return (cp_keys){0x24, 0x81, 0};//É
+	case 0xCA: return (cp_keys){0x26, 0x81, 0};//Ê
+	case 0xCB: return (cp_keys){0x2E, 0x81, 0};//Ë
+	case 0xCC: return (cp_keys){0x44, 0x81, 0};//Ì
+	case 0xCD: return (cp_keys){0x4B, 0x81, 0};//Í
+	case 0xCE: return (cp_keys){0x49, 0x81, 0};//Î
+	case 0xCF: return (cp_keys){0x4C, 0x81, 0};//Ï
+	case 0xD1: return (cp_keys){0x2C, 0x81, 0};//Ñ
+	case 0xD2: return (cp_keys){0x85, 0x81, 0};//Ò
+	case 0xD3: return (cp_keys){0x4D, 0x81, 0};//Ó
+	case 0xD4: return (cp_keys){0x45, 0x81, 0};//Ô
+	case 0xD5: return (cp_keys){0x0E, 0x81, 0};//Õ
+	case 0xD6: return (cp_keys){0x52, 0x81, 0};//Ö
+	//character in font doesn't really look like a phi to me
+	//but Wikipedia lists it as such
+	case 0x3A6: //Φ
+	case 0xD8: return (cp_keys){0x54, 0x81, 0};//Ø
+	case 0xD9: return (cp_keys){0x43, 0x81, 0};//Ù
+	case 0xDA: return (cp_keys){0x3C, 0x81, 0};//Ú
+	case 0xDB: return (cp_keys){0x3D, 0x81, 0};//Û
+	case 0xDC: return (cp_keys){0x42, 0x81, 0};//Ü
+	case 0x3A3: return (cp_keys){0x5B, 0x81, 0};//Σ
+	case 0x3A9: return (cp_keys){0x3A, 0x81, 0};//Ω
+	case 0x3B1: return (cp_keys){0x34, 0x81, 0};//α
+	case 0x3B2: return (cp_keys){0x33, 0x81, 0};//β
+	case 0x3B8: return (cp_keys){0x3B, 0x81, 0};//θ
+	case 0x3BB: return (cp_keys){0x22, 0x81, 0};//λ
+	case 0xB5://µ
+	case 0x3BC: return (cp_keys){0x1A, 0x81, 0};//μ
+	case 0x3C0: return (cp_keys){0x0E, 0x12, 0};//π
+	default: return (cp_keys){0,0,0};
+	}
+}
+
+static void advance_paste_buffer(sms_context *sms, const char *paste)
+{
+	if (!*paste) {
+		free(sms->header.paste_buffer);
+		sms->header.paste_buffer = NULL;
+	} else {
+		sms->header.paste_cur_char = paste - sms->header.paste_buffer;
+	}
+}
+
+static void process_paste(sms_context *sms, uint32_t cycle)
+{
+	if (sms->header.paste_buffer && cycle > sms->last_paste_cycle && cycle - sms->last_paste_cycle >= PASTE_DELAY) {
+		const char *paste = sms->header.paste_buffer + sms->header.paste_cur_char;
+		int cp = utf8_codepoint(&paste);
+		cp_keys keys = cp_to_keys(cp);
+		if (!keys.main) {
+			advance_paste_buffer(sms, paste);
+			return;
+		}
+		if (sms->paste_toggle) {
+			//key up
+			sms->header.keyboard_up(&sms->header, keys.main);
+			if (keys.mod1) {
+				sms->header.keyboard_up(&sms->header, keys.mod1);
+				if (keys.mod2) {
+					sms->header.keyboard_up(&sms->header, keys.mod2);
+				}
+			}
+			advance_paste_buffer(sms, paste);
+		} else {
+			//key down
+			sms->header.keyboard_down(&sms->header, keys.main);
+			if (keys.mod1) {
+				sms->header.keyboard_down(&sms->header, keys.mod1);
+				if (keys.mod2) {
+					sms->header.keyboard_down(&sms->header, keys.mod2);
+				}
+			}
+		}
+		sms->paste_toggle = !sms->paste_toggle;
+		sms->last_paste_cycle = cycle;
+	}
+}
+
 static uint8_t i8255_input_poll(i8255 *ppi, uint32_t cycle, uint32_t port)
 {
 	if (port > 1) {
@@ -246,6 +419,8 @@ static uint8_t i8255_input_poll(i8255 *ppi, uint32_t cycle, uint32_t port)
 			return (port_a & 0x3F) | (port_b << 6);
 		}
 	}
+	process_events();
+	process_paste(sms, cycle);
 	//TODO: keyboard matrix ghosting
 	if (port) {
 		//TODO: printer port BUSY/FAULT
@@ -720,6 +895,11 @@ static void run_sms(system_header *system)
 			vdp_adjust_cycles(sms->vdp, adjust);
 			sms->psg->cycles -= adjust;
 			sms->cassette_cycle -= adjust;
+			if (sms->last_paste_cycle > adjust) {
+				sms->last_paste_cycle -= adjust;
+			} else {
+				sms->last_paste_cycle = 0;
+			}
 			if (sms->psg->vgm) {
 				vgm_adjust_cycles(sms->psg->vgm, adjust);
 			}
@@ -931,6 +1111,7 @@ uint16_t scancode_map[0x90] = {
 	[0x89] = 0x6040,//up arrow
 	[0x8A] = 0x4020,//down arrow
 	[0x8D] = 0x6020,//right arrow
+	[0x85] = 0x3080,//del mapped to @ because of lack of good options
 };
 
 static void keyboard_down(system_header *system, uint8_t scancode)

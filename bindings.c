@@ -47,7 +47,8 @@ typedef enum {
 	UI_CRAM_DEBUG,
 	UI_COMPOSITE_DEBUG,
 	UI_OSCILLOSCOPE_DEBUG,
-	UI_CD_GRAPHICS_DEBUG
+	UI_CD_GRAPHICS_DEBUG,
+	UI_PASTE
 } ui_action;
 
 typedef struct {
@@ -486,6 +487,15 @@ void handle_binding_up(keybinding * binding)
 				}*/
 				break;
 			}
+		case UI_PASTE:
+			if (allow_content_binds) {
+				if (current_system->paste_buffer) {
+					free(current_system->paste_buffer);
+				}
+				current_system->paste_buffer = render_read_clipboard();
+				current_system->paste_cur_char = 0;
+			}
+			break;
 		}
 		break;
 	}
@@ -722,6 +732,8 @@ int parse_binding_target(int device_num, const char * target, tern_node * padbut
 			*subtype_a = UI_OSCILLOSCOPE_DEBUG;
 		} else if (!strcmp(target + 3, "cd_graphics_debug")) {
 			*subtype_a = UI_CD_GRAPHICS_DEBUG;
+		} else if (!strcmp(target + 3, "paste")) {
+			*subtype_a = UI_PASTE;
 		} else {
 			warning("Unreconized UI binding type %s\n", target);
 			return 0;
