@@ -26,7 +26,7 @@ enum {
 	TAPE_RECORDING
 };
 
-#define PASTE_DELAY 3420 * 16
+#define PASTE_DELAY (3420 * 16)
 
 static void *memory_io_write(uint32_t location, void *vcontext, uint8_t value)
 {
@@ -233,8 +233,9 @@ static void cassette_action(system_header *header, uint8_t action)
 
 typedef struct {
 	uint8_t main;
-	uint8_t mod1;
-	uint8_t mod2;
+	uint8_t mod;
+	uint8_t before;
+	uint8_t after;
 } cp_keys;
 
 static cp_keys cp_to_keys(int cp)
@@ -252,108 +253,108 @@ static cp_keys cp_to_keys(int cp)
 	}
 	switch (cp)
 	{
-	case '0': return (cp_keys){0x45, 0, 0};
-	case '1': return (cp_keys){0x16, shift, 0};
-	case '2': return (cp_keys){0x1E, shift, 0};
-	case '3': return (cp_keys){0x26, shift, 0};
-	case '4': return (cp_keys){0x25, shift, 0};
-	case '5': return (cp_keys){0x2E, shift, 0};
-	case '6': return (cp_keys){0x36, shift, 0};
-	case '7': return (cp_keys){0x3D, shift, 0};
-	case '8': return (cp_keys){0x3E, shift, 0};
-	case '9': return (cp_keys){0x46, shift, 0};
-	case 'A': return (cp_keys){0x1C, shift, 0};
-	case 'B': return (cp_keys){0x32, shift, 0};
-	case 'C': return (cp_keys){0x21, shift, 0};
-	case 'D': return (cp_keys){0x23, shift, 0};
-	case 'E': return (cp_keys){0x24, shift, 0};
-	case 'F': return (cp_keys){0x2B, shift, 0};
-	case 'G': return (cp_keys){0x34, shift, 0};
-	case 'H': return (cp_keys){0x33, shift, 0};
-	case 'I': return (cp_keys){0x43, shift, 0};
-	case 'J': return (cp_keys){0x3B, shift, 0};
-	case 'K': return (cp_keys){0x42, shift, 0};
-	case 'L': return (cp_keys){0x4B, shift, 0};
-	case 'M': return (cp_keys){0x3A, shift, 0};
-	case 'N': return (cp_keys){0x31, shift, 0};
-	case 'O': return (cp_keys){0x44, shift, 0};
-	case 'P': return (cp_keys){0x4D, shift, 0};
-	case 'Q': return (cp_keys){0x15, shift, 0};
-	case 'R': return (cp_keys){0x2D, shift, 0};
-	case 'S': return (cp_keys){0x1B, shift, 0};
-	case 'T': return (cp_keys){0x2C, shift, 0};
-	case 'U': return (cp_keys){0x3C, shift, 0};
-	case 'V': return (cp_keys){0x2A, shift, 0};
-	case 'W': return (cp_keys){0x1D, shift, 0};
-	case 'X': return (cp_keys){0x22, shift, 0};
-	case 'Y': return (cp_keys){0x35, shift, 0};
-	case 'Z': return (cp_keys){0x1A, shift, 0};
-	case '-': return (cp_keys){0x4E, 0, 0};
-	case '=': return (cp_keys){0x4E, 0x12, 0};
-	case ';': return (cp_keys){0x4C, 0, 0};
-	case '+': return (cp_keys){0x4C, 0x12, 0};
-	case ':': return (cp_keys){0x52, 0, 0};
-	case '*': return (cp_keys){0x52, 0x12, 0};
-	case ',': return (cp_keys){0x41, 0, 0};
-	case '<': return (cp_keys){0x41, 0x12, 0};
-	case '.': return (cp_keys){0x49, 0, 0};
-	case '>': return (cp_keys){0x49, 0x12, 0};
-	case '/': return (cp_keys){0x4A, 0, 0};
-	case '?': return (cp_keys){0x4A, 0x12, 0};
-	case '^': return (cp_keys){0x55, 0, 0};
-	case '~': return (cp_keys){0x55, 0x12, 0};
-	case '[': return (cp_keys){0x54, 0, 0};
-	case '{': return (cp_keys){0x54, 0x12, 0};
-	case ']': return (cp_keys){0x5B, 0, 0};
-	case '}': return (cp_keys){0x5B, 0x12, 0};
-	case '@': return (cp_keys){0x85, 0, 0};
-	case '`': return (cp_keys){0x85, 0x12, 0};
-	case '\n': return (cp_keys){0x5A, 0, 0};
-	case ' ': return (cp_keys){0x29, 0, 0};
-	case 0xA5: return (cp_keys){0x5D, 0, 0};//¥
+	case '0': return (cp_keys){0x45};
+	case '1': return (cp_keys){0x16, shift};
+	case '2': return (cp_keys){0x1E, shift};
+	case '3': return (cp_keys){0x26, shift};
+	case '4': return (cp_keys){0x25, shift};
+	case '5': return (cp_keys){0x2E, shift};
+	case '6': return (cp_keys){0x36, shift};
+	case '7': return (cp_keys){0x3D, shift};
+	case '8': return (cp_keys){0x3E, shift};
+	case '9': return (cp_keys){0x46, shift};
+	case 'A': return (cp_keys){0x1C, shift};
+	case 'B': return (cp_keys){0x32, shift};
+	case 'C': return (cp_keys){0x21, shift};
+	case 'D': return (cp_keys){0x23, shift};
+	case 'E': return (cp_keys){0x24, shift};
+	case 'F': return (cp_keys){0x2B, shift};
+	case 'G': return (cp_keys){0x34, shift};
+	case 'H': return (cp_keys){0x33, shift};
+	case 'I': return (cp_keys){0x43, shift};
+	case 'J': return (cp_keys){0x3B, shift};
+	case 'K': return (cp_keys){0x42, shift};
+	case 'L': return (cp_keys){0x4B, shift};
+	case 'M': return (cp_keys){0x3A, shift};
+	case 'N': return (cp_keys){0x31, shift};
+	case 'O': return (cp_keys){0x44, shift};
+	case 'P': return (cp_keys){0x4D, shift};
+	case 'Q': return (cp_keys){0x15, shift};
+	case 'R': return (cp_keys){0x2D, shift};
+	case 'S': return (cp_keys){0x1B, shift};
+	case 'T': return (cp_keys){0x2C, shift};
+	case 'U': return (cp_keys){0x3C, shift};
+	case 'V': return (cp_keys){0x2A, shift};
+	case 'W': return (cp_keys){0x1D, shift};
+	case 'X': return (cp_keys){0x22, shift};
+	case 'Y': return (cp_keys){0x35, shift};
+	case 'Z': return (cp_keys){0x1A, shift};
+	case '-': return (cp_keys){0x4E};
+	case '=': return (cp_keys){0x4E, 0x12};
+	case ';': return (cp_keys){0x4C};
+	case '+': return (cp_keys){0x4C, 0x12};
+	case ':': return (cp_keys){0x52};
+	case '*': return (cp_keys){0x52, 0x12};
+	case ',': return (cp_keys){0x41};
+	case '<': return (cp_keys){0x41, 0x12};
+	case '.': return (cp_keys){0x49};
+	case '>': return (cp_keys){0x49, 0x12};
+	case '/': return (cp_keys){0x4A};
+	case '?': return (cp_keys){0x4A, 0x12};
+	case '^': return (cp_keys){0x55};
+	case '~': return (cp_keys){0x55, 0x12};
+	case '[': return (cp_keys){0x54};
+	case '{': return (cp_keys){0x54, 0x12};
+	case ']': return (cp_keys){0x5B};
+	case '}': return (cp_keys){0x5B, 0x12};
+	case '@': return (cp_keys){0x85};
+	case '`': return (cp_keys){0x85, 0x12};
+	case '\n': return (cp_keys){0x5A};
+	case ' ': return (cp_keys){0x29};
+	case 0xA5: return (cp_keys){0x5D};//¥
 	//Accented latin letters will only work right with export BASIC
-	case 0xA1: return (cp_keys){0x32, 0x81, 0};//¡
-	case 0xA3: return (cp_keys){0x5D, 0x81, 0};//£
-	case 0xBF: return (cp_keys){0x2A, 0x81, 0};//¿
-	case 0xC0: return (cp_keys){0x1D, 0x81, 0};//À
-	case 0xC1: return (cp_keys){0x15, 0x81, 0};//Á
-	case 0xC2: return (cp_keys){0x16, 0x81, 0};//Â
-	case 0xC3: return (cp_keys){0x23, 0x81, 0};//Ã
-	case 0xC4: return (cp_keys){0x1C, 0x81, 0};//Ä
-	case 0xC5: return (cp_keys){0x1B, 0x81, 0};//Å
-	case 0xC7: return (cp_keys){0x21, 0x81, 0};//Ç
-	case 0xC8: return (cp_keys){0x2D, 0x81, 0};//È
-	case 0xC9: return (cp_keys){0x24, 0x81, 0};//É
-	case 0xCA: return (cp_keys){0x26, 0x81, 0};//Ê
-	case 0xCB: return (cp_keys){0x2E, 0x81, 0};//Ë
-	case 0xCC: return (cp_keys){0x44, 0x81, 0};//Ì
-	case 0xCD: return (cp_keys){0x4B, 0x81, 0};//Í
-	case 0xCE: return (cp_keys){0x49, 0x81, 0};//Î
-	case 0xCF: return (cp_keys){0x4C, 0x81, 0};//Ï
-	case 0xD1: return (cp_keys){0x2C, 0x81, 0};//Ñ
-	case 0xD2: return (cp_keys){0x85, 0x81, 0};//Ò
-	case 0xD3: return (cp_keys){0x4D, 0x81, 0};//Ó
-	case 0xD4: return (cp_keys){0x45, 0x81, 0};//Ô
-	case 0xD5: return (cp_keys){0x0E, 0x81, 0};//Õ
-	case 0xD6: return (cp_keys){0x52, 0x81, 0};//Ö
+	case 0xA1: return (cp_keys){0x32, 0x81};//¡
+	case 0xA3: return (cp_keys){0x5D, 0x81};//£
+	case 0xBF: return (cp_keys){0x2A, 0x81};//¿
+	case 0xC0: return (cp_keys){0x1D, 0x81};//À
+	case 0xC1: return (cp_keys){0x15, 0x81};//Á
+	case 0xC2: return (cp_keys){0x16, 0x81};//Â
+	case 0xC3: return (cp_keys){0x23, 0x81};//Ã
+	case 0xC4: return (cp_keys){0x1C, 0x81};//Ä
+	case 0xC5: return (cp_keys){0x1B, 0x81};//Å
+	case 0xC7: return (cp_keys){0x21, 0x81};//Ç
+	case 0xC8: return (cp_keys){0x2D, 0x81};//È
+	case 0xC9: return (cp_keys){0x24, 0x81};//É
+	case 0xCA: return (cp_keys){0x26, 0x81};//Ê
+	case 0xCB: return (cp_keys){0x2E, 0x81};//Ë
+	case 0xCC: return (cp_keys){0x44, 0x81};//Ì
+	case 0xCD: return (cp_keys){0x4B, 0x81};//Í
+	case 0xCE: return (cp_keys){0x49, 0x81};//Î
+	case 0xCF: return (cp_keys){0x4C, 0x81};//Ï
+	case 0xD1: return (cp_keys){0x2C, 0x81};//Ñ
+	case 0xD2: return (cp_keys){0x85, 0x81};//Ò
+	case 0xD3: return (cp_keys){0x4D, 0x81};//Ó
+	case 0xD4: return (cp_keys){0x45, 0x81};//Ô
+	case 0xD5: return (cp_keys){0x0E, 0x81};//Õ
+	case 0xD6: return (cp_keys){0x52, 0x81};//Ö
 	//character in font doesn't really look like a phi to me
 	//but Wikipedia lists it as such
 	case 0x3A6: //Φ
-	case 0xD8: return (cp_keys){0x54, 0x81, 0};//Ø
-	case 0xD9: return (cp_keys){0x43, 0x81, 0};//Ù
-	case 0xDA: return (cp_keys){0x3C, 0x81, 0};//Ú
-	case 0xDB: return (cp_keys){0x3D, 0x81, 0};//Û
-	case 0xDC: return (cp_keys){0x42, 0x81, 0};//Ü
-	case 0x3A3: return (cp_keys){0x5B, 0x81, 0};//Σ
-	case 0x3A9: return (cp_keys){0x3A, 0x81, 0};//Ω
-	case 0x3B1: return (cp_keys){0x34, 0x81, 0};//α
-	case 0x3B2: return (cp_keys){0x33, 0x81, 0};//β
-	case 0x3B8: return (cp_keys){0x3B, 0x81, 0};//θ
-	case 0x3BB: return (cp_keys){0x22, 0x81, 0};//λ
+	case 0xD8: return (cp_keys){0x54, 0x81};//Ø
+	case 0xD9: return (cp_keys){0x43, 0x81};//Ù
+	case 0xDA: return (cp_keys){0x3C, 0x81};//Ú
+	case 0xDB: return (cp_keys){0x3D, 0x81};//Û
+	case 0xDC: return (cp_keys){0x42, 0x81};//Ü
+	case 0x3A3: return (cp_keys){0x5B, 0x81};//Σ
+	case 0x3A9: return (cp_keys){0x3A, 0x81};//Ω
+	case 0x3B1: return (cp_keys){0x34, 0x81};//α
+	case 0x3B2: return (cp_keys){0x33, 0x81};//β
+	case 0x3B8: return (cp_keys){0x3B, 0x81};//θ
+	case 0x3BB: return (cp_keys){0x22, 0x81};//λ
 	case 0xB5://µ
-	case 0x3BC: return (cp_keys){0x1A, 0x81, 0};//μ
-	case 0x3C0: return (cp_keys){0x0E, 0x12, 0};//π
-	default: return (cp_keys){0,0,0};
+	case 0x3BC: return (cp_keys){0x1A, 0x81};//μ
+	case 0x3C0: return (cp_keys){0x0E, 0x12};//π
+	default: return (cp_keys){0};
 	}
 }
 
@@ -367,38 +368,49 @@ static void advance_paste_buffer(sms_context *sms, const char *paste)
 	}
 }
 
+
+static uint8_t paste_internal(sms_context *sms, uint8_t prev_key)
+{
+	const char *paste = sms->header.paste_buffer + sms->header.paste_cur_char;
+	int cp = utf8_codepoint(&paste);
+	cp_keys keys = cp_to_keys(cp);
+	if (!keys.main) {
+		advance_paste_buffer(sms, paste);
+		return 0;
+	}
+	if (sms->paste_toggle) {
+		//key up
+		sms->header.keyboard_up(&sms->header, keys.main);
+		if (keys.mod) {
+			sms->header.keyboard_up(&sms->header, keys.mod);
+		}
+		advance_paste_buffer(sms, paste);
+	} else {
+		//key down
+		if (prev_key == keys.main) {
+			// we're pressing the key that was just released, we need to wait to the next scan
+			return 0;
+		}
+		sms->header.keyboard_down(&sms->header, keys.main);
+		if (keys.mod) {
+			sms->header.keyboard_down(&sms->header, keys.mod);
+		}
+	}
+	sms->paste_toggle = !sms->paste_toggle;
+	return keys.main;
+}
+
 static void process_paste(sms_context *sms, uint32_t cycle)
 {
 	if (sms->header.paste_buffer && cycle > sms->last_paste_cycle && cycle - sms->last_paste_cycle >= PASTE_DELAY) {
-		const char *paste = sms->header.paste_buffer + sms->header.paste_cur_char;
-		int cp = utf8_codepoint(&paste);
-		cp_keys keys = cp_to_keys(cp);
-		if (!keys.main) {
-			advance_paste_buffer(sms, paste);
-			return;
-		}
-		if (sms->paste_toggle) {
-			//key up
-			sms->header.keyboard_up(&sms->header, keys.main);
-			if (keys.mod1) {
-				sms->header.keyboard_up(&sms->header, keys.mod1);
-				if (keys.mod2) {
-					sms->header.keyboard_up(&sms->header, keys.mod2);
-				}
-			}
-			advance_paste_buffer(sms, paste);
-		} else {
-			//key down
-			sms->header.keyboard_down(&sms->header, keys.main);
-			if (keys.mod1) {
-				sms->header.keyboard_down(&sms->header, keys.mod1);
-				if (keys.mod2) {
-					sms->header.keyboard_down(&sms->header, keys.mod2);
-				}
+		
+		uint8_t main_key;
+		if ((main_key = paste_internal(sms, 0))) {
+			sms->last_paste_cycle = cycle;
+			if (sms->header.paste_buffer && !sms->paste_toggle) {
+				paste_internal(sms, main_key);
 			}
 		}
-		sms->paste_toggle = !sms->paste_toggle;
-		sms->last_paste_cycle = cycle;
 	}
 }
 
