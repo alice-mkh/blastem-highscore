@@ -254,7 +254,7 @@ static cp_keys cp_to_keys(int cp)
 	} else if (cp >= '!' && cp <= ')') {
 		shift = 0x12;
 		cp += '1' - '!';
-	} else if (cp >= 0xE0 && cp <= 0xFC) {
+	} else if (cp >= 0xE0 && cp <= 0xFC && cp != 0xF7) {
 		//accented latin letters only have a single case
 		cp -= 0xE0 - 0xC0;
 	}
@@ -319,6 +319,8 @@ static cp_keys cp_to_keys(int cp)
 	SIMPLE('\n', 0x5A);
 	SIMPLE(' ', 0x29);
 	SIMPLE(0xA5, 0x5D);//¥
+	case 0xA6: //¦ (broken bar)
+	SHIFTED('|', 0x5D);//|
 	//Accented latin letters will only work right with export BASIC
 	ACCENTED(0xA1, 0x32);//¡
 	ACCENTED(0xA3, 0x5D);//£
@@ -353,6 +355,7 @@ static cp_keys cp_to_keys(int cp)
 	ACCENTED(0xDA, 0x3C);//Ú
 	ACCENTED(0xDB, 0x3D);//Û
 	ACCENTED(0xDC, 0x42);//Ü
+	GRAPHIC(0xF7, 0x0E);//÷
 	ACCENTED(0x3A3, 0x5B);//Σ
 	ACCENTED(0x3A9, 0x3A);//Ω
 	ACCENTED(0x3B1, 0x34);//α
@@ -379,6 +382,19 @@ static cp_keys cp_to_keys(int cp)
 	GRAPHIC(0x2571, 0x4E);//╱
 	GRAPHIC(0x2572, 0x5D);//╲
 	GRAPHIC(0x2573, 0x55);//╳
+	//Block Elements
+	SHIFTED_GRAPHIC(0x2580, 0x32);//▀ upper half
+	SHIFTED_GRAPHIC(0x2581, 0x1A);//▁ lower 1/8th
+	SHIFTED_GRAPHIC(0x2582, 0x22);//▂ lower 1/4th
+	SHIFTED_GRAPHIC(0x2584, 0x21);//▄ lower half
+	GRAPHIC(0x2588, 0x2A);//█ full block
+	GRAPHIC(0x258C, 0x32);//▌ left half
+	GRAPHIC(0x258D, 0x31);//▍ left 3/8ths (Sega character is 1/3rd)
+	GRAPHIC(0x258F, 0x3A);//▏ left 1/8th (Sega character is 1/6th)
+	SHIFTED_GRAPHIC(0x2592, 0x2A);//▒
+	SHIFTED_GRAPHIC(0x2594, 0x3A);//▔ upper 1/8th
+	GRAPHIC(0x2595, 0x1A);//▕ right 1/8th (Sega character is 1/6th)
+	GRAPHIC(0x259E, 0x33);//▞
 	default: return (cp_keys){0};
 	}
 }
