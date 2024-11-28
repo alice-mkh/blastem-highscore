@@ -26,7 +26,7 @@ enum {
 	TAPE_RECORDING
 };
 
-#define PASTE_DELAY (3420 * 16)
+#define PASTE_DELAY (3420 * 22)
 
 static void *memory_io_write(uint32_t location, void *vcontext, uint8_t value)
 {
