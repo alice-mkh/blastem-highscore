@@ -487,10 +487,13 @@ static uint8_t paste_internal(sms_context *sms, uint8_t prev_key)
 		sms->paste_state = PASTE_BEFORE;
 		advance_paste_buffer(sms, paste);
 		return keys.after;
-	case PASTE_TOGGLE_UP:
+	case PASTE_TOGGLE_UP: {
 		sms->header.keyboard_up(&sms->header, sms->paste_toggle);
 		sms->paste_state = PASTE_BEFORE;
-		return sms->paste_toggle;
+		uint8_t ret = sms->paste_toggle;
+		sms->paste_toggle = 0;
+		return ret;
+		}
 	}
 }
 
