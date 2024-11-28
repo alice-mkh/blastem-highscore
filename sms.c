@@ -365,6 +365,9 @@ static cp_keys cp_to_keys(int cp)
 	case 0xB5://µ
 	ACCENTED(0x3BC, 0x1A);//μ
 	SHIFTED(0x3C0, 0x0E);//π
+	//Arrows
+	GRAPHIC(0x2190, 0x46);//←
+	GRAPHIC(0x2191, 0x3E);//↑
 	//Box drawing
 	GRAPHIC(0x2500, 0x1E);//─
 	GRAPHIC(0x2501, 0x34);//━
@@ -378,6 +381,10 @@ static cp_keys cp_to_keys(int cp)
 	SHIFTED_GRAPHIC(0x2524, 0x1B);//┤
 	SHIFTED_GRAPHIC(0x252C, 0x1D);//┬
 	SHIFTED_GRAPHIC(0x2534, 0x1C);//┴
+	SHIFTED_GRAPHIC(0x256D, 0x24);//╭
+	SHIFTED_GRAPHIC(0x256E, 0x2D);//╮
+	SHIFTED_GRAPHIC(0x256F, 0x2B);//╯
+	SHIFTED_GRAPHIC(0x2570, 0x23);//╰
 	GRAPHIC(0x253C, 0x16);//┼
 	GRAPHIC(0x2571, 0x4E);//╱
 	GRAPHIC(0x2572, 0x5D);//╲
@@ -391,10 +398,42 @@ static cp_keys cp_to_keys(int cp)
 	GRAPHIC(0x258C, 0x32);//▌ left half
 	GRAPHIC(0x258D, 0x31);//▍ left 3/8ths (Sega character is 1/3rd)
 	GRAPHIC(0x258F, 0x3A);//▏ left 1/8th (Sega character is 1/6th)
+	GRAPHIC(0x2590, 0x21);//▐ right half
 	SHIFTED_GRAPHIC(0x2592, 0x2A);//▒
 	SHIFTED_GRAPHIC(0x2594, 0x3A);//▔ upper 1/8th
 	GRAPHIC(0x2595, 0x1A);//▕ right 1/8th (Sega character is 1/6th)
 	GRAPHIC(0x259E, 0x33);//▞
+	//Geometric Shapes
+	SHIFTED_GRAPHIC(0x25CB, 0x3C);//○
+	SHIFTED_GRAPHIC(0x25CF, 0x3B);//●
+	GRAPHIC(0x25E2, 0x24);//◢
+	GRAPHIC(0x25E3, 0x2D);//◣
+	GRAPHIC(0x25E4, 0x2B);//◤
+	GRAPHIC(0x25E5, 0x23);//◥
+	SHIFTED_GRAPHIC(0x25DC, 0x24);//◜
+	SHIFTED_GRAPHIC(0x25DD, 0x2D);//◝
+	SHIFTED_GRAPHIC(0x25DE, 0x2B);//◞
+	SHIFTED_GRAPHIC(0x25DF, 0x23);//◟
+	//Miscellaneous Symbols
+	GRAPHIC(0x263B, 0x3B);//☻
+	GRAPHIC(0x2660, 0x25);//♠
+	GRAPHIC(0x2663, 0x3D);//♣
+	GRAPHIC(0x2665, 0x2E);//♥
+	GRAPHIC(0x2666, 0x36);//♦
+	//Miscellaneous Symbos and Pictographs
+	GRAPHIC(0x1F47E, 0x42);//👾
+	//Transport and Map Symbols
+	SHIFTED_GRAPHIC(0x1F697, 0x33);//🚗
+	SHIFTED_GRAPHIC(0x1F698, 0x35);//🚘
+	//Symbols for legacy computing
+	SHIFTED_GRAPHIC(0x1FB82, 0x31);//🮂 upper 1/4th
+	GRAPHIC(0x1FB88, 0x22);//🮈 right 3/8ths (Sega character is 1/3rd)
+	case 0x1FB8C: //🮌 left half medium shade
+	SHIFTED_GRAPHIC(0x1FB8D, 0x2C);//🮍 right half medium shade, Sega char is sort of in the middle
+	case 0x1FB8E://🮎 upper half medium shade
+	SHIFTED_GRAPHIC(0x1FB8F, 0x34);//🮏 lower half medium shade, Sega char is sort of in the middle
+	GRAPHIC(0x1FBC5, 0x35);//🯅 stick figure
+	GRAPHIC(0x1FBCF, 0x31);//🯏 left 1/3rd
 	default: return (cp_keys){0};
 	}
 }
