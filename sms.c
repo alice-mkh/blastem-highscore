@@ -543,6 +543,15 @@ static cp_keys cp_to_keys(int cp)
 	KANA(0x30F3, 0x35);//ン
 	SHIFTED_KANA(0x30FB, 0x4A);//・
 	KANA(0x30FC, 0x5D);//ー
+	//CJK Unified Ideographs
+	GRAPHIC(0x571F, 0x85);//土
+	GRAPHIC(0x5E74, 0x4B);//年
+	GRAPHIC(0x65E5, 0x52);//日
+	GRAPHIC(0x6708, 0x4C);//月
+	GRAPHIC(0x6728, 0x44);//木
+	GRAPHIC(0x6C34, 0x43);//水
+	GRAPHIC(0x706B, 0x3C);//火
+	GRAPHIC(0x91D1, 0x4D);//金
 	//Miscellaneous Symbos and Pictographs
 	GRAPHIC(0x1F47E, 0x42);//👾
 	//Transport and Map Symbols
