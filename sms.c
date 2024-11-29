@@ -255,8 +255,13 @@ static cp_keys cp_to_keys(int cp)
 		shift = 0x12;
 		cp += '1' - '!';
 	} else if (cp >= 0xE0 && cp <= 0xFC && cp != 0xF7) {
-		//accented latin letters only have a single case
+		//accented latin letters only have a single case (Latin-1 block)
 		cp -= 0xE0 - 0xC0;
+	} else if (cp >= 0x100 && cp <= 0x16D && (cp & 1)) {
+		//accented latin letters only have a single case (Latin Extended-A block)
+		cp &= ~1;
+	} else if (cp >= 0x1CD && cp <= 0x1D4 && !(cp & 1)) {
+		cp--;
 	}
 	switch (cp)
 	{
@@ -348,7 +353,7 @@ static cp_keys cp_to_keys(int cp)
 	ACCENTED(0xD5, 0x0E);//Õ
 	ACCENTED(0xD6, 0x52);//Ö
 	//character in font doesn't really look like a phi to me
-	//but Wikipedia lists it as such
+	//but Wikipedia lists it as such and it's between other Greek chars
 	case 0x3A6: //Φ
 	ACCENTED(0xD8, 0x54);//Ø
 	ACCENTED(0xD9, 0x43);//Ù
@@ -356,6 +361,22 @@ static cp_keys cp_to_keys(int cp)
 	ACCENTED(0xDB, 0x3D);//Û
 	ACCENTED(0xDC, 0x42);//Ü
 	GRAPHIC(0xF7, 0x0E);//÷
+	//Latin Extended-A
+	ACCENTED(0x100, 0x2B);//Ā
+	case 0x1CD: //Ǎ
+	ACCENTED(0x102, 0x1E);//Ă
+	ACCENTED(0x112, 0x36);//Ē
+	case 0x11A: //Ě
+	ACCENTED(0x114, 0x25);//Ĕ
+	ACCENTED(0x12A, 0x4A);//Ī
+	case 0x1CF: //Ǐ
+	ACCENTED(0x12C, 0x46);//Ĭ
+	case 0x1D1: //Ǒ
+	ACCENTED(0x14E, 0x4E);//Ŏ
+	ACCENTED(0x16A, 0x41);//Ū
+	case 0x1D3: //Ǔ
+	ACCENTED(0x16C, 0x3E);//Ŭ
+	//Greek and Coptic
 	ACCENTED(0x3A3, 0x5B);//Σ
 	ACCENTED(0x3A9, 0x3A);//Ω
 	ACCENTED(0x3B1, 0x34);//α
@@ -463,7 +484,18 @@ static uint8_t paste_internal(sms_context *sms, uint8_t prev_key)
 {
 	const char *paste = sms->header.paste_buffer + sms->header.paste_cur_char;
 	int cp = utf8_codepoint(&paste);
-	cp_keys keys = cp_to_keys(cp);
+	cp_keys keys = {0};
+	if (cp == 'N' || cp == 'n') {
+		const char *tmp = paste;
+		int next = utf8_codepoint(&tmp);
+		if (next == 0x302) {
+			keys = (cp_keys){0x35, 0x81};//N̂  (N with circumflex above)
+			paste = tmp;
+		}
+	}
+	if (!keys.main) {
+		keys = cp_to_keys(cp);
+	}
 	if (!keys.main) {
 		advance_paste_buffer(sms, paste);
 		return 0;
