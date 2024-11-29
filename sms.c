@@ -244,6 +244,10 @@ typedef struct {
 #define ACCENTED(cp, sc) case cp: return (cp_keys){sc, 0x81}
 #define GRAPHIC(cp, sc) case cp: return (cp_keys){sc, .before=0x11, .after=0x11}
 #define SHIFTED_GRAPHIC(cp, sc) case cp: return (cp_keys){sc, 0x12, .before=0x11, .after=0x11}
+#define KANA(cp, sc) case cp: return (cp_keys){sc, .before=0x81, .after=0x81}
+#define SHIFTED_KANA(cp, sc) case cp: return (cp_keys){sc, 0x12, .before=0x81, .after=0x81}
+#define DAKUTEN_KANA(cp, sc) case cp: return (cp_keys){sc, .before=0x81, .after=0x85}
+#define MARU_KANA(cp, sc) case cp: return (cp_keys){sc, .before=0x81, .after=0x54}
 
 static cp_keys cp_to_keys(int cp)
 {
@@ -441,6 +445,104 @@ static cp_keys cp_to_keys(int cp)
 	GRAPHIC(0x2663, 0x3D);//♣
 	GRAPHIC(0x2665, 0x2E);//♥
 	GRAPHIC(0x2666, 0x36);//♦
+	//CJK Punctuation
+	SHIFTED_KANA(0x3002, 0x49);//。
+	SHIFTED_KANA(0x300C, 0x54);//「
+	SHIFTED_KANA(0x300D, 0x5B);//」
+	//Hiragana (for diacritics shared with Katakana)
+	case 0xFF9E://ﾞ (half-width)
+	case 0x3099:// (combining)
+	KANA(0x309B, 0x85);//゛
+	case 0xFF9F://ﾟ (half-width)
+	case 0x309A:// (combining)
+	KANA(0x309C, 0x54);//゜
+	//Katakana
+	SHIFTED(0x30A0, 0x4E);//Katakana double hyphen, translate to =
+	case 0x30A1://ァ
+	KANA(0x30A2, 0x26);//ア
+	case 0x30A3://ィ
+	KANA(0x30A4, 0x24);//イ
+	case 0x30A5://ゥ
+	KANA(0x30A6, 0x25);//ウ
+	case 0x30A7://ェ
+	KANA(0x30A8, 0x2E);//エ
+	case 0x30A9://ォ
+	KANA(0x30AA, 0x36);//オ
+	case 0x30F5://ヵ
+	KANA(0x30AB, 0x2C);//カ
+	DAKUTEN_KANA(0x30AC, 0x2C);//ガ
+	KANA(0x30AD, 0x34);//キ
+	DAKUTEN_KANA(0x30AE, 0x34);//ギ
+	KANA(0x30AF, 0x33);//ク
+	DAKUTEN_KANA(0x30B0, 0x33);//グ
+	case 0x30F6://ヶ
+	KANA(0x30B1, 0x52);//ケ
+	DAKUTEN_KANA(0x30B2, 0x52);//ゲ
+	KANA(0x30B3, 0x32);//コ
+	DAKUTEN_KANA(0x30B4, 0x32);//ゴ
+	KANA(0x30B5, 0x22);//サ
+	DAKUTEN_KANA(0x30B6, 0x22);//ザ
+	KANA(0x30B7, 0x23);//シ
+	DAKUTEN_KANA(0x30B8, 0x23);//ジ
+	KANA(0x30B9, 0x2D);//ス
+	DAKUTEN_KANA(0x30BA, 0x2D);//ズ
+	KANA(0x30BB, 0x4D);//セ
+	DAKUTEN_KANA(0x30BC, 0x4D);//ゼ
+	KANA(0x30BD, 0x21);//ソ
+	DAKUTEN_KANA(0x30BE, 0x21);//ゾ
+	KANA(0x30BF, 0x15);//タ
+	DAKUTEN_KANA(0x30C0, 0x15);//ダ
+	KANA(0x30C1, 0x1C);//チ
+	DAKUTEN_KANA(0x30C2, 0x1C);//ヂ
+	case 0x30C3://ッ
+	KANA(0x30C4, 0x1A);//ツ
+	DAKUTEN_KANA(0x30C5, 0x1A);//ヅ
+	KANA(0x30C6, 0x1D);//テ
+	DAKUTEN_KANA(0x30C7, 0x1D);//デ
+	KANA(0x30C8, 0x1B);//ト
+	DAKUTEN_KANA(0x30C9, 0x1B);//ド
+	KANA(0x30CA, 0x3C);//ナ
+	KANA(0x30CB, 0x43);//ニ
+	KANA(0x30CC, 0x16);//ヌ
+	KANA(0x30CD, 0x41);//ネ
+	KANA(0x30CE, 0x42);//ノ
+	KANA(0x30CF, 0x2B);//ハ
+	DAKUTEN_KANA(0x30D0, 0x2B);//バ
+	MARU_KANA(0x30D1, 0x2B);//パ
+	KANA(0x30D2, 0x2A);//ヒ
+	DAKUTEN_KANA(0x30D3, 0x2A);//ビ
+	MARU_KANA(0x30D4, 0x2A);//ピ
+	KANA(0x30D5, 0x1E);//フ
+	DAKUTEN_KANA(0x30D6, 0x1E);//ブ
+	MARU_KANA(0x30D7, 0x1E);//プ
+	KANA(0x30D8, 0x55);//ヘ
+	DAKUTEN_KANA(0x30D9,0x55);//ベ
+	MARU_KANA(0x30DA, 0x55);//ペ
+	KANA(0x30DB, 0x4E);//ホ
+	DAKUTEN_KANA(0x30DC,0x4E);//ボ
+	MARU_KANA(0x30DD, 0x4E);//ポ
+	KANA(0x30DE, 0x3B);//マ
+	KANA(0x30DF, 0x31);//ミ
+	KANA(0x30E0, 0x5B);//ム
+	KANA(0x30E1, 0x4A);//メ
+	KANA(0x30E2, 0x3A);//モ
+	case 0x30E3://ャ
+	KANA(0x30E4, 0x3D);//ヤ
+	case 0x30E5://ュ
+	KANA(0x30E6, 0x3E);//ユ
+	case 0x30E7://ョ
+	KANA(0x30E8, 0x46);//ヨ
+	KANA(0x30E9, 0x44);//ラ
+	KANA(0x30EA, 0x4B);//リ
+	KANA(0x30EB, 0x49);//ル
+	KANA(0x30EC, 0x4C);//レ
+	KANA(0x30ED, 0x0E);//ロ
+	case 0x30EE://ヮ
+	KANA(0x30EF, 0x45);//ワ
+	SHIFTED_KANA(0x30F2, 0x45);//ヲ
+	KANA(0x30F3, 0x35);//ン
+	SHIFTED_KANA(0x30FB, 0x4A);//・
+	KANA(0x30FC, 0x5D);//ー
 	//Miscellaneous Symbos and Pictographs
 	GRAPHIC(0x1F47E, 0x42);//👾
 	//Transport and Map Symbols
@@ -556,6 +658,10 @@ static uint8_t paste_internal(sms_context *sms, uint8_t prev_key)
 	case PASTE_AFTER_UP:
 		sms->header.keyboard_up(&sms->header, keys.after);
 		sms->paste_state = PASTE_BEFORE;
+		if (keys.before == 0x81 && (keys.after == 0x85 || keys.after == 0x54)) {
+			//special handling for DAKUTEN_KANA and MARU_KANA
+			sms->paste_toggle = keys.before;
+		}
 		advance_paste_buffer(sms, paste);
 		return keys.after;
 	case PASTE_TOGGLE_UP: {
