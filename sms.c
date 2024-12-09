@@ -1491,6 +1491,7 @@ void load_cassette(sms_context *sms, system_media *media)
 	sms->cassette_state = TAPE_STOPPED;
 	sms->cassette_offset = data_sub_chunk;
 	sms->cassette = media;
+	sms->cassette_cycle = sms->z80->Z80_CYCLE;
 }
 
 static void start_vgm_log(system_header *system, char *filename)
@@ -1515,6 +1516,12 @@ static void stop_vgm_log(system_header *system)
 	vgm_close(sms->psg->vgm);
 	sms->psg->vgm = NULL;
 	sms->header.vgm_logging = 0;
+}
+
+static void lockon_change(system_header *system, system_media *media)
+{
+	sms_context *sms = (sms_context *)system;
+	load_cassette(sms, media);
 }
 
 sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t force_region)
@@ -1660,6 +1667,9 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.toggle_debug_view = toggle_debug_view;
 	sms->header.cassette_action = cassette_action;
 	sms->header.type = SYSTEM_SMS;
+	if (is_sc3000) {
+		sms->header.lockon_change = lockon_change;
+	}
 
 	return sms;
 }

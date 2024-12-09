@@ -22,6 +22,7 @@
 #include "../controller_info.h"
 #include "../bindings.h"
 #include "../mediaplayer.h"
+#include "../sms.h"
 
 static struct nk_context *context;
 static struct rawfb_context *fb_context;
@@ -239,6 +240,12 @@ void view_load(struct nk_context *context)
 void view_lock_on(struct nk_context *context)
 {
 	browser_label = "Select ROM";
+	view_file_browser(context, 0);
+}
+
+void view_load_tape(struct nk_context *context)
+{
+	browser_label = "Select Tape Image";
 	view_file_browser(context, 0);
 }
 
@@ -2444,9 +2451,22 @@ void view_pause(struct nk_context *context)
 		{"Settings", view_settings},
 		{"Exit", NULL}
 	};
+	static menu_item sc3k_items[] = {
+		{"Resume", view_play},
+		{"Load ROM", view_load},
+		{"Load Tape", view_load_tape},
+		{"Save State", view_save_state},
+		{"Load State", view_load_state},
+		{"Settings", view_settings},
+		{"Exit", NULL}
+	};
 
 	if (nk_begin(context, "Main Menu", nk_rect(0, 0, render_width(), render_height()), 0)) {
-		menu(context, sizeof(items)/sizeof(*items), items, exit_handler);
+		if (current_system->type == SYSTEM_SMS && ((sms_context *)current_system)->i8255) {
+			menu(context, sizeof(sc3k_items)/sizeof(*sc3k_items), sc3k_items, exit_handler);
+		} else {
+			menu(context, sizeof(items)/sizeof(*items), items, exit_handler);
+		}
 		nk_end(context);
 	}
 }

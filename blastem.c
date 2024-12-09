@@ -441,9 +441,15 @@ void lockon_media(char *lock_on_path)
 	free(lock_on.extension);
 	free(lock_on.orig_path);
 	if (lock_on_path) {
-		reload_media();
+		if (!current_system || !current_system->lockon_change) {
+			cart.chain = NULL;
+			reload_media();
+		}
 		cart.chain = &lock_on;
 		load_media(lock_on_path, &lock_on, NULL);
+		if (current_system && current_system->lockon_change) {
+			current_system->lockon_change(current_system, &lock_on);
+		}
 	} else {
 		lock_on.dir = NULL;
 		lock_on.name = NULL;
