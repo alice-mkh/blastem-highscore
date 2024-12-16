@@ -1690,6 +1690,20 @@ MK-49037-18 {
 	regions E
 }
 a43aef367857a681decea52377c2e7a992c2ac68 {
+	name Level III BASIC (Export)
+	map {
+		0 {
+			device ROM
+			last 7FFF
+		}
+		8000 {
+			device RAM
+			size 8000
+			last FFFF
+		}
+	}
+}
+b1a8585a9afff962e8fd0e79b3305199da4e4562 {
 	name Level III BASIC
 	map {
 		0 {

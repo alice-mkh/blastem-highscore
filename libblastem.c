@@ -532,6 +532,11 @@ void render_set_external_sync(uint8_t ext_sync_on)
 {
 }
 
+char * render_read_clipboard(void)
+{
+	return NULL;
+}
+
 void bindings_set_mouse_mode(uint8_t mode)
 {
 }

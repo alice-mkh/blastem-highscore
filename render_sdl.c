@@ -2573,3 +2573,11 @@ uint8_t render_create_thread(render_thread *thread, const char *name, render_thr
 	*thread = SDL_CreateThread(fun, name, data);
 	return *thread != 0;
 }
+
+char *render_read_clipboard(void)
+{
+	char *tmp = SDL_GetClipboardText();
+	char *ret = strdup(tmp);
+	SDL_free(tmp);
+	return ret;
+}

@@ -19,6 +19,15 @@
 #define Z80_OPTS options
 #endif
 
+enum {
+	TAPE_NONE,
+	TAPE_STOPPED,
+	TAPE_PLAYING,
+	TAPE_RECORDING
+};
+
+#define PASTE_DELAY (3420 * 22)
+
 static void *memory_io_write(uint32_t location, void *vcontext, uint8_t value)
 {
 	z80_context *z80 = vcontext;
@@ -134,6 +143,560 @@ static void i8255_output_updated(i8255 *ppi, uint32_t cycle, uint32_t port, uint
 	}
 }
 
+static void cassette_run(sms_context *sms, uint32_t cycle)
+{
+	if (!sms->cassette) {
+		return;
+	}
+	if (cycle > sms->cassette_cycle) {
+		uint64_t diff = cycle - sms->cassette_cycle;
+		diff *= sms->cassette_wave.sample_rate;
+		diff /= sms->normal_clock;
+		if (sms->cassette_state == TAPE_PLAYING) {
+			uint64_t bytes_per_sample = sms->cassette_wave.num_channels * sms->cassette_wave.bits_per_sample / 8;
+			uint64_t offset = diff * bytes_per_sample + sms->cassette_offset;
+			if (offset > UINT32_MAX || offset > sms->cassette->size - bytes_per_sample) {
+				sms->cassette_offset = sms->cassette->size - bytes_per_sample;
+			} else {
+				sms->cassette_offset = offset;
+			}
+			static uint32_t last_displayed_seconds;
+			uint32_t seconds = (sms->cassette_offset - (sms->cassette_wave.format_header.size + offsetof(wave_header, audio_format))) / (bytes_per_sample * sms->cassette_wave.sample_rate);
+			if (seconds != last_displayed_seconds) {
+				last_displayed_seconds = seconds;
+				printf("Cassette: %02d:%02d\n", seconds / 60, seconds % 60);
+			}
+		}
+		diff *= sms->normal_clock;
+		diff /= sms->cassette_wave.sample_rate;
+		sms->cassette_cycle += diff;
+	}
+}
+
+static uint8_t cassette_read(sms_context *sms, uint32_t cycle)
+{
+	cassette_run(sms, cycle);
+	if (sms->cassette_state != TAPE_PLAYING) {
+		return 0;
+	}
+	int64_t sample = 0;
+	for (uint16_t i = 0; i < sms->cassette_wave.num_channels; i++)
+	{
+		if (sms->cassette_wave.audio_format == 3) {
+			if (sms->cassette_wave.bits_per_sample == 64) {
+				sample += 32767.0 * ((double *)(((char *)sms->cassette->buffer) + sms->cassette_offset))[i];
+			} else if (sms->cassette_wave.bits_per_sample == 32) {
+				sample += 32767.0f * ((float *)(((char *)sms->cassette->buffer) + sms->cassette_offset))[i];
+			}
+		} else if (sms->cassette_wave.audio_format == 1) {
+			if (sms->cassette_wave.bits_per_sample == 32) {
+				sample += ((int32_t *)(((char *)sms->cassette->buffer) + sms->cassette_offset))[i];
+			} else if (sms->cassette_wave.bits_per_sample == 16) {
+				sample += ((int16_t *)(((char *)sms->cassette->buffer) + sms->cassette_offset))[i];
+			} else if (sms->cassette_wave.bits_per_sample == 8) {
+				sample += ((uint8_t *)sms->cassette->buffer)[sms->cassette_offset + i] - 0x80;
+			}
+		}
+	}
+	uint32_t bytes_per_sample = sms->cassette_wave.num_channels * sms->cassette_wave.bits_per_sample / 8;
+	if (sms->cassette_offset == sms->cassette->size - bytes_per_sample) {
+		sms->cassette_state = TAPE_STOPPED;
+		puts("Cassette reached end of file, playback stoped");
+	}
+	return sample > 0 ? 0x80 : 0;
+}
+
+static void cassette_action(system_header *header, uint8_t action)
+{
+	sms_context *sms = (sms_context*)header;
+	if (!sms->cassette) {
+		return;
+	}
+	cassette_run(sms, sms->z80->Z80_CYCLE);
+	switch(action)
+	{
+	case CASSETTE_PLAY:
+		sms->cassette_state = TAPE_PLAYING;
+		puts("Cassette playback started");
+		break;
+	case CASSETTE_RECORD:
+		break;
+	case CASSETTE_STOP:
+		sms->cassette_state = TAPE_STOPPED;
+		puts("Cassette playback stoped");
+		break;
+	case CASSETTE_REWIND:
+		sms->cassette_offset = sms->cassette_wave.format_header.size + offsetof(wave_header, audio_format);
+		break;
+	}
+}
+
+typedef struct {
+	uint8_t main;
+	uint8_t mod;
+	uint8_t before;
+	uint8_t after;
+} cp_keys;
+
+#define SIMPLE(cp, sc) case cp: return (cp_keys){sc}
+#define MAYBE_SHIFT(cp, sc) case cp: return (cp_keys){sc, shift}
+#define SHIFTED(cp, sc) case cp: return (cp_keys){sc, 0x12}
+#define ACCENTED(cp, sc) case cp: return (cp_keys){sc, 0x81}
+#define GRAPHIC(cp, sc) case cp: return (cp_keys){sc, .before=0x11, .after=0x11}
+#define SHIFTED_GRAPHIC(cp, sc) case cp: return (cp_keys){sc, 0x12, .before=0x11, .after=0x11}
+#define KANA(cp, sc) case cp: return (cp_keys){sc, .before=0x81, .after=0x81}
+#define SHIFTED_KANA(cp, sc) case cp: return (cp_keys){sc, 0x12, .before=0x81, .after=0x81}
+#define DAKUTEN_KANA(cp, sc) case cp: return (cp_keys){sc, .before=0x81, .after=0x85}
+#define MARU_KANA(cp, sc) case cp: return (cp_keys){sc, .before=0x81, .after=0x54}
+
+static cp_keys cp_to_keys(int cp)
+{
+	uint8_t shift = 0;
+	if (cp >= 'a' && cp <= 'z') {
+		shift = 0x12;
+		cp -= 'a' - 'A';
+	} else if (cp >= '!' && cp <= ')') {
+		shift = 0x12;
+		cp += '1' - '!';
+	} else if (cp >= 0xE0 && cp <= 0xFC && cp != 0xF7) {
+		//accented latin letters only have a single case (Latin-1 block)
+		cp -= 0xE0 - 0xC0;
+	} else if (cp >= 0x100 && cp <= 0x16D && (cp & 1)) {
+		//accented latin letters only have a single case (Latin Extended-A block)
+		cp &= ~1;
+	} else if (cp >= 0x1CD && cp <= 0x1D4 && !(cp & 1)) {
+		cp--;
+	}
+	switch (cp)
+	{
+	SIMPLE('0', 0x45);
+	MAYBE_SHIFT('1', 0x16);
+	MAYBE_SHIFT('2', 0x1E);
+	MAYBE_SHIFT('3', 0x26);
+	MAYBE_SHIFT('4', 0x25);
+	MAYBE_SHIFT('5', 0x2E);
+	MAYBE_SHIFT('6', 0x36);
+	MAYBE_SHIFT('7', 0x3D);
+	MAYBE_SHIFT('8', 0x3E);
+	MAYBE_SHIFT('9', 0x46);
+	MAYBE_SHIFT('A', 0x1C);
+	MAYBE_SHIFT('B', 0x32);
+	MAYBE_SHIFT('C', 0x21);
+	MAYBE_SHIFT('D', 0x23);
+	MAYBE_SHIFT('E', 0x24);
+	MAYBE_SHIFT('F', 0x2B);
+	MAYBE_SHIFT('G', 0x34);
+	MAYBE_SHIFT('H', 0x33);
+	MAYBE_SHIFT('I', 0x43);
+	MAYBE_SHIFT('J', 0x3B);
+	MAYBE_SHIFT('K', 0x42);
+	MAYBE_SHIFT('L', 0x4B);
+	MAYBE_SHIFT('M', 0x3A);
+	MAYBE_SHIFT('N', 0x31);
+	MAYBE_SHIFT('O', 0x44);
+	MAYBE_SHIFT('P', 0x4D);
+	MAYBE_SHIFT('Q', 0x15);
+	MAYBE_SHIFT('R', 0x2D);
+	MAYBE_SHIFT('S', 0x1B);
+	MAYBE_SHIFT('T', 0x2C);
+	MAYBE_SHIFT('U', 0x3C);
+	MAYBE_SHIFT('V', 0x2A);
+	MAYBE_SHIFT('W', 0x1D);
+	MAYBE_SHIFT('X', 0x22);
+	MAYBE_SHIFT('Y', 0x35);
+	MAYBE_SHIFT('Z', 0x1A);
+	SIMPLE('-', 0x4E);
+	SHIFTED('=', 0x4E);
+	SIMPLE(';', 0x4C);
+	SHIFTED('+', 0x4C);
+	SIMPLE(':', 0x52);
+	SHIFTED('*', 0x52);
+	SIMPLE(',', 0x41);
+	SHIFTED('<', 0x41);
+	SIMPLE('.', 0x49);
+	SHIFTED('>', 0x49);
+	SIMPLE('/', 0x4A);
+	SHIFTED('?', 0x4A);
+	SIMPLE('^', 0x55);
+	SHIFTED('~', 0x55);
+	SIMPLE('[', 0x54);
+	SHIFTED('{', 0x54);
+	SIMPLE(']', 0x5B);
+	SHIFTED('}', 0x5B);
+	SIMPLE('@', 0x85);
+	SHIFTED('`', 0x85);
+	SIMPLE('\n', 0x5A);
+	SIMPLE(' ', 0x29);
+	SIMPLE(0xA5, 0x5D);//¥
+	case 0xA6: //¦ (broken bar)
+	SHIFTED('|', 0x5D);//|
+	//Accented latin letters will only work right with export BASIC
+	ACCENTED(0xA1, 0x32);//¡
+	ACCENTED(0xA3, 0x5D);//£
+	ACCENTED(0xBF, 0x2A);//¿
+	ACCENTED(0xC0, 0x1D);//À
+	ACCENTED(0xC1, 0x15);//Á
+	ACCENTED(0xC2, 0x16);//Â
+	ACCENTED(0xC3, 0x23);//Ã
+	ACCENTED(0xC4, 0x1C);//Ä
+	ACCENTED(0xC5, 0x1B);//Å
+	ACCENTED(0xC7, 0x21);//Ç
+	case 0xC6: return (cp_keys){0x31, 0x81, .after=0x24};//Æ
+	ACCENTED(0xC8, 0x2D);//È
+	ACCENTED(0xC9, 0x24);//É
+	ACCENTED(0xCA, 0x26);//Ê
+	ACCENTED(0xCB, 0x2E);//Ë
+	ACCENTED(0xCC, 0x44);//Ì
+	ACCENTED(0xCD, 0x4B);//Í
+	ACCENTED(0xCE, 0x49);//Î
+	ACCENTED(0xCF, 0x4C);//Ï
+	ACCENTED(0xD1, 0x2C);//Ñ
+	ACCENTED(0xD2, 0x85);//Ò
+	ACCENTED(0xD3, 0x4D);//Ó
+	ACCENTED(0xD4, 0x45);//Ô
+	ACCENTED(0xD5, 0x0E);//Õ
+	ACCENTED(0xD6, 0x52);//Ö
+	//character in font doesn't really look like a phi to me
+	//but Wikipedia lists it as such and it's between other Greek chars
+	case 0x3A6: //Φ
+	ACCENTED(0xD8, 0x54);//Ø
+	ACCENTED(0xD9, 0x43);//Ù
+	ACCENTED(0xDA, 0x3C);//Ú
+	ACCENTED(0xDB, 0x3D);//Û
+	ACCENTED(0xDC, 0x42);//Ü
+	GRAPHIC(0xF7, 0x0E);//÷
+	//Latin Extended-A
+	ACCENTED(0x100, 0x2B);//Ā
+	case 0x1CD: //Ǎ
+	ACCENTED(0x102, 0x1E);//Ă
+	ACCENTED(0x112, 0x36);//Ē
+	case 0x11A: //Ě
+	ACCENTED(0x114, 0x25);//Ĕ
+	ACCENTED(0x12A, 0x4A);//Ī
+	case 0x1CF: //Ǐ
+	ACCENTED(0x12C, 0x46);//Ĭ
+	case 0x1D1: //Ǒ
+	ACCENTED(0x14E, 0x4E);//Ŏ
+	ACCENTED(0x16A, 0x41);//Ū
+	case 0x1D3: //Ǔ
+	ACCENTED(0x16C, 0x3E);//Ŭ
+	//Greek and Coptic
+	ACCENTED(0x3A3, 0x5B);//Σ
+	ACCENTED(0x3A9, 0x3A);//Ω
+	ACCENTED(0x3B1, 0x34);//α
+	ACCENTED(0x3B2, 0x33);//β
+	ACCENTED(0x3B8, 0x3B);//θ
+	ACCENTED(0x3BB, 0x22);//λ
+	case 0xB5://µ
+	ACCENTED(0x3BC, 0x1A);//μ
+	SHIFTED(0x3C0, 0x0E);//π
+	//Arrows
+	GRAPHIC(0x2190, 0x46);//←
+	GRAPHIC(0x2191, 0x3E);//↑
+	//Box drawing
+	GRAPHIC(0x2500, 0x1E);//─
+	GRAPHIC(0x2501, 0x34);//━
+	GRAPHIC(0x2502, 0x26);//│
+	GRAPHIC(0x2503, 0x2C);//┃
+	GRAPHIC(0x250C, 0x15);//┌
+	GRAPHIC(0x2510, 0x1D);//┐
+	GRAPHIC(0x2514, 0x1C);//└
+	GRAPHIC(0x2518, 0x1B);//┘
+	SHIFTED_GRAPHIC(0x251C, 0x15);//├
+	SHIFTED_GRAPHIC(0x2524, 0x1B);//┤
+	SHIFTED_GRAPHIC(0x252C, 0x1D);//┬
+	SHIFTED_GRAPHIC(0x2534, 0x1C);//┴
+	SHIFTED_GRAPHIC(0x256D, 0x24);//╭
+	SHIFTED_GRAPHIC(0x256E, 0x2D);//╮
+	SHIFTED_GRAPHIC(0x256F, 0x2B);//╯
+	SHIFTED_GRAPHIC(0x2570, 0x23);//╰
+	GRAPHIC(0x253C, 0x16);//┼
+	GRAPHIC(0x2571, 0x4E);//╱
+	GRAPHIC(0x2572, 0x5D);//╲
+	GRAPHIC(0x2573, 0x55);//╳
+	//Block Elements
+	SHIFTED_GRAPHIC(0x2580, 0x32);//▀ upper half
+	SHIFTED_GRAPHIC(0x2581, 0x1A);//▁ lower 1/8th
+	SHIFTED_GRAPHIC(0x2582, 0x22);//▂ lower 1/4th
+	SHIFTED_GRAPHIC(0x2584, 0x21);//▄ lower half
+	GRAPHIC(0x2588, 0x2A);//█ full block
+	GRAPHIC(0x258C, 0x32);//▌ left half
+	GRAPHIC(0x258D, 0x31);//▍ left 3/8ths (Sega character is 1/3rd)
+	GRAPHIC(0x258F, 0x3A);//▏ left 1/8th (Sega character is 1/6th)
+	GRAPHIC(0x2590, 0x21);//▐ right half
+	SHIFTED_GRAPHIC(0x2592, 0x2A);//▒
+	SHIFTED_GRAPHIC(0x2594, 0x3A);//▔ upper 1/8th
+	GRAPHIC(0x2595, 0x1A);//▕ right 1/8th (Sega character is 1/6th)
+	GRAPHIC(0x259E, 0x33);//▞
+	//Geometric Shapes
+	SHIFTED_GRAPHIC(0x25CB, 0x3C);//○
+	SHIFTED_GRAPHIC(0x25CF, 0x3B);//●
+	GRAPHIC(0x25E2, 0x24);//◢
+	GRAPHIC(0x25E3, 0x2D);//◣
+	GRAPHIC(0x25E4, 0x2B);//◤
+	GRAPHIC(0x25E5, 0x23);//◥
+	SHIFTED_GRAPHIC(0x25DC, 0x24);//◜
+	SHIFTED_GRAPHIC(0x25DD, 0x2D);//◝
+	SHIFTED_GRAPHIC(0x25DE, 0x2B);//◞
+	SHIFTED_GRAPHIC(0x25DF, 0x23);//◟
+	//Miscellaneous Symbols
+	GRAPHIC(0x263B, 0x3B);//☻
+	GRAPHIC(0x2660, 0x25);//♠
+	GRAPHIC(0x2663, 0x3D);//♣
+	GRAPHIC(0x2665, 0x2E);//♥
+	GRAPHIC(0x2666, 0x36);//♦
+	//CJK Punctuation
+	SHIFTED_KANA(0x3002, 0x49);//。
+	SHIFTED_KANA(0x300C, 0x54);//「
+	SHIFTED_KANA(0x300D, 0x5B);//」
+	//Hiragana (for diacritics shared with Katakana)
+	case 0xFF9E://ﾞ (half-width)
+	case 0x3099:// (combining)
+	KANA(0x309B, 0x85);//゛
+	case 0xFF9F://ﾟ (half-width)
+	case 0x309A:// (combining)
+	KANA(0x309C, 0x54);//゜
+	//Katakana
+	SHIFTED(0x30A0, 0x4E);//Katakana double hyphen, translate to =
+	case 0x30A1://ァ
+	KANA(0x30A2, 0x26);//ア
+	case 0x30A3://ィ
+	KANA(0x30A4, 0x24);//イ
+	case 0x30A5://ゥ
+	KANA(0x30A6, 0x25);//ウ
+	case 0x30A7://ェ
+	KANA(0x30A8, 0x2E);//エ
+	case 0x30A9://ォ
+	KANA(0x30AA, 0x36);//オ
+	case 0x30F5://ヵ
+	KANA(0x30AB, 0x2C);//カ
+	DAKUTEN_KANA(0x30AC, 0x2C);//ガ
+	KANA(0x30AD, 0x34);//キ
+	DAKUTEN_KANA(0x30AE, 0x34);//ギ
+	KANA(0x30AF, 0x33);//ク
+	DAKUTEN_KANA(0x30B0, 0x33);//グ
+	case 0x30F6://ヶ
+	KANA(0x30B1, 0x52);//ケ
+	DAKUTEN_KANA(0x30B2, 0x52);//ゲ
+	KANA(0x30B3, 0x32);//コ
+	DAKUTEN_KANA(0x30B4, 0x32);//ゴ
+	KANA(0x30B5, 0x22);//サ
+	DAKUTEN_KANA(0x30B6, 0x22);//ザ
+	KANA(0x30B7, 0x23);//シ
+	DAKUTEN_KANA(0x30B8, 0x23);//ジ
+	KANA(0x30B9, 0x2D);//ス
+	DAKUTEN_KANA(0x30BA, 0x2D);//ズ
+	KANA(0x30BB, 0x4D);//セ
+	DAKUTEN_KANA(0x30BC, 0x4D);//ゼ
+	KANA(0x30BD, 0x21);//ソ
+	DAKUTEN_KANA(0x30BE, 0x21);//ゾ
+	KANA(0x30BF, 0x15);//タ
+	DAKUTEN_KANA(0x30C0, 0x15);//ダ
+	KANA(0x30C1, 0x1C);//チ
+	DAKUTEN_KANA(0x30C2, 0x1C);//ヂ
+	case 0x30C3://ッ
+	KANA(0x30C4, 0x1A);//ツ
+	DAKUTEN_KANA(0x30C5, 0x1A);//ヅ
+	KANA(0x30C6, 0x1D);//テ
+	DAKUTEN_KANA(0x30C7, 0x1D);//デ
+	KANA(0x30C8, 0x1B);//ト
+	DAKUTEN_KANA(0x30C9, 0x1B);//ド
+	KANA(0x30CA, 0x3C);//ナ
+	KANA(0x30CB, 0x43);//ニ
+	KANA(0x30CC, 0x16);//ヌ
+	KANA(0x30CD, 0x41);//ネ
+	KANA(0x30CE, 0x42);//ノ
+	KANA(0x30CF, 0x2B);//ハ
+	DAKUTEN_KANA(0x30D0, 0x2B);//バ
+	MARU_KANA(0x30D1, 0x2B);//パ
+	KANA(0x30D2, 0x2A);//ヒ
+	DAKUTEN_KANA(0x30D3, 0x2A);//ビ
+	MARU_KANA(0x30D4, 0x2A);//ピ
+	KANA(0x30D5, 0x1E);//フ
+	DAKUTEN_KANA(0x30D6, 0x1E);//ブ
+	MARU_KANA(0x30D7, 0x1E);//プ
+	KANA(0x30D8, 0x55);//ヘ
+	DAKUTEN_KANA(0x30D9,0x55);//ベ
+	MARU_KANA(0x30DA, 0x55);//ペ
+	KANA(0x30DB, 0x4E);//ホ
+	DAKUTEN_KANA(0x30DC,0x4E);//ボ
+	MARU_KANA(0x30DD, 0x4E);//ポ
+	KANA(0x30DE, 0x3B);//マ
+	KANA(0x30DF, 0x31);//ミ
+	KANA(0x30E0, 0x5B);//ム
+	KANA(0x30E1, 0x4A);//メ
+	KANA(0x30E2, 0x3A);//モ
+	case 0x30E3://ャ
+	KANA(0x30E4, 0x3D);//ヤ
+	case 0x30E5://ュ
+	KANA(0x30E6, 0x3E);//ユ
+	case 0x30E7://ョ
+	KANA(0x30E8, 0x46);//ヨ
+	KANA(0x30E9, 0x44);//ラ
+	KANA(0x30EA, 0x4B);//リ
+	KANA(0x30EB, 0x49);//ル
+	KANA(0x30EC, 0x4C);//レ
+	KANA(0x30ED, 0x0E);//ロ
+	case 0x30EE://ヮ
+	KANA(0x30EF, 0x45);//ワ
+	SHIFTED_KANA(0x30F2, 0x45);//ヲ
+	KANA(0x30F3, 0x35);//ン
+	SHIFTED_KANA(0x30FB, 0x4A);//・
+	KANA(0x30FC, 0x5D);//ー
+	//CJK Unified Ideographs
+	GRAPHIC(0x571F, 0x85);//土
+	GRAPHIC(0x5E74, 0x4B);//年
+	GRAPHIC(0x65E5, 0x52);//日
+	GRAPHIC(0x6708, 0x4C);//月
+	GRAPHIC(0x6728, 0x44);//木
+	GRAPHIC(0x6C34, 0x43);//水
+	GRAPHIC(0x706B, 0x3C);//火
+	GRAPHIC(0x91D1, 0x4D);//金
+	//Miscellaneous Symbos and Pictographs
+	GRAPHIC(0x1F47E, 0x42);//👾
+	//Transport and Map Symbols
+	SHIFTED_GRAPHIC(0x1F697, 0x33);//🚗
+	SHIFTED_GRAPHIC(0x1F698, 0x35);//🚘
+	//Symbols for legacy computing
+	SHIFTED_GRAPHIC(0x1FB82, 0x31);//🮂 upper 1/4th
+	GRAPHIC(0x1FB88, 0x22);//🮈 right 3/8ths (Sega character is 1/3rd)
+	case 0x1FB8C: //🮌 left half medium shade
+	SHIFTED_GRAPHIC(0x1FB8D, 0x2C);//🮍 right half medium shade, Sega char is sort of in the middle
+	case 0x1FB8E://🮎 upper half medium shade
+	SHIFTED_GRAPHIC(0x1FB8F, 0x34);//🮏 lower half medium shade, Sega char is sort of in the middle
+	GRAPHIC(0x1FBC5, 0x35);//🯅 stick figure
+	GRAPHIC(0x1FBCF, 0x31);//🯏 left 1/3rd
+	default: return (cp_keys){0};
+	}
+}
+
+static void advance_paste_buffer(sms_context *sms, const char *paste)
+{
+	if (!*paste) {
+		free(sms->header.paste_buffer);
+		sms->header.paste_buffer = NULL;
+	} else {
+		sms->header.paste_cur_char = paste - sms->header.paste_buffer;
+	}
+}
+
+enum {
+	PASTE_BEFORE,
+	PASTE_MAIN,
+	PASTE_AFTER,
+	PASTE_BEFORE_UP,
+	PASTE_MAIN_UP,
+	PASTE_AFTER_UP,
+	PASTE_TOGGLE_UP
+};
+
+
+static uint8_t paste_internal(sms_context *sms, uint8_t prev_key)
+{
+	const char *paste = sms->header.paste_buffer + sms->header.paste_cur_char;
+	int cp = utf8_codepoint(&paste);
+	cp_keys keys = {0};
+	if (cp == 'N' || cp == 'n') {
+		const char *tmp = paste;
+		int next = utf8_codepoint(&tmp);
+		if (next == 0x302) {
+			keys = (cp_keys){0x35, 0x81};//N̂  (N with circumflex above)
+			paste = tmp;
+		}
+	}
+	if (!keys.main) {
+		keys = cp_to_keys(cp);
+	}
+	if (!keys.main) {
+		advance_paste_buffer(sms, paste);
+		return 0;
+	}
+	switch (sms->paste_state)
+	{
+	default:
+	case PASTE_BEFORE:
+		if (sms->paste_toggle != keys.before) {
+			if (sms->paste_toggle) {
+				sms->header.keyboard_down(&sms->header, sms->paste_toggle);
+				sms->paste_state = PASTE_TOGGLE_UP;
+				return sms->paste_toggle;
+			} else {
+				if (prev_key == keys.before) {
+					return 0;
+				}
+				sms->header.keyboard_down(&sms->header, keys.before);
+				sms->paste_state = PASTE_BEFORE_UP;
+				return keys.before;
+			}
+		}
+	case PASTE_MAIN:
+		if (prev_key == keys.main) {
+			// we're pressing the key that was just released, we need to wait to the next scan
+			return 0;
+		}
+		sms->header.keyboard_down(&sms->header, keys.main);
+		if (keys.mod) {
+			sms->header.keyboard_down(&sms->header, keys.mod);
+		}
+		sms->paste_state = PASTE_MAIN_UP;
+		return keys.main;
+	case PASTE_AFTER:
+		if (prev_key == keys.after) {
+			return 0;
+		}
+		sms->header.keyboard_down(&sms->header, keys.after);
+		sms->paste_state = PASTE_AFTER_UP;
+		return keys.after;
+	case PASTE_BEFORE_UP:
+		sms->header.keyboard_up(&sms->header, keys.before);
+		sms->paste_state = PASTE_MAIN;
+		return keys.before;
+	case PASTE_MAIN_UP:
+		sms->header.keyboard_up(&sms->header, keys.main);
+		if (keys.mod) {
+			sms->header.keyboard_up(&sms->header, keys.mod);
+		}
+		if (keys.after && keys.after != keys.before) {
+			sms->paste_state = PASTE_AFTER;
+		} else {
+			sms->paste_toggle = keys.after;
+			sms->paste_state = PASTE_BEFORE;
+			advance_paste_buffer(sms, paste);
+		}
+		return keys.main;
+	case PASTE_AFTER_UP:
+		sms->header.keyboard_up(&sms->header, keys.after);
+		sms->paste_state = PASTE_BEFORE;
+		if (keys.before == 0x81 && (keys.after == 0x85 || keys.after == 0x54)) {
+			//special handling for DAKUTEN_KANA and MARU_KANA
+			sms->paste_toggle = keys.before;
+		}
+		advance_paste_buffer(sms, paste);
+		return keys.after;
+	case PASTE_TOGGLE_UP: {
+		sms->header.keyboard_up(&sms->header, sms->paste_toggle);
+		sms->paste_state = PASTE_BEFORE;
+		uint8_t ret = sms->paste_toggle;
+		sms->paste_toggle = 0;
+		return ret;
+		}
+	}
+}
+
+static void process_paste(sms_context *sms, uint32_t cycle)
+{
+	if (sms->header.paste_buffer && cycle > sms->last_paste_cycle && cycle - sms->last_paste_cycle >= PASTE_DELAY) {
+		
+		uint8_t main_key;
+		if ((main_key = paste_internal(sms, 0))) {
+			sms->last_paste_cycle = cycle;
+			if (sms->header.paste_buffer && !sms->paste_state) {
+				paste_internal(sms, main_key);
+			}
+		}
+	}
+}
+
 static uint8_t i8255_input_poll(i8255 *ppi, uint32_t cycle, uint32_t port)
 {
 	if (port > 1) {
@@ -142,21 +705,21 @@ static uint8_t i8255_input_poll(i8255 *ppi, uint32_t cycle, uint32_t port)
 	sms_context *sms = ppi->system;
 	if (sms->kb_mux == 7) {
 		if (port) {
-			//TODO: cassette-in
 			//TODO: printer port BUSY/FAULT
 			uint8_t port_b = io_data_read(sms->io.ports+1, cycle);
-			return (port_b >> 2 & 0xF) | 0x10;
+			return (port_b >> 2 & 0xF) | 0x10 | cassette_read(sms, cycle);
 		} else {
 			uint8_t port_a = io_data_read(sms->io.ports, cycle);
 			uint8_t port_b = io_data_read(sms->io.ports+1, cycle);
 			return (port_a & 0x3F) | (port_b << 6);
 		}
 	}
+	process_events();
+	process_paste(sms, cycle);
 	//TODO: keyboard matrix ghosting
 	if (port) {
-		//TODO: cassette-in
 		//TODO: printer port BUSY/FAULT
-		return (sms->keystate[sms->kb_mux] >> 8) | 0x10;
+		return (sms->keystate[sms->kb_mux] >> 8) | 0x10 | cassette_read(sms, cycle);
 	}
 	return sms->keystate[sms->kb_mux];
 }
@@ -607,6 +1170,7 @@ static void run_sms(system_header *system)
 		target_cycle = sms->z80->Z80_CYCLE;
 		vdp_run_context(sms->vdp, target_cycle);
 		psg_run(sms->psg, target_cycle);
+		cassette_run(sms, target_cycle);
 
 		if (system->save_state) {
 			while (!sms->z80->pc) {
@@ -625,6 +1189,12 @@ static void run_sms(system_header *system)
 			z80_adjust_cycles(sms->z80, adjust);
 			vdp_adjust_cycles(sms->vdp, adjust);
 			sms->psg->cycles -= adjust;
+			sms->cassette_cycle -= adjust;
+			if (sms->last_paste_cycle > adjust) {
+				sms->last_paste_cycle -= adjust;
+			} else {
+				sms->last_paste_cycle = 0;
+			}
 			if (sms->psg->vgm) {
 				vgm_adjust_cycles(sms->psg->vgm, adjust);
 			}
@@ -836,6 +1406,7 @@ uint16_t scancode_map[0x90] = {
 	[0x89] = 0x6040,//up arrow
 	[0x8A] = 0x4020,//down arrow
 	[0x8D] = 0x6020,//right arrow
+	[0x85] = 0x3080,//del mapped to @ because of lack of good options
 };
 
 static void keyboard_down(system_header *system, uint8_t scancode)
@@ -892,6 +1463,37 @@ static void toggle_debug_view(system_header *system, uint8_t debug_view)
 #endif
 }
 
+void load_cassette(sms_context *sms, system_media *media)
+{
+	sms->cassette = NULL;
+	sms->cassette_state = TAPE_NONE;
+	memcpy(&sms->cassette_wave, media->buffer, offsetof(wave_header, data_header));
+	if (memcmp(sms->cassette_wave.chunk.format, "WAVE", 4)) {
+		return;
+	}
+	if (sms->cassette_wave.chunk.size < offsetof(wave_header, data_header)) {
+		return;
+	}
+	if (memcmp(sms->cassette_wave.format_header.id, "fmt ", 4)) {
+		return;
+	}
+	if (sms->cassette_wave.format_header.size < offsetof(wave_header, data_header) - offsetof(wave_header, audio_format)) {
+		return;
+	}
+	if (sms->cassette_wave.bits_per_sample != 8 && sms->cassette_wave.bits_per_sample != 16) {
+		return;
+	}
+	uint32_t data_sub_chunk = sms->cassette_wave.format_header.size + offsetof(wave_header, audio_format);
+	if (data_sub_chunk > media->size || media->size - data_sub_chunk < sizeof(riff_sub_chunk)) {
+		return;
+	}
+	memcpy(&sms->cassette_wave.data_header, ((uint8_t *)media->buffer) + data_sub_chunk, sizeof(riff_sub_chunk));
+	sms->cassette_state = TAPE_STOPPED;
+	sms->cassette_offset = data_sub_chunk;
+	sms->cassette = media;
+	sms->cassette_cycle = sms->z80->Z80_CYCLE;
+}
+
 static void start_vgm_log(system_header *system, char *filename)
 {
 	sms_context *sms = (sms_context *)system;
@@ -914,6 +1516,12 @@ static void stop_vgm_log(system_header *system)
 	vgm_close(sms->psg->vgm);
 	sms->psg->vgm = NULL;
 	sms->header.vgm_logging = 0;
+}
+
+static void lockon_change(system_header *system, system_media *media)
+{
+	sms_context *sms = (sms_context *)system;
+	load_cassette(sms, media);
 }
 
 sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t force_region)
@@ -977,7 +1585,10 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 		sms->start_button_region = 0xC0;
 	} else if (is_sc3000) {
 		sms->keystate = calloc(sizeof(uint16_t), 7);
-		memset(sms->keystate, 0xFF, sizeof(uint16_t) * 7);
+		for (int i = 0; i < 7; i++)
+		{
+			sms->keystate[i] = 0xFFF;
+		}
 		sms->i8255 = calloc(1, sizeof(i8255));
 		i8255_init(sms->i8255, i8255_output_updated, i8255_input_poll);
 		sms->i8255->system = sms;
@@ -985,6 +1596,9 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 		init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_sc, 7, 15, 0xFF);
 	} else {
 		init_z80_opts(zopts, sms->header.info.map, sms->header.info.map_chunks, io_map, 4, 15, 0xFF);
+	}
+	if (is_sc3000 && media->chain) {
+		load_cassette(sms, media->chain);
 	}
 	sms->z80 = init_z80_context(zopts);
 	sms->z80->system = sms;
@@ -1051,7 +1665,11 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.start_vgm_log = start_vgm_log;
 	sms->header.stop_vgm_log = stop_vgm_log;
 	sms->header.toggle_debug_view = toggle_debug_view;
+	sms->header.cassette_action = cassette_action;
 	sms->header.type = SYSTEM_SMS;
+	if (is_sc3000) {
+		sms->header.lockon_change = lockon_change;
+	}
 
 	return sms;
 }

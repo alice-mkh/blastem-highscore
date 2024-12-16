@@ -316,7 +316,7 @@ static void update_pad_menu_binding(char *key, tern_val val, uint8_t valtype, vo
 	*pads = tern_insert_node(*pads, key, val.ptrval);
 }
 
-#define CONFIG_VERSION 10
+#define CONFIG_VERSION 11
 static tern_node *migrate_config(tern_node *config, int from_version)
 {
 	tern_node *def_config = parse_bundled_config("default.cfg");
@@ -515,6 +515,22 @@ static tern_node *migrate_config(tern_node *config, int from_version)
 		}
 		char *combined = alloc_join(new_size, (char const **)ext_list, ' ');
 		config = tern_insert_path(config, "ui\0extensions\0", (tern_val){.ptrval = combined}, TVAL_PTR);
+		break;
+	}
+	case 10: {
+		//Add default bindings for cassette actions
+		char *bind = tern_find_path(config, "bindings\0keys\0f2\0", TVAL_PTR).ptrval;
+		if (!bind) {
+			config = tern_insert_path(config, "bindings\0keys\0f2\0", (tern_val){.ptrval = strdup("cassette.play")}, TVAL_PTR);
+		}
+		bind = tern_find_path(config, "bindings\0keys\0f3\0", TVAL_PTR).ptrval;
+		if (!bind) {
+			config = tern_insert_path(config, "bindings\0keys\0f3\0", (tern_val){.ptrval = strdup("cassette.stop")}, TVAL_PTR);
+		}
+		bind = tern_find_path(config, "bindings\0keys\0f4\0", TVAL_PTR).ptrval;
+		if (!bind) {
+			config = tern_insert_path(config, "bindings\0keys\0f4\0", (tern_val){.ptrval = strdup("cassette.rewind")}, TVAL_PTR);
+		}
 		break;
 	}
 	}

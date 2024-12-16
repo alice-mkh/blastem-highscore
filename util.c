@@ -307,7 +307,10 @@ int utf8_codepoint(const char **text)
 		value |= (**text) & 0x3F;
 		(*text)++;
 	}
-	return value + base;
+	if (value < base) {
+		return 0;
+	}
+	return value;
 }
 
 char is_path_sep(char c)
