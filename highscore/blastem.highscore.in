@@ -1,5 +1,6 @@
 [Highscore]
 Name=BlastEm
+Version=@version@
 Module=blastem-highscore.so
 Authors=Michael Pavone;
 Copyright=Copyright (C) 2013-2024 Michael Pavone;

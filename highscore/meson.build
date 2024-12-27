@@ -1,6 +1,12 @@
 project('blastem-highscore', 'c',
-  version : '0.1',
+  version : '0.6.2',
 )
+
+version = run_command('git', 'describe', '--always', '--tags').stdout().strip()
+
+if version == ''
+  version = meson.project_version()
+endif
 
 cc = meson.get_compiler('c')
 
@@ -128,6 +134,12 @@ shared_library('blastem-highscore',
   install : true
 )
 
-install_data('blastem.highscore',
-  install_dir : cores_dir,
+descriptor = configuration_data()
+descriptor.set('version', version)
+configure_file(
+  input: 'blastem.highscore.in',
+  output: 'blastem.highscore',
+  configuration: descriptor,
+  install_dir: cores_dir,
+  install: true
 )
