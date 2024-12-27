@@ -6,6 +6,8 @@ version = run_command('git', 'describe', '--always', '--tags').stdout().strip()
 
 if version == ''
   version = meson.project_version()
+elif version.startswith('v')
+  version = version.substring(1)
 endif
 
 cc = meson.get_compiler('c')
