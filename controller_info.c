@@ -29,7 +29,8 @@ static heuristic heuristics[] = {
 	{"WiiU", {.type = TYPE_NINTENDO, .subtype = SUBTYPE_WIIU}},
 	{"Wii U", {.type = TYPE_NINTENDO, .subtype = SUBTYPE_WIIU}},
 	{"Nintendo Switch", {.type = TYPE_NINTENDO, .subtype = SUBTYPE_SWITCH}},
-	{"Saturn", {.type = TYPE_SEGA, .subtype = SUBTYPE_SATURN}}
+	{"Saturn", {.type = TYPE_SEGA, .subtype = SUBTYPE_SATURN}},
+	{"8BitDo M30", {.type = TYPE_SEGA, .subtype = SUBTYPE_GENESIS, .variant = VARIANT_8BUTTON}}
 };
 const uint32_t num_heuristics = sizeof(heuristics)/sizeof(*heuristics);
 
