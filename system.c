@@ -8,6 +8,250 @@
 #include "coleco.h"
 #include "paths.h"
 #include "util.h"
+#include "cdimage.h"
+
+#define SMD_HEADER_SIZE 512
+#define SMD_MAGIC1 0x03
+#define SMD_MAGIC2 0xAA
+#define SMD_MAGIC3 0xBB
+#define SMD_BLOCK_SIZE 0x4000
+
+#ifdef DISABLE_ZLIB
+#define ROMFILE FILE*
+#define romopen fopen
+#define romread fread
+#define romseek fseek
+#define romgetc fgetc
+#define romclose fclose
+#else
+#include "zlib/zlib.h"
+#define ROMFILE gzFile
+#define romopen gzopen
+#define romread gzfread
+#define romseek gzseek
+#define romgetc gzgetc
+#define romclose gzclose
+#endif
+
+uint16_t *process_smd_block(uint16_t *dst, uint8_t *src, size_t bytes)
+{
+	for (uint8_t *low = src, *high = (src+bytes/2), *end = src+bytes; high < end; high++, low++) {
+		*(dst++) = *low << 8 | *high;
+	}
+	return dst;
+}
+
+int load_smd_rom(ROMFILE f, void **buffer)
+{
+	uint8_t block[SMD_BLOCK_SIZE];
+	romseek(f, SMD_HEADER_SIZE, SEEK_SET);
+
+	size_t filesize = 512 * 1024;
+	size_t readsize = 0;
+	uint16_t *dst, *buf;
+	dst = buf = malloc(filesize);
+
+
+	size_t read;
+	do {
+		if ((readsize + SMD_BLOCK_SIZE > filesize)) {
+			filesize *= 2;
+			buf = realloc(buf, filesize);
+			dst = buf + readsize/sizeof(uint16_t);
+		}
+		read = romread(block, 1, SMD_BLOCK_SIZE, f);
+		if (read > 0) {
+			dst = process_smd_block(dst, block, read);
+			readsize += read;
+		}
+	} while(read > 0);
+	romclose(f);
+
+	*buffer = buf;
+
+	return readsize;
+}
+
+uint8_t is_smd_format(const char *filename, uint8_t *header)
+{
+	if (header[1] == SMD_MAGIC1 && header[8] == SMD_MAGIC2 && header[9] == SMD_MAGIC3) {
+		int i;
+		for (i = 3; i < 8; i++) {
+			if (header[i] != 0) {
+				return 0;
+			}
+		}
+		if (i == 8) {
+			if (header[2]) {
+				fatal_error("%s is a split SMD ROM which is not currently supported", filename);
+			}
+			return 1;
+		}
+	}
+	return 0;
+}
+
+#ifndef IS_LIB
+uint32_t load_media_zip(const char *filename, system_media *dst)
+{
+	static const char *valid_exts[] = {"bin", "md", "gen", "sms", "gg", "rom", "smd", "sg", "sc", "sf7"};
+	const uint32_t num_exts = sizeof(valid_exts)/sizeof(*valid_exts);
+	zip_file *z = zip_open(filename);
+	if (!z) {
+		return 0;
+	}
+
+	for (uint32_t i = 0; i < z->num_entries; i++)
+	{
+		char *ext = path_extension(z->entries[i].name);
+		if (!ext) {
+			continue;
+		}
+		for (uint32_t j = 0; j < num_exts; j++)
+		{
+			if (!strcasecmp(ext, valid_exts[j])) {
+				size_t out_size = nearest_pow2(z->entries[i].size);
+				dst->buffer = zip_read(z, i, &out_size);
+				if (dst->buffer) {
+					if (is_smd_format(z->entries[i].name, dst->buffer)) {
+						size_t offset;
+						for (offset = 0; offset + SMD_BLOCK_SIZE + SMD_HEADER_SIZE <= out_size; offset += SMD_BLOCK_SIZE)
+						{
+							uint8_t tmp[SMD_BLOCK_SIZE];
+							uint8_t *u8dst = dst->buffer;
+							memcpy(tmp, u8dst + offset + SMD_HEADER_SIZE, SMD_BLOCK_SIZE);
+							process_smd_block((void *)(u8dst + offset), tmp, SMD_BLOCK_SIZE);
+						}
+						out_size = offset;
+					}
+					dst->extension = ext;
+					dst->dir = path_dirname(filename);
+					if (!dst->dir) {
+						dst->dir = path_current_dir();
+					}
+					dst->name = basename_no_extension(filename);
+					dst->size = out_size;
+					dst->zip = z;
+					return out_size;
+				}
+			}
+		}
+		free(ext);
+	}
+	zip_close(z);
+	return 0;
+}
+#endif
+
+uint32_t load_media(char * filename, system_media *dst, system_type *stype)
+{
+	uint8_t header[10];
+#ifndef IS_LIB
+	if (dst->zip) {
+		zip_close(dst->zip);
+	}
+#endif
+	dst->orig_path = filename;
+	char *ext = path_extension(filename);
+#ifndef IS_LIB
+	if (ext && !strcasecmp(ext, "zip")) {
+		free(ext);
+		return load_media_zip(filename, dst);
+	}
+#endif
+	if (ext && !strcasecmp(ext, "iso")) {
+		if (stype) {
+			*stype = SYSTEM_SEGACD;
+		}
+		return make_iso_media(dst, filename);
+	}
+
+	ROMFILE f = romopen(filename, "rb");
+	if (!f) {
+		free(ext);
+		return 0;
+	}
+#ifndef DISABLE_ZLIB
+	char *to_free = NULL;
+	if (!gzdirect(f) && ext && !strcasecmp(ext, "gz")) {
+		size_t without_gz = strlen(filename) - 2;
+		to_free = calloc(1, without_gz);
+		memcpy(to_free, filename, without_gz - 1);
+		to_free[without_gz - 1] = 0;
+		free(ext);
+		filename = to_free;
+		ext = path_extension(filename);
+	}
+#endif //DISABLE_ZLIB
+
+	if (sizeof(header) != romread(header, 1, sizeof(header), f)) {
+		fatal_error("Error reading from %s\n", filename);
+	}
+
+	uint32_t ret = 0;
+	if (is_smd_format(filename, header)) {
+		if (stype) {
+			*stype = SYSTEM_GENESIS;
+		}
+		ret = load_smd_rom(f, &dst->buffer);
+	}
+
+	if (!ret) {
+		size_t filesize = 512 * 1024;
+		size_t readsize = sizeof(header);
+
+		char *buf = malloc(filesize);
+		memcpy(buf, header, readsize);
+
+		size_t read;
+		do {
+			read = romread(buf + readsize, 1, filesize - readsize, f);
+			if (read > 0) {
+				readsize += read;
+				if (readsize == filesize) {
+					int one_more = romgetc(f);
+					if (one_more >= 0) {
+						filesize *= 2;
+						buf = realloc(buf, filesize);
+						buf[readsize++] = one_more;
+					} else {
+						read = 0;
+					}
+				}
+			}
+		} while (read > 0);
+		dst->buffer = buf;
+		ret = (uint32_t)readsize;
+	}
+	dst->dir = path_dirname(filename);
+	if (!dst->dir) {
+		dst->dir = path_current_dir();
+	}
+	dst->name = basename_no_extension(filename);
+	dst->extension = ext;
+	dst->size = ret;
+	romclose(f);
+	if (!strcasecmp(dst->extension, "cue")) {
+		if (parse_cue(dst)) {
+			if (stype) {
+				*stype = SYSTEM_SEGACD;
+			}
+		}
+	} else if (!strcasecmp(dst->extension, "toc")) {
+		if (parse_toc(dst)) {
+			if (stype) {
+				*stype = SYSTEM_SEGACD;
+			}
+		}
+	}
+#ifndef DISABLE_ZLIB
+	if (to_free) {
+		free(to_free);
+	}
+#endif
+
+	return ret;
+}
 
 uint8_t safe_cmp(char *str, long offset, uint8_t *buffer, long filesize)
 {

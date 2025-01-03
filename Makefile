@@ -73,6 +73,7 @@ LIBS=sdl2 glew gl
 endif #USE_GLES
 endif #USE_FBDEV
 FONT:=nuklear_ui/font.o
+ifneq ($(MAKECMDGOALS),libblastem.$(SO))
 CHOOSER:=nuklear_ui/filechooser_gtk.o
 GTKFLAGS:=$(shell pkg-config --cflags gtk+-3.0 2>/dev/null)
 ifeq ($(GTKFLAGS),)
@@ -81,6 +82,7 @@ ifeq ($(GTKFLAGS),)
 CHOOSER:=nuklear_ui/filechooser_null.o
 endif
 endif
+endif #neq ($(MAKECMDGOALS),libblastem.$(SO))
 ifeq ($(GTKFLAGS),)
 else
 EXTRA_NUKLEAR_LDFLAGS:=-ldl
@@ -290,7 +292,7 @@ ALL+= termhelper
 endif
 
 ifeq ($(MAKECMDGOALS),libblastem.$(SO))
-CFLAGS+= -fpic -DIS_LIB
+CFLAGS+= -fpic -DIS_LIB -DDISABLE_ZLIB
 endif
 
 all : $(ALL)

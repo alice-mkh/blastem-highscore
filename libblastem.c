@@ -8,7 +8,9 @@
 #include "io.h"
 #include "genesis.h"
 #include "sms.h"
+#include "cdimage.h"
 
+tern_node *config;
 static retro_environment_t retro_environment;
 RETRO_API void retro_set_environment(retro_environment_t re)
 {
@@ -36,10 +38,28 @@ RETRO_API void retro_set_environment(retro_environment_t re)
 		input_descriptor_macro(5)
 		input_descriptor_macro(6)
 		input_descriptor_macro(7)
-		{ 0 },
+		{0},
 	};
 
 	re(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, (void *)desc);
+	
+	static const struct retro_system_content_info_override scio[] = {
+		{
+			.extensions = "md|gen|sms|gg|sg|sc|col|vgm|flac|wav|bin|rom",
+			.need_fullpath = 0,
+			.persistent_data = 0
+		},
+		{0}
+	};
+	re(RETRO_ENVIRONMENT_SET_CONTENT_INFO_OVERRIDE, (void *)scio);
+	
+	const char *system_dir = NULL;
+	re(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_dir);
+	if (system_dir) {
+		config = tern_insert_path(config, "system\0scd_bios_us\0", (tern_val){.ptrval = alloc_concat(system_dir, "/bios_CD_U.bin")}, TVAL_PTR);
+		config = tern_insert_path(config, "system\0scd_bios_eu\0", (tern_val){.ptrval = alloc_concat(system_dir, "/bios_CD_E.bin")}, TVAL_PTR);
+		config = tern_insert_path(config, "system\0scd_bios_jp\0", (tern_val){.ptrval = alloc_concat(system_dir, "/bios_CD_J.bin")}, TVAL_PTR);
+	}
 }
 
 static retro_video_refresh_t retro_video_refresh;
@@ -74,7 +94,6 @@ int headless = 0;
 int exit_after = 0;
 int z80_enabled = 1;
 char *save_filename;
-tern_node *config;
 uint8_t use_native_states = 1;
 system_header *current_system;
 static system_media media;
@@ -100,12 +119,14 @@ RETRO_API unsigned retro_api_version(void)
 	return RETRO_API_VERSION;
 }
 
+#include "version.inc"
+
 RETRO_API void retro_get_system_info(struct retro_system_info *info)
 {
 	info->library_name = "BlastEm";
-	info->library_version = "0.6.3-pre"; //TODO: share this with blastem.c
-	info->valid_extensions = "md|gen|sms|gg|bin|rom";
-	info->need_fullpath = 0;
+	info->library_version = BLASTEM_VERSION;
+	info->valid_extensions = "md|gen|sms|gg|sg|sc|col|cue|toc|iso|vgm|flac|wav|bin|rom";
+	info->need_fullpath = 1;
 	info->block_extract = 0;
 }
 
@@ -239,15 +260,22 @@ static system_type stype;
 RETRO_API bool retro_load_game(const struct retro_game_info *game)
 {
 	serialize_size_cache = 0;
-	if (game->path) {
-		media.dir = path_dirname(game->path);
-		media.name = basename_no_extension(game->path);
-		media.extension = path_extension(game->path);
+	stype = SYSTEM_UNKNOWN;
+	if (game->data) {
+		if (game->path) {
+			media.dir = path_dirname(game->path);
+			media.name = basename_no_extension(game->path);
+			media.extension = path_extension(game->path);
+		}
+		media.buffer = malloc(nearest_pow2(game->size));
+		memcpy(media.buffer, game->data, game->size);
+		media.size = game->size;
+	} else {
+		load_media((char *)game->path, &media, &stype);
 	}
-	media.buffer = malloc(nearest_pow2(game->size));
-	memcpy(media.buffer, game->data, game->size);
-	media.size = game->size;
-	stype = detect_system_type(&media);
+	if (stype == SYSTEM_UNKNOWN) {
+		stype = detect_system_type(&media);
+	}
 	current_system = alloc_config_system(stype, &media, 0, 0);
 
 	unsigned format = RETRO_PIXEL_FORMAT_XRGB8888;
