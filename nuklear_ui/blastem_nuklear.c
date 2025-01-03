@@ -247,11 +247,13 @@ void view_file_settings(struct nk_context *context)
 	view_file_browser(context, 0);
 }
 
+#include "../version.inc"
+
 void view_about(struct nk_context *context)
 {
 	const char *lines[] = {
-		"BlastEm v0.6.3-pre",
-		"Copyright 2012-2019 Michael Pavone",
+		"BlastEm v" BLASTEM_VERSION,
+		"Copyright 2012-2025 Michael Pavone",
 		"",
 		"BlastEm is a high performance open source",
 		"(GPLv3) Genesis/Megadrive emulator",
