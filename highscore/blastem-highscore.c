@@ -44,14 +44,11 @@ blastem_core_load_rom (HsCore      *core,
 
   disable_stdout_messages ();
 
-  media.dir = path_dirname (rom_paths[0]);
-  media.name = basename_no_extension (rom_paths[0]);
-  media.extension = path_extension (rom_paths[0]);
+  self->stype = SYSTEM_UNKNOWN;
+  load_media ((char *) rom_paths[0], &media, &self->stype);
+  if (self->stype == SYSTEM_UNKNOWN)
+    self->stype = detect_system_type (&media);
 
-  media.buffer = malloc (nearest_pow2 (length));
-  memcpy (media.buffer, data, length);
-  media.size = length;
-  self->stype = detect_system_type (&media);
   current_system = alloc_config_system (self->stype, &media, 0, 0);
 
   g_assert (current_system);
