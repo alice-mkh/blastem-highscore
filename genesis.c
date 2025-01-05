@@ -626,6 +626,7 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 				scd_adjust_cycle(gen->expansion, deduction);
 			}
 			gen->last_flush_cycle -= deduction;
+			gen->last_sync_cycle -= deduction;
 		}
 	} else if (mclks - gen->last_flush_cycle > gen->soft_flush_cycles) {
 		event_soft_flush(mclks);
