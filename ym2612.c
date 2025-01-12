@@ -585,11 +585,16 @@ void ym_run_phase(ym2612_context *context, uint32_t channel, uint32_t op)
 		//Update the channel output if we've updated all operators
 		if (op % 4 == 3) {
 			if (chan->algorithm < 4) {
-				chan->output = operator->output;
+				chan->output = operator->output & ~0x1F;
 				chan->phase_overflow = operator->phase_overflow;
 			} else if(chan->algorithm == 4) {
 				ym_operator *other_op = context->operators + channel * 4 + 2;
-				chan->output = operator->output + other_op->output;
+				chan->output = (operator->output & ~0x1F) + (other_op->output & ~0x1F);
+				if (chan->output > 0x1FE0) {
+					chan->output = 0x1FE0;
+				} else if (chan->output < -0x1FF0) {
+					chan->output = - 0x1FF0;
+				}
 				if (operator->phase_inc < other_op->phase_inc) {
 					chan->phase_overflow = operator->phase_overflow;
 				} else {
@@ -599,7 +604,12 @@ void ym_run_phase(ym2612_context *context, uint32_t channel, uint32_t op)
 				output = 0;
 				uint32_t lowest_phase_inc = 0xFFFFFFFF;
 				for (uint32_t op = ((chan->algorithm == 7) ? 0 : 1) + channel*4; op < (channel+1)*4; op++) {
-					output += context->operators[op].output;
+					output += context->operators[op].output & ~0x1F;
+					if (output > 0x1FE0) {
+						output = 0x1FE0;
+					} else if (output < -0x1FF0) {
+						output = - 0x1FF0;
+					}
 					if (context->operators[op].phase_inc < lowest_phase_inc) {
 						lowest_phase_inc = context->operators[op].phase_inc;
 						chan->phase_overflow = context->operators[op].phase_overflow;
@@ -617,16 +627,6 @@ void ym_output_sample(ym2612_context *context)
 	int16_t left = 0, right = 0;
 	for (int i = 0; i < NUM_CHANNELS; i++) {
 		int16_t value = context->channels[i].output;
-		if (value > 0x1FE0) {
-			value = 0x1FE0;
-		} else if (value < -0x1FF0) {
-			value = -0x1FF0;
-		} else {
-			value &= 0x3FE0;
-			if (value & 0x2000) {
-				value |= 0xC000;
-			}
-		}
 		if (value >= 0) {
 			value += context->zero_offset;
 		} else {
