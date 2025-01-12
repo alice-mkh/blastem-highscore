@@ -648,6 +648,7 @@ void ym_output_sample(ym2612_context *context)
 			} else {
 				left -= (context->zero_offset * context->volume_mult) / context->volume_div;
 			}
+			left += (value * context->volume_mult) / (60 * context->volume_div);
 		}
 		if (context->channels[i].lr & 0x40) {
 			right += (value * context->volume_mult) / context->volume_div;
@@ -657,6 +658,7 @@ void ym_output_sample(ym2612_context *context)
 			} else {
 				right -= (context->zero_offset * context->volume_mult) / context->volume_div;
 			}
+			right += (value * context->volume_mult) / (60 * context->volume_div);
 		}
 	}
 	render_put_stereo_sample(context->audio, left, right);
