@@ -2113,10 +2113,12 @@ void view_audio_settings(struct nk_context *context)
 		"64"
 	};
 	const char *dac[] = {
+		"auto",
 		"zero_offset",
 		"linear"
 	};
 	const char *dac_desc[] = {
+		"Default for Model",
 		"Zero Offset",
 		"Linear"
 	};
@@ -2129,7 +2131,7 @@ void view_audio_settings(struct nk_context *context)
 	if (selected_rate < 0 || selected_size < 0 || selected_dac < 0) {
 		selected_rate = find_match(rates, num_rates, "audio\0rate\0", "48000");
 		selected_size = find_match(sizes, num_sizes, "audio\0buffer\0", "512");
-		selected_dac = find_match(dac, num_dacs, "audio\0fm_dac\0", "zero_offset");
+		selected_dac = find_match(dac, num_dacs, "audio\0fm_dac\0", "auto");
 	}
 	uint32_t width = render_width();
 	uint32_t height = render_height();

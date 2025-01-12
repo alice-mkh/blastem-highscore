@@ -2448,8 +2448,14 @@ static void set_audio_config(genesis_context *gen)
 		config_gain = tern_find_path(config, "audio\0fm_gain\0", TVAL_PTR).ptrval;
 		render_audio_source_gaindb(gen->ym->audio, config_gain ? atof(config_gain) : 0.0f);
 
-		char *config_dac = tern_find_path_default(config, "audio\0fm_dac\0", (tern_val){.ptrval="zero_offset"}, TVAL_PTR).ptrval;
-		ym_enable_zero_offset(gen->ym, !strcmp(config_dac, "zero_offset"));
+		char *config_dac = tern_find_path_default(config, "audio\0fm_dac\0", (tern_val){.ptrval="auto"}, TVAL_PTR).ptrval;
+		uint8_t zero_offset = 0;
+		if (!strcmp(config_dac, "auto")) {
+			zero_offset = gen->ym->status_address_mask != 0;
+		} else if (!strcmp(config_dac, "zero_offset")) {
+			zero_offset = 1;
+		}
+		ym_enable_zero_offset(gen->ym, zero_offset);
 	}
 
 	if (gen->expansion) {
