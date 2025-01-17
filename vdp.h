@@ -267,6 +267,8 @@ struct vdp_context {
 	uint8_t        pushed_frame;
 	uint8_t        type;
 	uint8_t        cram_latch;
+	uint8_t        window_h_latch;
+	uint8_t        window_v_latch;
 	int32_t        color_map[1 << 12];
 	uint8_t        vdpmem[];
 };

@@ -1289,23 +1289,23 @@ static void read_map_scroll(uint16_t column, uint16_t vsram_off, uint32_t line, 
 	}
 	if (!vsram_off) {
 		uint16_t left_col, right_col;
-		if (context->regs[REG_WINDOW_H] & WINDOW_RIGHT) {
-			left_col = (context->regs[REG_WINDOW_H] & 0x1F) * 2 + 2;
+		if (context->window_h_latch & WINDOW_RIGHT) {
+			left_col = (context->window_h_latch & 0x1F) * 2 + 2;
 			right_col = 42;
 		} else {
 			left_col = 0;
-			right_col = (context->regs[REG_WINDOW_H] & 0x1F) * 2;
+			right_col = (context->window_h_latch & 0x1F) * 2;
 			if (right_col) {
 				right_col += 2;
 			}
 		}
 		uint16_t top_line, bottom_line;
-		if (context->regs[REG_WINDOW_V] & WINDOW_DOWN) {
-			top_line = (context->regs[REG_WINDOW_V] & 0x1F) << window_line_shift;
+		if (context->window_v_latch & WINDOW_DOWN) {
+			top_line = (context->window_v_latch & 0x1F) << window_line_shift;
 			bottom_line = context->double_res ? 481 : 241;
 		} else {
 			top_line = 0;
-			bottom_line = (context->regs[REG_WINDOW_V] & 0x1F) << window_line_shift;
+			bottom_line = (context->window_v_latch & 0x1F) << window_line_shift;
 		}
 		if ((column >= left_col && column < right_col) || (line >= top_line && line < bottom_line)) {
 			uint16_t address = context->regs[REG_WINDOW] << 10;
@@ -2100,22 +2100,22 @@ static void vdp_advance_line(vdp_context *context)
 			if (is_mode_5) {
 				uint32_t left, right;
 				uint16_t top_line, bottom_line;
-				if (context->regs[REG_WINDOW_V] & WINDOW_DOWN) {
-					top_line = ((context->regs[REG_WINDOW_V] & 0x1F) << 3) + context->border_top;
+				if (context->window_v_latch & WINDOW_DOWN) {
+					top_line = ((context->window_v_latch & 0x1F) << 3) + context->border_top;
 					bottom_line = context->inactive_start + context->border_top;
 				} else {
 					top_line = context->border_top;
-					bottom_line = ((context->regs[REG_WINDOW_V] & 0x1F) << 3) + context->border_top;
+					bottom_line = ((context->window_v_latch & 0x1F) << 3) + context->border_top;
 				}
 				if (line >= top_line && line < bottom_line) {
 					left = 0;
 					right = 320 + BORDER_LEFT + BORDER_RIGHT;
-				} else if (context->regs[REG_WINDOW_H] & WINDOW_RIGHT) {
-					left = (context->regs[REG_WINDOW_H] & 0x1F) * 16 + BORDER_LEFT;
+				} else if (context->window_h_latch & WINDOW_RIGHT) {
+					left = (context->window_h_latch & 0x1F) * 16 + BORDER_LEFT;
 					right = 320 + BORDER_LEFT + BORDER_RIGHT;
 				} else {
 					left = 0;
-					right = (context->regs[REG_WINDOW_H] & 0x1F) * 16 + BORDER_LEFT;
+					right = (context->window_h_latch & 0x1F) * 16 + BORDER_LEFT;
 				}
 				for (uint32_t i = left; i < right; i++)
 				{
@@ -2134,6 +2134,10 @@ static void vdp_advance_line(vdp_context *context)
 	}
 
 	context->vcounter++;
+	if (is_mode_5) {
+		context->window_h_latch = context->regs[REG_WINDOW_H];
+		context->window_v_latch = context->regs[REG_WINDOW_V];
+	}
 	if (context->vcounter == jump_start) {
 		context->vcounter = jump_end;
 	} else {
@@ -5371,7 +5375,7 @@ void vdp_int_ack(vdp_context * context)
 	}
 }
 
-#define VDP_STATE_VERSION 3
+#define VDP_STATE_VERSION 4
 void vdp_serialize(vdp_context *context, serialize_buffer *buf)
 {
 	save_int8(buf, VDP_STATE_VERSION);
@@ -5454,6 +5458,8 @@ void vdp_serialize(vdp_context *context, serialize_buffer *buf)
 	save_int32(buf, context->address_latch);
 	//was cd_latch, for compatibility with older builds that expect it
 	save_int8(buf, context->cd);
+	save_int8(buf, context->window_h_latch);
+	save_int8(buf, context->window_v_latch);
 }
 
 void vdp_deserialize(deserialize_buffer *buf, void *vcontext)
@@ -5588,10 +5594,16 @@ void vdp_deserialize(deserialize_buffer *buf, void *vcontext)
 	context->cycles = load_int32(buf);
 	context->pending_vint_start = load_int32(buf);
 	context->pending_hint_start = load_int32(buf);
+	context->window_h_latch = context->regs[REG_WINDOW_H];
+	context->window_v_latch = context->regs[REG_WINDOW_V];
 	if (version > 2) {
 		context->address_latch = load_int32(buf);
 		//was cd_latch, no longer used
 		load_int8(buf);
+		if (version > 3) {
+			context->window_h_latch = load_int8(buf);
+			context->window_v_latch = load_int8(buf);
+		}
 	} else {
 		context->address_latch = context->address;
 	}
