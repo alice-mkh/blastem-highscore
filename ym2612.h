@@ -6,57 +6,18 @@
 #ifndef YM2612_H_
 #define YM2612_H_
 
-#include <stdint.h>
-#include <stdio.h>
 #include "serialize.h"
+#include "ym_common.h"
 #include "render_audio.h"
 #include "vgm.h"
 #include "oscilloscope.h"
 
 #define NUM_PART_REGS (0xB7-0x30)
-#define NUM_CHANNELS 6
-#define NUM_OPERATORS (4*NUM_CHANNELS)
+#define OPN2_NUM_CHANNELS 6
+#define OPN2_NUM_OPERATORS (4*OPN2_NUM_CHANNELS)
 
 #define YM_OPT_WAVE_LOG 1
 #define YM_OPT_3834 2
-
-typedef struct {
-	int16_t  *mod_src[2];
-	uint32_t phase_counter;
-	uint32_t phase_inc;
-	uint16_t envelope;
-	int16_t  output;
-	uint16_t total_level;
-	uint16_t sustain_level;
-	uint8_t  rates[4];
-	uint8_t  key_scaling;
-	uint8_t  multiple;
-	uint8_t  detune;
-	uint8_t  am;
-	uint8_t  env_phase;
-	uint8_t  ssg;
-	uint8_t  inverted;
-	uint8_t  phase_overflow;
-} ym_operator;
-
-typedef struct {
-	FILE *   logfile;
-	uint16_t fnum;
-	int16_t  output;
-	int16_t  op1_old;
-	int16_t  op2_old;
-	uint8_t  block_fnum_latch;
-	uint8_t  block;
-	uint8_t  keycode;
-	uint8_t  algorithm;
-	uint8_t  feedback;
-	uint8_t  ams;
-	uint8_t  pms;
-	uint8_t  lr;
-	uint8_t  keyon;
-	uint8_t  scope_channel;
-	uint8_t  phase_overflow;
-} ym_channel;
 
 typedef struct {
 	uint16_t fnum;
@@ -85,8 +46,8 @@ typedef struct {
 	uint32_t     status_address_mask;
 	int32_t      volume_mult;
 	int32_t      volume_div;
-	ym_operator  operators[NUM_OPERATORS];
-	ym_channel   channels[NUM_CHANNELS];
+	ym_operator  operators[OPN2_NUM_OPERATORS];
+	ym_channel   channels[OPN2_NUM_CHANNELS];
 	int16_t      zero_offset;
 	uint16_t     timer_a;
 	uint16_t     timer_a_load;

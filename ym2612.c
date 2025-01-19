@@ -4,8 +4,6 @@
  BlastEm is free software distributed under the terms of the GNU General Public License version 3 or greater. See COPYING for full license text.
 */
 #include <string.h>
-#include <math.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include "ym2612.h"
 #include "render.h"
@@ -47,56 +45,11 @@ enum {
 	PHASE_RELEASE
 };
 
-uint8_t did_tbl_init = 0;
-//According to Nemesis, real hardware only uses a 256 entry quarter sine table; however,
-//memory is cheap so using a half sine table will probably save some cycles
-//a full sine table would be nice, but negative numbers don't get along with log2
-#define SINE_TABLE_SIZE 512
-static uint16_t sine_table[SINE_TABLE_SIZE];
-//Similar deal here with the power table for log -> linear conversion
-//According to Nemesis, real hardware only uses a 256 entry table for the fractional part
-//and uses the whole part as a shift amount.
-#define POW_TABLE_SIZE (1 << 13)
-static uint16_t pow_table[POW_TABLE_SIZE];
-
-static uint16_t rate_table_base[] = {
-	//main portion
-	0,1,0,1,0,1,0,1,
-	0,1,0,1,1,1,0,1,
-	0,1,1,1,0,1,1,1,
-	0,1,1,1,1,1,1,1,
-	//top end
-	1,1,1,1,1,1,1,1,
-	1,1,1,2,1,1,1,2,
-	1,2,1,2,1,2,1,2,
-	1,2,2,2,1,2,2,2,
-};
-
-static uint16_t rate_table[64*8];
-
+static int16_t ams_shift[] = {8, 1, -1, -2};
 static uint8_t lfo_timer_values[] = {108, 77, 71, 67, 62, 44, 8, 5};
-static uint8_t lfo_pm_base[][8] = {
-	{0,   0,   0,   0,   0,   0,   0,   0},
-	{0,   0,   0,   0,   4,   4,   4,   4},
-	{0,   0,   0,   4,   4,   4,   8,   8},
-	{0,   0,   4,   4,   8,   8, 0xc, 0xc},
-	{0,   0,   4,   8,   8,   8, 0xc,0x10},
-	{0,   0,   8, 0xc,0x10,0x10,0x14,0x18},
-	{0,   0,0x10,0x18,0x20,0x20,0x28,0x30},
-	{0,   0,0x20,0x30,0x40,0x40,0x50,0x60}
-};
-static int16_t lfo_pm_table[128 * 32 * 8];
 
-int16_t ams_shift[] = {8, 1, -1, -2};
-
-#define MAX_ENVELOPE 0xFFC
 #define YM_DIVIDER 2
 #define CYCLE_NEVER 0xFFFFFFFF
-
-static uint16_t round_fixed_point(double value, int dec_bits)
-{
-	return value * (1 << dec_bits) + 0.5;
-}
 
 static FILE * debug_file = NULL;
 static uint32_t first_key_on=0;
@@ -108,7 +61,7 @@ static void ym_finalize_log()
 	if (!log_context) {
 		return;
 	}
-	for (int i = 0; i < NUM_CHANNELS; i++) {
+	for (int i = 0; i < OPN2_NUM_CHANNELS; i++) {
 		if (log_context->channels[i].logfile) {
 			wave_finalize(log_context->channels[i].logfile);
 		}
@@ -118,7 +71,7 @@ static void ym_finalize_log()
 
 void ym_adjust_master_clock(ym2612_context * context, uint32_t master_clock)
 {
-	render_audio_adjust_clock(context->audio, master_clock, context->clock_inc * NUM_OPERATORS);
+	render_audio_adjust_clock(context->audio, master_clock, context->clock_inc * OPN2_NUM_OPERATORS);
 }
 
 void ym_adjust_cycles(ym2612_context *context, uint32_t deduction)
@@ -142,11 +95,6 @@ void ym_adjust_cycles(ym2612_context *context, uint32_t deduction)
 	}
 }
 
-#ifdef __ANDROID__
-#define log2(x) (log(x)/log(2))
-#endif
-
-
 #define TIMER_A_MAX 1023
 #define TIMER_B_MAX 255
 
@@ -155,9 +103,9 @@ void ym_reset(ym2612_context *context)
 	memset(context->part1_regs, 0, sizeof(context->part1_regs));
 	memset(context->part2_regs, 0, sizeof(context->part2_regs));
 	memset(context->operators, 0, sizeof(context->operators));
-	FILE* savedlogs[NUM_CHANNELS];
-	uint8_t saved_scope_channel[NUM_CHANNELS];
-	for (int i = 0; i < NUM_CHANNELS; i++)
+	FILE* savedlogs[OPN2_NUM_CHANNELS];
+	uint8_t saved_scope_channel[OPN2_NUM_CHANNELS];
+	for (int i = 0; i < OPN2_NUM_CHANNELS; i++)
 	{
 		savedlogs[i] = context->channels[i].logfile;
 		saved_scope_channel[i] = context->channels[i].scope_channel;
@@ -178,7 +126,7 @@ void ym_reset(ym2612_context *context)
 	//TODO: Reset LFO state
 
 	//some games seem to expect that the LR flags start out as 1
-	for (int i = 0; i < NUM_CHANNELS; i++) {
+	for (int i = 0; i < OPN2_NUM_CHANNELS; i++) {
 		context->channels[i].lr = 0xC0;
 		context->channels[i].logfile = savedlogs[i];
 		context->channels[i].scope_channel = saved_scope_channel[i];
@@ -189,7 +137,7 @@ void ym_reset(ym2612_context *context)
 		}
 	}
 	context->write_cycle = CYCLE_NEVER;
-	for (int i = 0; i < NUM_OPERATORS; i++) {
+	for (int i = 0; i < OPN2_NUM_OPERATORS; i++) {
 		context->operators[i].envelope = MAX_ENVELOPE;
 		context->operators[i].env_phase = PHASE_RELEASE;
 	}
@@ -202,13 +150,13 @@ void ym_init(ym2612_context * context, uint32_t master_clock, uint32_t clock_div
 	memset(context, 0, sizeof(*context));
 	context->clock_inc = clock_div * 6;
 	context->busy_cycles = BUSY_CYCLES * context->clock_inc;
-	context->audio = render_audio_source("YM2612", master_clock, context->clock_inc * NUM_OPERATORS, 2);
+	context->audio = render_audio_source("YM2612", master_clock, context->clock_inc * OPN2_NUM_OPERATORS, 2);
 	//TODO: pick a randomish high initial value and lower it over time
 	context->invalid_status_decay = 225000 * context->clock_inc;
 	context->status_address_mask = (options & YM_OPT_3834) ? 0 : 3;
 
 	//some games seem to expect that the LR flags start out as 1
-	for (int i = 0; i < NUM_CHANNELS; i++) {
+	for (int i = 0; i < OPN2_NUM_CHANNELS; i++) {
 		if (options & YM_OPT_WAVE_LOG) {
 			char fname[64];
 			sprintf(fname, "ym_channel_%d.wav", i);
@@ -217,7 +165,7 @@ void ym_init(ym2612_context * context, uint32_t master_clock, uint32_t clock_div
 				fprintf(stderr, "Failed to open WAVE log file %s for writing\n", fname);
 				continue;
 			}
-			if (!wave_init(f, master_clock / (context->clock_inc * NUM_OPERATORS), 16, 1)) {
+			if (!wave_init(f, master_clock / (context->clock_inc * OPN2_NUM_OPERATORS), 16, 1)) {
 				fclose(f);
 				context->channels[i].logfile = NULL;
 			}
@@ -230,63 +178,7 @@ void ym_init(ym2612_context * context, uint32_t master_clock, uint32_t clock_div
 			registered_finalize = 1;
 		}
 	}
-	if (!did_tbl_init) {
-		//populate sine table
-		for (int32_t i = 0; i < 512; i++) {
-			double sine = sin( ((double)(i*2+1) / SINE_TABLE_SIZE) * M_PI_2 );
-
-			//table stores 4.8 fixed pointed representation of the base 2 log
-			sine_table[i] = round_fixed_point(-log2(sine), 8);
-		}
-		//populate power table
-		for (int32_t i = 0; i < POW_TABLE_SIZE; i++) {
-			double linear = pow(2, -((double)((i & 0xFF)+1) / 256.0));
-			int32_t tmp = round_fixed_point(linear, 11);
-			int32_t shift = (i >> 8) - 2;
-			if (shift < 0) {
-				tmp <<= 0-shift;
-			} else {
-				tmp >>= shift;
-			}
-			pow_table[i] =  tmp;
-		}
-		//populate envelope generator rate table, from small base table
-		for (int rate = 0; rate < 64; rate++) {
-			for (int cycle = 0; cycle < 8; cycle++) {
-				uint16_t value;
-				if (rate < 2) {
-					value = 0;
-				} else if (rate >= 60) {
-					value = 8;
-				} else if (rate < 8) {
-					value = rate_table_base[((rate & 6) == 6 ? 16 : 0) + cycle];
-				} else if (rate < 48) {
-					value = rate_table_base[(rate & 0x3) * 8 + cycle];
-				} else {
-					value = rate_table_base[32 + (rate & 0x3) * 8 + cycle] << ((rate - 48) >> 2);
-				}
-				rate_table[rate * 8 + cycle] = value;
-			}
-		}
-		//populate LFO PM table from small base table
-		//seems like there must be a better way to derive this
-		for (int freq = 0; freq < 128; freq++) {
-			for (int pms = 0; pms < 8; pms++) {
-				for (int step = 0; step < 32; step++) {
-					int16_t value = 0;
-					for (int bit = 0x40, shift = 0; bit > 0; bit >>= 1, shift++) {
-						if (freq & bit) {
-							value += lfo_pm_base[pms][(step & 0x8) ? 7-step & 7 : step & 7] >> shift;
-						}
-					}
-					if (step & 0x10) {
-						value = -value;
-					}
-					lfo_pm_table[freq * 256 + pms * 32 + step] = value;
-				}
-			}
-		}
-	}
+	ym_init_tables();
 	ym_reset(context);
 	ym_enable_zero_offset(context, 1);
 }
@@ -430,7 +322,7 @@ void ym_run_timers(ym2612_context *context)
 		context->lfo_am_step = context->lfo_pm_step = 0;
 	}
 	if (context->lfo_pm_step != old_pm_step) {
-		for (int chan = 0; chan < NUM_CHANNELS; chan++)
+		for (int chan = 0; chan < OPN2_NUM_CHANNELS; chan++)
 		{
 			if (context->channels[chan].pms) {
 				for (int op = chan * 4; op < (chan + 1) * 4; op++)
@@ -565,17 +457,7 @@ void ym_run_phase(ym2612_context *context, uint32_t channel, uint32_t op)
 		if (env > MAX_ENVELOPE) {
 			env = MAX_ENVELOPE;
 		}
-		if (first_key_on) {
-			dfprintf(debug_file, "op %d, base phase: %d, mod: %d, sine: %d, out: %d\n", op, phase, mod, sine_table[(phase+mod) & 0x1FF], pow_table[sine_table[phase & 0x1FF] + env]);
-		}
-		//if ((channel != 0 && channel != 4) || chan->algorithm != 5) {
-			phase += mod;
-		//}
-
-		int16_t output = pow_table[sine_table[phase & 0x1FF] + env];
-		if (phase & 0x200) {
-			output = -output;
-		}
+		int16_t output = ym_sine(phase, mod, env);
 		if (op % 4 == 0) {
 			chan->op1_old = operator->output;
 		} else if (op % 4 == 2) {
@@ -625,7 +507,7 @@ void ym_run_phase(ym2612_context *context, uint32_t channel, uint32_t op)
 void ym_output_sample(ym2612_context *context)
 {
 	int16_t left = 0, right = 0;
-	for (int i = 0; i < NUM_CHANNELS; i++) {
+	for (int i = 0; i < OPN2_NUM_CHANNELS; i++) {
 		int16_t value = context->channels[i].output;
 		if (value >= 0) {
 			value += context->zero_offset;
@@ -683,7 +565,7 @@ void ym_run(ym2612_context * context, uint32_t to_cycle)
 			ym_channel * channel = context->channels + op/4;
 			ym_run_envelope(context, channel, operator);
 			context->current_env_op++;
-			if (context->current_env_op == NUM_OPERATORS) {
+			if (context->current_env_op == OPN2_NUM_OPERATORS) {
 				context->current_env_op = 0;
 				context->env_counter++;
 			}
@@ -692,7 +574,7 @@ void ym_run(ym2612_context * context, uint32_t to_cycle)
 		//Update Phase Generator
 		ym_run_phase(context, context->current_op / 4, context->current_op);
 		context->current_op++;
-		if (context->current_op == NUM_OPERATORS) {
+		if (context->current_op == OPN2_NUM_OPERATORS) {
 			context->current_op = 0;
 			ym_output_sample(context);
 		}
@@ -963,7 +845,7 @@ void ym_data_write(ym2612_context * context, uint8_t value)
 		}
 	} else if (context->selected_reg < 0xA0) {
 		//part
-		uint8_t op = context->selected_part ? (NUM_OPERATORS/2) : 0;
+		uint8_t op = context->selected_part ? (OPN2_NUM_OPERATORS/2) : 0;
 		//channel in part
 		if ((context->selected_reg & 0x3) != 0x3) {
 			op += 4 * (context->selected_reg & 0x3) + ((context->selected_reg & 0xC) / 4);
@@ -1276,7 +1158,7 @@ void ym_serialize(ym2612_context *context, serialize_buffer *buf)
 {
 	save_buffer8(buf, context->part1_regs, YM_PART1_REGS);
 	save_buffer8(buf, context->part2_regs, YM_PART2_REGS);
-	for (int i = 0; i < NUM_OPERATORS; i++)
+	for (int i = 0; i < OPN2_NUM_OPERATORS; i++)
 	{
 		save_int32(buf, context->operators[i].phase_counter);
 		save_int16(buf, context->operators[i].envelope);
@@ -1284,7 +1166,7 @@ void ym_serialize(ym2612_context *context, serialize_buffer *buf)
 		save_int8(buf, context->operators[i].env_phase);
 		save_int8(buf, context->operators[i].inverted);
 	}
-	for (int i = 0; i < NUM_CHANNELS; i++)
+	for (int i = 0; i < OPN2_NUM_CHANNELS; i++)
 	{
 		save_int16(buf, context->channels[i].output);
 		save_int16(buf, context->channels[i].op1_old);
@@ -1347,7 +1229,7 @@ void ym_deserialize(deserialize_buffer *buf, void *vcontext)
 			ym_data_write(context, temp_regs[i]);
 		}
 	}
-	for (int i = 0; i < NUM_OPERATORS; i++)
+	for (int i = 0; i < OPN2_NUM_OPERATORS; i++)
 	{
 		context->operators[i].phase_counter = load_int32(buf);
 		context->operators[i].envelope = load_int16(buf);
@@ -1358,7 +1240,7 @@ void ym_deserialize(deserialize_buffer *buf, void *vcontext)
 		}
 		context->operators[i].inverted = load_int8(buf) != 0 ? SSG_INVERT : 0;
 	}
-	for (int i = 0; i < NUM_CHANNELS; i++)
+	for (int i = 0; i < OPN2_NUM_CHANNELS; i++)
 	{
 		context->channels[i].output = load_int16(buf);
 		context->channels[i].op1_old = load_int16(buf);
@@ -1379,11 +1261,11 @@ void ym_deserialize(deserialize_buffer *buf, void *vcontext)
 	context->sub_timer_b = load_int8(buf);
 	context->env_counter = load_int16(buf);
 	context->current_op = load_int8(buf);
-	if (context->current_op >= NUM_OPERATORS) {
+	if (context->current_op >= OPN2_NUM_OPERATORS) {
 		context->current_op = 0;
 	}
 	context->current_env_op = load_int8(buf);
-	if (context->current_env_op >= NUM_OPERATORS) {
+	if (context->current_env_op >= OPN2_NUM_OPERATORS) {
 		context->current_env_op = 0;
 	}
 	context->lfo_counter = load_int8(buf);
@@ -1416,9 +1298,9 @@ void ym_enable_scope(ym2612_context *context, oscilloscope *scope, uint32_t mast
 		"YM2612 #6"
 	};
 	context->scope = scope;
-	for (int i = 0; i < NUM_CHANNELS; i++)
+	for (int i = 0; i < OPN2_NUM_CHANNELS; i++)
 	{
-		context->channels[i].scope_channel = scope_add_channel(scope, names[i], master_clock / (context->clock_inc * NUM_OPERATORS));
+		context->channels[i].scope_channel = scope_add_channel(scope, names[i], master_clock / (context->clock_inc * OPN2_NUM_OPERATORS));
 	}
 #endif
 }

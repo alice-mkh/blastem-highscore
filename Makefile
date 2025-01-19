@@ -218,7 +218,7 @@ TRANSOBJS+= gen_x86.o backend_x86.o
 endif
 endif
 endif
-AUDIOOBJS=ym2612.o psg.o wave.o flac.o vgm.o event_log.o render_audio.o rf5c164.o
+AUDIOOBJS=ym2612.o ymf262.o ym_common.o psg.o wave.o flac.o vgm.o event_log.o render_audio.o rf5c164.o
 CONFIGOBJS=config.o tern.o util.o paths.o
 NUKLEAROBJS=$(FONT) $(CHOOSER) nuklear_ui/blastem_nuklear.o nuklear_ui/sfnt.o
 RENDEROBJS=ppm.o controller_info.o

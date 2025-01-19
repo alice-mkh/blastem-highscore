@@ -126,10 +126,12 @@ struct data_block {
 
 typedef struct {
 	vgm_header header;
+	vgm_extended_header ext;
 	FILE       *f;
 	uint32_t   master_clock;
 	uint32_t   last_cycle;
 	uint32_t   extra_delta;
+	uint32_t   header_size;
 } vgm_writer;
 
 vgm_writer *vgm_write_open(char *filename, uint32_t rate, uint32_t clock, uint32_t cycle);
@@ -139,6 +141,9 @@ void vgm_gg_pan_write(vgm_writer *writer, uint32_t cycle, uint8_t value);
 void vgm_ym2612_init(vgm_writer *writer, uint32_t clock);
 void vgm_ym2612_part1_write(vgm_writer *writer, uint32_t cycle, uint8_t reg, uint8_t value);
 void vgm_ym2612_part2_write(vgm_writer *writer, uint32_t cycle, uint8_t reg, uint8_t value);
+void vgm_ymf262_init(vgm_writer *writer, uint32_t clock);
+void vgm_ymf262_part1_write(vgm_writer *writer, uint32_t cycle, uint8_t reg, uint8_t value);
+void vgm_ymf262_part2_write(vgm_writer *writer, uint32_t cycle, uint8_t reg, uint8_t value);
 void vgm_adjust_cycles(vgm_writer *writer, uint32_t deduction);
 void vgm_close(vgm_writer *writer);
 

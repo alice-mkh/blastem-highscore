@@ -16,6 +16,7 @@
 #include "z80_to_x86.h"
 #endif
 #include "ym2612.h"
+#include "ymf262.h"
 #include "vdp.h"
 #include "psg.h"
 #include "pico_pcm.h"
@@ -36,6 +37,7 @@ struct genesis_context {
 	psg_context     *psg;
 	pico_pcm        *adpcm;
 	ymz263b         *ymz;
+	ymf262_context  *opl;
 	uint16_t        *cart;
 	uint16_t        *lock_on;
 	uint16_t        *work_ram;

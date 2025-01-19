@@ -15,11 +15,8 @@ vgm_writer *vgm_write_open(char *filename, uint32_t rate, uint32_t clock, uint32
 	writer->header.data_offset = sizeof(writer->header) - offsetof(vgm_header, data_offset);
 	writer->header.rate = rate;
 	writer->f = f;
-	if (1 != fwrite(&writer->header, sizeof(writer->header), 1, f)) {
-		free(writer);
-		fclose(f);
-		return NULL;
-	}
+	writer->header_size = sizeof(vgm_header);
+	fseek(f, writer->header_size, SEEK_CUR);
 	writer->master_clock = clock;
 	writer->last_cycle = cycle;
 	
@@ -114,6 +111,33 @@ void vgm_ym2612_part2_write(vgm_writer *writer, uint32_t cycle, uint8_t reg, uin
 	fwrite(cmd, 1, sizeof(cmd), writer->f);
 }
 
+void vgm_ymf262_init(vgm_writer *writer, uint32_t clock)
+{
+	if (writer->header.version < 0x151) {
+		writer->header.version = 0x151;
+	}
+	uint32_t min_size = sizeof(vgm_header) + offsetof(vgm_extended_header, ymf278b_clk);
+	if (writer->header_size < min_size) {
+		fseek(writer->f, min_size - writer->header_size, SEEK_CUR);
+		writer->header_size = min_size;
+	}
+	writer->ext.ymf262_clk = clock;
+}
+
+void vgm_ymf262_part1_write(vgm_writer *writer, uint32_t cycle, uint8_t reg, uint8_t value)
+{
+	add_wait(writer, cycle);
+	uint8_t cmd[3] = {CMD_YMF262_0, reg, value};
+	fwrite(cmd, 1, sizeof(cmd), writer->f);
+}
+
+void vgm_ymf262_part2_write(vgm_writer *writer, uint32_t cycle, uint8_t reg, uint8_t value)
+{
+	add_wait(writer, cycle);
+	uint8_t cmd[3] = {CMD_YMF262_1, reg, value};
+	fwrite(cmd, 1, sizeof(cmd), writer->f);
+}
+
 void vgm_adjust_cycles(vgm_writer *writer, uint32_t deduction)
 {
 	if (deduction > writer->last_cycle) {
@@ -130,7 +154,14 @@ void vgm_close(vgm_writer *writer)
 	fwrite(&cmd, 1, sizeof(cmd), writer->f);
 	writer->header.eof_offset = ftell(writer->f) - offsetof(vgm_header, eof_offset);
 	fseek(writer->f, SEEK_SET, 0);
+	uint32_t extra_size = writer->header_size - sizeof(writer->header);
+	if (extra_size) {
+		writer->header.data_offset += extra_size;
+	}
 	fwrite(&writer->header, sizeof(writer->header), 1, writer->f);
+	if (extra_size) {
+		fwrite(&writer->ext, extra_size, 1, writer->f);
+	}
 	fclose(writer->f);
 	free(writer);
 }
