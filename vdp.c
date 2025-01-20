@@ -4748,42 +4748,46 @@ void vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
 		if (reg == REG_MODE_1 || reg == REG_MODE_2 || reg == REG_MODE_4) {
 			update_video_params(context);
 		}
-	} else if (reg == REG_KMOD_CTRL) {
-		if (!(value & 0xFF)) {
-			context->system->enter_debugger = 1;
-		}
-	} else if (reg == REG_KMOD_MSG) {
-		char c = value;
-		if (c) {
-			context->kmod_buffer_length++;
-			if ((context->kmod_buffer_length + 1) > context->kmod_buffer_storage) {
-				context->kmod_buffer_storage = context->kmod_buffer_storage ? context->kmod_buffer_storage * 2 : 128;
-				context->kmod_msg_buffer = realloc(context->kmod_msg_buffer, context->kmod_buffer_storage);
+	} else if (context->type == VDP_GENESIS) {
+		// Apparently Bart vs. the Space Mutants for SMS/GG writes to the timer KMOD timer register
+		// Probably need to add some sort of config toggle for KMOD registers generally, but this is a quick fix
+		if (reg == REG_KMOD_CTRL) {
+			if (!(value & 0xFF)) {
+				context->system->enter_debugger = 1;
 			}
-			context->kmod_msg_buffer[context->kmod_buffer_length - 1] = c;
-		} else if (context->kmod_buffer_length) {
-			context->kmod_msg_buffer[context->kmod_buffer_length] = 0;
-			if (is_stdout_enabled()) {
-				init_terminal();
-				printf("KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
-			} else {
-				// GDB remote debugging is enabled, use stderr instead
-				fprintf(stderr, "KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
+		} else if (reg == REG_KMOD_MSG) {
+			char c = value;
+			if (c) {
+				context->kmod_buffer_length++;
+				if ((context->kmod_buffer_length + 1) > context->kmod_buffer_storage) {
+					context->kmod_buffer_storage = context->kmod_buffer_storage ? context->kmod_buffer_storage * 2 : 128;
+					context->kmod_msg_buffer = realloc(context->kmod_msg_buffer, context->kmod_buffer_storage);
+				}
+				context->kmod_msg_buffer[context->kmod_buffer_length - 1] = c;
+			} else if (context->kmod_buffer_length) {
+				context->kmod_msg_buffer[context->kmod_buffer_length] = 0;
+				if (is_stdout_enabled()) {
+					init_terminal();
+					printf("KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
+				} else {
+					// GDB remote debugging is enabled, use stderr instead
+					fprintf(stderr, "KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
+				}
+				context->kmod_buffer_length = 0;
 			}
-			context->kmod_buffer_length = 0;
-		}
-	} else if (reg == REG_KMOD_TIMER) {
-		if (!(value & 0x80)) {
-			if (is_stdout_enabled()) {
-				init_terminal();
-				printf("KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
-			} else {
-				// GDB remote debugging is enabled, use stderr instead
-				fprintf(stderr, "KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
+		} else if (reg == REG_KMOD_TIMER) {
+			if (!(value & 0x80)) {
+				if (is_stdout_enabled()) {
+					init_terminal();
+					printf("KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
+				} else {
+					// GDB remote debugging is enabled, use stderr instead
+					fprintf(stderr, "KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
+				}
 			}
-		}
-		if (value & 0xC0) {
-			context->timer_start_cycle = context->cycles;
+			if (value & 0xC0) {
+				context->timer_start_cycle = context->cycles;
+			}
 		}
 	}
 }
