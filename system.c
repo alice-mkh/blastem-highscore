@@ -149,6 +149,7 @@ uint32_t load_media(char * filename, system_media *dst, system_type *stype)
 #ifndef IS_LIB
 	if (dst->zip) {
 		zip_close(dst->zip);
+		dst->zip = NULL;
 	}
 #endif
 	dst->orig_path = filename;
