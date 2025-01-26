@@ -15,6 +15,8 @@ binaryOps = {
 	'-': 'sub',
 	'<<': 'lsl',
 	'>>': 'lsr',
+	'*': 'mulu',
+	'*S': 'muls',
 	'&': 'and',
 	'|': 'or',
 	'^': 'xor'
@@ -751,6 +753,50 @@ def _sextCImpl(prog, params, rawParms):
 		fmt = '\n\t{dst} = {src} & 0x8000 ? {src} | 0xFFFF0000 : {src} & 0x7FFF;'
 	prog.lastSize = params[0]
 	return fmt.format(src=params[1], dst=params[2])
+
+def _mulsCImpl(prog, params, rawParams, flagUpdates):
+	p0Size = prog.paramSize(rawParams[0])
+	p1Size = prog.paramSize(rawParams[1])
+	destSize = prog.paramSize(rawParams[2])
+	if len(params) > 3:
+		size = params[3]
+		if size == 0:
+			size = 8
+		elif size == 1:
+			size = 16
+		else:
+			size = 32
+		prog.lastSize = size
+	else:
+		size = destSize
+	if p0Size >= size:
+		p0Size = size // 2
+	if p1Size >= size:
+		p1Size = size // 2
+	#TODO: Handle case in which destSize > size
+	return f'\n\t{params[2]} = (int{size}_t)(((int{p0Size}_t){params[0]}) * ((int{p1Size}_t){params[1]}));'
+
+def _muluCImpl(prog, params, rawParams, flagUpdates):
+	p0Size = prog.paramSize(rawParams[0])
+	p1Size = prog.paramSize(rawParams[1])
+	destSize = prog.paramSize(rawParams[2])
+	if len(params) > 3:
+		size = params[3]
+		if size == 0:
+			size = 8
+		elif size == 1:
+			size = 16
+		else:
+			size = 32
+		prog.lastSize = size
+	else:
+		size = destSize
+	if p0Size >= size:
+		p0Size = size // 2
+	if p1Size >= size:
+		p1Size = size // 2
+	#TODO: Handle case in which destSize > size
+	return f'\n\t{params[2]} = ((uint{p0Size}_t){params[0]}) * ((uint{p1Size}_t){params[1]});'
 	
 def _getCarryCheck(prog):
 	carryFlag = None
@@ -956,6 +1002,8 @@ _opMap = {
 	'rlc': Op().addImplementation('c', 2, _rlcCImpl),
 	'ror': Op().addImplementation('c', 2, _rorCImpl),
 	'rrc': Op().addImplementation('c', 2, _rrcCImpl),
+	'mulu': Op(lambda a, b: a * b).addImplementation('c', 2, _muluCImpl),
+	'muls': Op().addImplementation('c', 2, _mulsCImpl),
 	'and': Op(lambda a, b: a & b).cBinaryOperator('&'),
 	'or':  Op(lambda a, b: a | b).cBinaryOperator('|'),
 	'xor': Op(lambda a, b: a ^ b).cBinaryOperator('^'),
@@ -1096,7 +1144,12 @@ class Switch(ChildBlock):
 	
 	def addOp(self, op):
 		if op.op == 'case':
-			val = int(op.params[0], 16) if op.params[0].startswith('0x') else int(op.params[0])
+			if op.params[0].startswith('0x'):
+				val = int(op.params[0], 16)
+			elif op.params[0].startswith('0b'):
+				val = int(op.params[0], 2)
+			else:
+				val = int(op.params[0])
 			self.cases[val] = self.current_case = []
 			self.case_locals[val] = self.current_locals = {}
 		elif op.op == 'default':
@@ -1777,6 +1830,8 @@ class Program:
 					pass
 				elif param.startswith('0x'):
 					param = int(param, 16)
+				elif param.startswith('0b'):
+					param = int(param, 2)
 				else:
 					param = int(param)
 			except ValueError:
