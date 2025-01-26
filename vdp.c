@@ -913,8 +913,6 @@ static void read_sprite_x(uint32_t line, vdp_context * context)
 			context->sprite_draw_list[context->sprite_draws].width = width;
 			context->sprite_draw_list[context->sprite_draws].height = height;
 		}
-	} else if (context->sprite_draws) {
-		context->sprite_draw_list[context->sprite_draws - 1].x_pos = 0;
 	}
 	context->cur_slot++;
 }
@@ -3082,8 +3080,9 @@ static void vdp_h40_line(vdp_context * context)
 		context->col_1
 	);
 	context->flags &= ~FLAG_MASKED;
-	if (context->sprite_draws) {
-		context->sprite_draw_list[context->sprite_draws - 1].x_pos = 0;
+	while (context->sprite_draws) {
+		context->sprite_draws--;
+		context->sprite_draw_list[context->sprite_draws].x_pos = 0;
 	}
 	render_sprite_cells(context);
 	//164
@@ -3320,8 +3319,9 @@ static void vdp_h40(vdp_context * context, uint32_t target_cycles)
 			context->col_1
 		);
 		context->flags &= ~FLAG_MASKED;
-		if (context->sprite_draws) {
-			context->sprite_draw_list[context->sprite_draws - 1].x_pos = 0;
+		while (context->sprite_draws) {
+			context->sprite_draws--;
+			context->sprite_draw_list[context->sprite_draws].x_pos = 0;
 		}
 		render_sprite_cells(context);
 		CHECK_LIMIT
@@ -3541,8 +3541,9 @@ static void vdp_h32(vdp_context * context, uint32_t target_cycles)
 			context->col_1
 		);
 		context->flags &= ~FLAG_MASKED;
-		if (context->sprite_draws) {
-			context->sprite_draw_list[context->sprite_draws - 1].x_pos = 0;
+		while (context->sprite_draws) {
+			context->sprite_draws--;
+			context->sprite_draw_list[context->sprite_draws].x_pos = 0;
 		}
 		render_sprite_cells(context);
 		CHECK_LIMIT
