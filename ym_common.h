@@ -6,6 +6,20 @@
 #define MAX_ENVELOPE 0xFFC
 #define MAX_OPL_ENVELOPE 0xFF8
 
+#define SSG_ENABLE    8
+#define SSG_INVERT    4
+#define SSG_ALTERNATE 2
+#define SSG_HOLD      1
+
+#define SSG_CENTER 0x800
+
+enum {
+	PHASE_ATTACK,
+	PHASE_DECAY,
+	PHASE_SUSTAIN,
+	PHASE_RELEASE
+};
+
 typedef struct {
 	int16_t  *mod_src[2];
 	uint32_t phase_counter;
@@ -23,6 +37,7 @@ typedef struct {
 	uint8_t  ssg;
 	uint8_t  inverted;
 	uint8_t  phase_overflow;
+	uint8_t  wave;
 } ym_operator;
 
 typedef struct {
@@ -50,5 +65,8 @@ extern uint16_t rate_table[64*8];
 void ym_init_tables(void);
 int16_t ym_sine(uint16_t phase, int16_t mod, uint16_t env);
 int16_t ym_opl_wave(uint16_t phase, int16_t mod, uint16_t env, uint8_t waveform);
+void start_envelope(ym_operator *op, ym_channel *channel);
+void keyon(ym_operator *op, ym_channel *channel);
+void keyoff(ym_operator *op);
 
 #endif //YM_COMMON_H_

@@ -38,13 +38,6 @@
 
 static uint32_t ym_calc_phase_inc(ym2612_context * context, ym_operator * operator, uint32_t op);
 
-enum {
-	PHASE_ATTACK,
-	PHASE_DECAY,
-	PHASE_SUSTAIN,
-	PHASE_RELEASE
-};
-
 static int16_t ams_shift[] = {8, 1, -1, -2};
 static uint8_t lfo_timer_values[] = {108, 77, 71, 67, 62, 44, 8, 5};
 
@@ -208,47 +201,7 @@ void ym_enable_zero_offset(ym2612_context *context, uint8_t enabled)
 
 #define CSM_MODE 0x80
 
-#define SSG_ENABLE    8
-#define SSG_INVERT    4
-#define SSG_ALTERNATE 2
-#define SSG_HOLD      1
-
-#define SSG_CENTER 0x800
-
-static void start_envelope(ym_operator *op, ym_channel *channel)
-{
-	//Deal with "infinite" attack rates
-	uint8_t rate = op->rates[PHASE_ATTACK];
-	if (rate) {
-		uint8_t ks = channel->keycode >> op->key_scaling;;
-		rate = rate*2 + ks;
-	}
-	if (rate >= 62) {
-		op->env_phase = PHASE_DECAY;
-		op->envelope = 0;
-	} else {
-		op->env_phase = PHASE_ATTACK;
-	}
-}
-
-static void keyon(ym_operator *op, ym_channel *channel)
-{
-	start_envelope(op, channel);
-	op->phase_counter = 0;
-	op->inverted = op->ssg & SSG_INVERT;
-}
-
 static const uint8_t keyon_bits[] = {0x10, 0x40, 0x20, 0x80};
-
-static void keyoff(ym_operator *op)
-{
-	op->env_phase = PHASE_RELEASE;
-	if (op->inverted) {
-		//Nemesis says the inversion state doesn't change here, but I don't see how that is observable either way
-		op->inverted = 0;
-		op->envelope = (SSG_CENTER - op->envelope) & MAX_ENVELOPE;
-	}
-}
 
 static void csm_keyoff(ym2612_context *context)
 {

@@ -191,3 +191,36 @@ int16_t ym_opl_wave(uint16_t phase, int16_t mod, uint16_t env, uint8_t waveform)
 	}
 	return output;
 }
+
+void start_envelope(ym_operator *op, ym_channel *channel)
+{
+	//Deal with "infinite" attack rates
+	uint8_t rate = op->rates[PHASE_ATTACK];
+	if (rate) {
+		uint8_t ks = channel->keycode >> op->key_scaling;;
+		rate = rate*2 + ks;
+	}
+	if (rate >= 62) {
+		op->env_phase = PHASE_DECAY;
+		op->envelope = 0;
+	} else {
+		op->env_phase = PHASE_ATTACK;
+	}
+}
+
+void keyon(ym_operator *op, ym_channel *channel)
+{
+	start_envelope(op, channel);
+	op->phase_counter = 0;
+	op->inverted = op->ssg & SSG_INVERT;
+}
+
+void keyoff(ym_operator *op)
+{
+	op->env_phase = PHASE_RELEASE;
+	if (op->inverted) {
+		//Nemesis says the inversion state doesn't change here, but I don't see how that is observable either way
+		op->inverted = 0;
+		op->envelope = (SSG_CENTER - op->envelope) & MAX_ENVELOPE;
+	}
+}
