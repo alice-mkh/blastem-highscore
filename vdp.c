@@ -376,27 +376,28 @@ static void increment_address(vdp_context *context)
 
 static void render_sprite_cells(vdp_context * context)
 {
-	if (context->cur_slot > MAX_SPRITES_LINE) {
-		context->cur_slot--;
-		return;
-	}
 	if (context->cur_slot < 0) {
+		//should this be 16 in H32?
+		context->cur_slot += 32;
+	}
+	if (context->cur_slot >= MAX_SPRITES_LINE) {
+		context->cur_slot--;
 		return;
 	}
 	sprite_draw * d = context->sprite_draw_list + context->cur_slot;
 	uint16_t address = d->address;
 	address += context->sprite_x_offset * d->height * 4;
 	context->serial_address = address;
-	uint16_t dir;
-	int16_t x;
-	if (d->h_flip) {
-		x = d->x_pos + 7 + 8 * (d->width - context->sprite_x_offset - 1);
-		dir = -1;
-	} else {
-		x = d->x_pos + context->sprite_x_offset * 8;
-		dir = 1;
-	}
 	if (d->x_pos) {
+		uint16_t dir;
+		int16_t x;
+		if (d->h_flip) {
+			x = d->x_pos + 7 + 8 * (d->width - context->sprite_x_offset - 1);
+			dir = -1;
+		} else {
+			x = d->x_pos + context->sprite_x_offset * 8;
+			dir = 1;
+		}
 		context->flags |= FLAG_CAN_MASK;
 		if (!(context->flags & FLAG_MASKED)) {
 			x -= 128;
@@ -2797,10 +2798,11 @@ static void draw_right_border(vdp_context *context)
 				context->output = dummy_buffer;\
 			}\
 		}\
+		render_sprite_cells( context);\
 		if (slot == 168 || slot == 247 || slot == 248) {\
 			render_border_garbage(\
 				context,\
-				context->sprite_draw_list[context->cur_slot].address,\
+				context->serial_address,\
 				context->tmp_buf_b,\
 				context->buf_b_off + (slot == 247 ? 0 : 8),\
 				slot == 247 ? context->col_1 : context->col_2\
@@ -2812,7 +2814,7 @@ static void draw_right_border(vdp_context *context)
 		} else if (slot == 243) {\
 			render_border_garbage(\
 				context,\
-				context->sprite_draw_list[context->cur_slot].address,\
+				context->serial_address,\
 				context->tmp_buf_a,\
 				context->buf_a_off,\
 				context->col_1\
@@ -2820,7 +2822,6 @@ static void draw_right_border(vdp_context *context)
 		} else if (slot == 169) {\
 			draw_right_border(context);\
 		}\
-		render_sprite_cells( context);\
 		scan_sprite_table(context->vcounter, context);\
 		CHECK_LIMIT_HSYNC(slot)
 
@@ -2835,10 +2836,11 @@ static void draw_right_border(vdp_context *context)
 				context->output = dummy_buffer;\
 			}\
 		}\
+		render_sprite_cells( context);\
 		if (slot == 136 || slot == 247 || slot == 248) {\
 			render_border_garbage(\
 				context,\
-				context->sprite_draw_list[context->cur_slot].address,\
+				context->serial_address,\
 				context->tmp_buf_b,\
 				context->buf_b_off + (slot == 247 ? 0 : 8),\
 				slot == 247 ? context->col_1 : context->col_2\
@@ -2850,7 +2852,6 @@ static void draw_right_border(vdp_context *context)
 		} else if (slot == 137) {\
 			draw_right_border(context);\
 		}\
-		render_sprite_cells( context);\
 		scan_sprite_table(context->vcounter, context);\
 		if (context->flags & FLAG_DMA_RUN) { run_dma_src(context, -1); } \
 		if (slot == 147) {\
@@ -2935,22 +2936,24 @@ static void vdp_h40_line(vdp_context * context)
 	//167
 	context->sprite_index = 0x80;
 	context->slot_counter = 0;
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_b, context->buf_b_off,
 		context->col_1
 	);
-	render_sprite_cells(context);
 	scan_sprite_table(context->vcounter, context);
 	//168
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_b,
 		context->buf_b_off + 8,
 		context->col_2
 	);
+	scan_sprite_table(context->vcounter, context);
 
 	//Do palette lookup for end of previous line
 	uint8_t *src = context->compositebuf + (LINE_CHANGE_H40 - BG_START_SLOT) *2;
@@ -2973,20 +2976,22 @@ static void vdp_h40_line(vdp_context * context)
 		}
 	}
 	advance_output_line(context);
-	//168-242 (inclusive)
-	for (int i = 0; i < 28; i++)
+	//169-242 (inclusive)
+	for (int i = 0; i < 27; i++)
 	{
 		render_sprite_cells(context);
 		scan_sprite_table(context->vcounter, context);
 	}
 	//243
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_a,
 		context->buf_a_off,
 		context->col_1
 	);
+	scan_sprite_table(context->vcounter, context);
 	//244
 	address = (context->regs[REG_HSCROLL] & 0x3F) << 10;
 	mask = 0;
@@ -3010,24 +3015,25 @@ static void vdp_h40_line(vdp_context * context)
 		scan_sprite_table(context->vcounter, context);
 	}
 	//247
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_b,
 		context->buf_b_off,
 		context->col_1
 	);
-	render_sprite_cells(context);
 	scan_sprite_table(context->vcounter, context);
 	//248
+	
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_b,
 		context->buf_b_off + 8,
 		context->col_2
 	);
-	render_sprite_cells(context);
 	scan_sprite_table(context->vcounter, context);
 	context->buf_a_off = (context->buf_a_off + SCROLL_BUFFER_DRAW) & SCROLL_BUFFER_MASK;
 	context->buf_b_off = (context->buf_b_off + SCROLL_BUFFER_DRAW) & SCROLL_BUFFER_MASK;
@@ -3073,26 +3079,26 @@ static void vdp_h40_line(vdp_context * context)
 	//163
 	context->cur_slot = MAX_SPRITES_LINE-1;
 	memset(context->linebuf, 0, LINEBUF_SIZE);
-	render_border_garbage(
-		context,
-		context->sprite_draw_list[context->cur_slot].address,
-		context->tmp_buf_a, context->buf_a_off,
-		context->col_1
-	);
 	context->flags &= ~FLAG_MASKED;
 	while (context->sprite_draws) {
 		context->sprite_draws--;
 		context->sprite_draw_list[context->sprite_draws].x_pos = 0;
 	}
 	render_sprite_cells(context);
-	//164
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
+		context->tmp_buf_a, context->buf_a_off,
+		context->col_1
+	);
+	//164
+	render_sprite_cells(context);
+	render_border_garbage(
+		context,
+		context->serial_address,
 		context->tmp_buf_a, context->buf_a_off + 8,
 		context->col_2
 	);
-	render_sprite_cells(context);
 	context->cycles += MCLKS_LINE;
 	vdp_advance_line(context);
 	src = context->compositebuf;
@@ -3178,13 +3184,13 @@ static void vdp_h40(vdp_context * context, uint32_t target_cycles)
 		OUTPUT_PIXEL(167)
 		context->sprite_index = 0x80;
 		context->slot_counter = 0;
+		render_sprite_cells(context);
 		render_border_garbage(
 			context,
-			context->sprite_draw_list[context->cur_slot].address,
+			context->serial_address,
 			context->tmp_buf_b, context->buf_b_off,
 			context->col_1
 		);
-		render_sprite_cells(context);
 		scan_sprite_table(context->vcounter, context);
 		CHECK_LIMIT
 	SPRITE_RENDER_H40(168)
@@ -3312,28 +3318,28 @@ static void vdp_h40(vdp_context * context, uint32_t target_cycles)
 		OUTPUT_PIXEL(163)
 		context->cur_slot = MAX_SPRITES_LINE-1;
 		memset(context->linebuf, 0, LINEBUF_SIZE);
-		render_border_garbage(
-			context,
-			context->sprite_draw_list[context->cur_slot].address,
-			context->tmp_buf_a, context->buf_a_off,
-			context->col_1
-		);
 		context->flags &= ~FLAG_MASKED;
 		while (context->sprite_draws) {
 			context->sprite_draws--;
 			context->sprite_draw_list[context->sprite_draws].x_pos = 0;
 		}
 		render_sprite_cells(context);
+		render_border_garbage(
+			context,
+			context->serial_address,
+			context->tmp_buf_a, context->buf_a_off,
+			context->col_1
+		);
 		CHECK_LIMIT
 	case 164:
 		OUTPUT_PIXEL(164)
+		render_sprite_cells(context);
 		render_border_garbage(
 			context,
-			context->sprite_draw_list[context->cur_slot].address,
+			context->serial_address,
 			context->tmp_buf_a, context->buf_a_off + 8,
 			context->col_2
 		);
-		render_sprite_cells(context);
 		if (context->flags & FLAG_DMA_RUN) {
 			run_dma_src(context, -1);
 		}
@@ -3391,13 +3397,13 @@ static void vdp_h32(vdp_context * context, uint32_t target_cycles)
 		OUTPUT_PIXEL(135)
 		context->sprite_index = 0x80;
 		context->slot_counter = 0;
+		render_sprite_cells(context);
 		render_border_garbage(
 			context,
-			context->sprite_draw_list[context->cur_slot].address,
+			context->serial_address,
 			context->tmp_buf_b, context->buf_b_off,
 			context->col_1
 		);
-		render_sprite_cells(context);
 		scan_sprite_table(context->vcounter, context);
 		CHECK_LIMIT
 	SPRITE_RENDER_H32(136)
@@ -3440,7 +3446,7 @@ static void vdp_h32(vdp_context * context, uint32_t target_cycles)
 		//provides "garbage" for border when plane A selected
 		render_border_garbage(
 				context,
-				context->sprite_draw_list[context->cur_slot].address,
+				context->serial_address,
 				context->tmp_buf_a,
 				context->buf_a_off,
 				context->col_1
@@ -3534,28 +3540,28 @@ static void vdp_h32(vdp_context * context, uint32_t target_cycles)
 		OUTPUT_PIXEL(131)
 		context->cur_slot = MAX_SPRITES_LINE_H32-1;
 		memset(context->linebuf, 0, LINEBUF_SIZE);
-		render_border_garbage(
-			context,
-			context->sprite_draw_list[context->cur_slot].address,
-			context->tmp_buf_a, context->buf_a_off,
-			context->col_1
-		);
 		context->flags &= ~FLAG_MASKED;
 		while (context->sprite_draws) {
 			context->sprite_draws--;
 			context->sprite_draw_list[context->sprite_draws].x_pos = 0;
 		}
 		render_sprite_cells(context);
+		render_border_garbage(
+			context,
+			context->serial_address,
+			context->tmp_buf_a, context->buf_a_off,
+			context->col_1
+		);
 		CHECK_LIMIT
 	case 132:
 		OUTPUT_PIXEL(132)
+		render_sprite_cells(context);
 		render_border_garbage(
 			context,
-			context->sprite_draw_list[context->cur_slot].address,
+			context->serial_address,
 			context->tmp_buf_a, context->buf_a_off + 8,
 			context->col_2
 		);
-		render_sprite_cells(context);
 		if (context->flags & FLAG_DMA_RUN) {
 			run_dma_src(context, -1);
 		}
