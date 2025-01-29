@@ -117,7 +117,9 @@ static void update_video_params(vdp_context *context)
 				context->state = ACTIVE;
 			} else if (context->vcounter == 0x1FF) {
 				context->state = PREPARING;
-				memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				if (!context->done_composite) {
+					memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				}
 			}
 		}
 	} else {
@@ -138,7 +140,9 @@ static void update_video_params(vdp_context *context)
 			}
 			else if (context->vcounter == 0x1FF) {
 				context->state = PREPARING;
-				memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				if (!context->done_composite) {
+					memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				}
 			}
 		}
 	}
@@ -4622,7 +4626,9 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 			vdp_advance_line(context);
 			if (context->vcounter == active_line) {
 				context->state = PREPARING;
-				memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				if (!context->done_composite) {
+					memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				}
 				return;
 			}
 		}
