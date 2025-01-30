@@ -55,10 +55,12 @@ RETRO_API void retro_set_environment(retro_environment_t re)
 	
 	const char *system_dir = NULL;
 	re(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_dir);
+	printf("system_dir: %s\n", system_dir);
 	if (system_dir) {
 		config = tern_insert_path(config, "system\0scd_bios_us\0", (tern_val){.ptrval = alloc_concat(system_dir, "/bios_CD_U.bin")}, TVAL_PTR);
 		config = tern_insert_path(config, "system\0scd_bios_eu\0", (tern_val){.ptrval = alloc_concat(system_dir, "/bios_CD_E.bin")}, TVAL_PTR);
 		config = tern_insert_path(config, "system\0scd_bios_jp\0", (tern_val){.ptrval = alloc_concat(system_dir, "/bios_CD_J.bin")}, TVAL_PTR);
+		config = tern_insert_path(config, "system\0coleco_bios_path\0", (tern_val){.ptrval = alloc_concat(system_dir, "/colecovision.rom")}, TVAL_PTR);
 	}
 }
 

@@ -131,6 +131,31 @@ m68k_read32
 	ocall read_16
 	lsl tmp 16 tmp
 	or tmp scratch1 scratch1
+
+m68k_trap
+	arg vector 32
+	check_user_mode_swap_ssp_usp
+	#save PC
+	a7 -= 4
+	scratch2 = a7
+	m68k_write32_lowfirst pc
+	#save SR
+	a7 -= 2
+	scratch2 = a7
+	m68k_get_sr
+	ocall write_16
+	#set supervisor bit
+	status |= 0x20
+	#clear trace bit
+	status &= 0x7F
+	trace_pending = 0
+	scratch1 = vector << 2
+	m68k_read32
+	pc = scratch1
+	cycles 10
+	m68k_prefetch
+	
+	
 	
 m68k_interrupt
 	cmp int_cycle cycles
@@ -643,6 +668,102 @@ m68k_save_dst
 	m68k_fetch_src_ea M R Z
 	
 	and src dregs.D dregs.D Z
+	update_flags NZV0C0
+	m68k_prefetch
+
+1100XXX101000YYY exg_dn_dn
+	scratch1 = dregs.X
+	dregs.X = dregs.Y
+	dregs.Y = scratch1
+	cycles 2
+	m68k_prefetch
+
+1100XXX101001YYY exg_an_an
+	scratch1 = aregs.X
+	aregs.X = aregs.Y
+	aregs.Y = scratch1
+	cycles 2
+	m68k_prefetch
+
+1100XXX110001YYY exg_dn_an
+	scratch1 = dregs.X
+	dregs.X = aregs.Y
+	aregs.Y = scratch1
+	cycles 2
+	m68k_prefetch
+
+1100DDD011MMMRRR mulu
+	local a 16
+	local b 16
+	invalid M 1
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_src_ea M R 1
+	#2-cycles per bit x 16, 2 for cleanup
+	cycles 34
+	#popcnt
+	a = src & 0b1010101010101010
+	a >>= 1
+	b = src & 0b0101010101010101
+	b += a
+	a = b & 0b1100110011001100
+	a >>= 2
+	b &= 0b0011001100110011
+	b += a
+	a = b & 0b1111000011110000
+	a >>= 4
+	b &= 0b0000111100001111
+	b += a
+	a = b & 0b1111111100000000
+	a >>= 8
+	b &= 0b0000000011111111
+	b += a
+	#2 cycles per set bit
+	b += b
+	cycles b
+	dregs.D = src * dregs.D
+	update_flags NZV0C0
+	m68k_prefetch
+
+1100DDD111MMMRRR muls
+	local a 16
+	local b 16
+	invalid M 1
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_src_ea M R 1
+	#2-cycles per bit x 16, 2 for cleanup
+	cycles 34
+	#muls timing is essentially the same as muls, but it's based on the number of 0/1
+	#transitions rather than the number of 1 bits. xoring the value with itself shifted
+	#by one effectively sets one bit for every transition
+	b = src << 1
+	b ^= src
+	#popcnt
+	a = b & 0b1010101010101010
+	a >>= 1
+	b &= 0b0101010101010101
+	b += a
+	a = b & 0b1100110011001100
+	a >>= 2
+	b &= 0b0011001100110011
+	b += a
+	a = b & 0b1111000011110000
+	a >>= 4
+	b &= 0b0000111100001111
+	b += a
+	a = b & 0b1111111100000000
+	a >>= 8
+	b &= 0b0000000011111111
+	b += a
+	#2 cycles per set bit
+	b += b
+	cycles b
+	dregs.D = src *S dregs.D
 	update_flags NZV0C0
 	m68k_prefetch
 	
@@ -1875,6 +1996,12 @@ m68k_save_dst
 	sext bits dregs.R dregs.R
 	update_flags NZV0C0
 	m68k_prefetch
+
+010011100100VVVV trap
+	local vector 32
+	scratch1 = pc
+	vector = V + 32
+	m68k_trap vector
 
 0100111001010RRR link
 	a7 -= 4

@@ -25,7 +25,6 @@ void render_end_audio(void)
 	render_lock_audio();
 		if (wav_file) {
 			wave_finalize(wav_file);
-			fclose(wav_file);
 			wav_file = NULL;
 		}
 	render_unlock_audio();

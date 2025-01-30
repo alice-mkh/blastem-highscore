@@ -37,7 +37,7 @@ uint32_t MCLKS_PER_68K;
 #define LINES_PAL 313
 
 #ifdef IS_LIB
-#define MAX_SOUND_CYCLES (MCLKS_PER_YM*NUM_OPERATORS*6*4)
+#define MAX_SOUND_CYCLES (MCLKS_PER_YM*OPN2_NUM_OPERATORS*6*4)
 #else
 #define MAX_SOUND_CYCLES 100000
 #endif
@@ -626,6 +626,7 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 				scd_adjust_cycle(gen->expansion, deduction);
 			}
 			gen->last_flush_cycle -= deduction;
+			gen->last_sync_cycle -= deduction;
 		}
 	} else if (mclks - gen->last_flush_cycle > gen->soft_flush_cycles) {
 		event_soft_flush(mclks);
@@ -708,13 +709,16 @@ static void sync_sound_pico(genesis_context * gen, uint32_t target)
 		psg_run(gen->psg, cur_target);
 		pico_pcm_run(gen->adpcm, cur_target);
 		if (gen->ymz) {
+			//FIXME: These have a separate crystal
 			ymz263b_run(gen->ymz, cur_target);
+			ymf262_run(gen->opl, cur_target);
 		}
 	}
 	psg_run(gen->psg, target);
 	pico_pcm_run(gen->adpcm, target);
 	if (gen->ymz) {
 		ymz263b_run(gen->ymz, target);
+		ymf262_run(gen->opl, target);
 	}
 }
 
@@ -871,6 +875,7 @@ static m68k_context* sync_components_pico(m68k_context * context, uint32_t addre
 			gen->adpcm->cycle -= deduction;
 			if (gen->ymz) {
 				gen->ymz->cycle -= deduction;
+				ymf262_adjust_cycles(gen->opl, deduction);
 			}
 			if (gen->reset_cycle != CYCLE_NEVER) {
 				gen->reset_cycle -= deduction;
@@ -1602,6 +1607,7 @@ static uint8_t copera_io_read(uint32_t location, void *vcontext)
 	uint8_t ret;
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
+	//FIXME: Copera sound hardware has a separate clock
 	switch (location & 0xFF)
 	{
 	case 1:
@@ -1616,6 +1622,10 @@ static uint8_t copera_io_read(uint32_t location, void *vcontext)
 		ymz263b_run(gen->ymz, m68k->cycles);
 		ret = ymz263b_data_read(gen->ymz, location & 4);
 		printf("Copera YMZ263 Data read - %X: %X\n", location, ret);
+		return ret;
+	case 0x28:
+		ret = ymf262_read_status(gen->opl, m68k->cycles, 0);
+		printf("Copera YMF262 Status read - %X: %X\n", location, ret);
 		return ret;
 	default:
 		printf("Unhandled Copera 8-bit read %X\n", location);
@@ -1633,6 +1643,7 @@ static void* copera_io_write(uint32_t location, void *vcontext, uint8_t value)
 {
 	m68k_context *m68k = vcontext;
 	genesis_context *gen = m68k->system;
+	//FIXME: Copera sound hardware has a separate clock
 	switch (location & 0xFF)
 	{
 	case 1:
@@ -1651,9 +1662,17 @@ static void* copera_io_write(uint32_t location, void *vcontext, uint8_t value)
 	case 0x24:
 	case 0x34:
 		printf("Copera YMF262 Address Part #%d write - %X: %X\n", ((location >> 4) & 1) + 1, location, value);
+		ymf262_run(gen->opl, m68k->cycles);
+		if (location & 0x10) {
+			ymf262_address_write_part2(gen->opl, value);
+		} else {
+			ymf262_address_write_part1(gen->opl, value);
+		}
 		break;
 	case 0x28:
 		printf("Copera YMF262 Data write - %X: %X\n", location, value);
+		ymf262_run(gen->opl, m68k->cycles);
+		ymf262_data_write(gen->opl, value);
 		break;
 	case 0x40:
 		//Bit 4 = SCI
@@ -1905,6 +1924,7 @@ static void set_speed_percent(system_header * system, uint32_t percent)
 		}
 		if (context->ymz) {
 			ymz263b_adjust_master_clock(context->ymz, context->master_clock);
+			ymf262_adjust_master_clock(context->opl, context->master_clock);
 		}
 		pico_pcm_adjust_master_clock(context->adpcm, context->master_clock);
 	}
@@ -2249,6 +2269,7 @@ static void free_genesis(system_header *system)
 		if (gen->ymz) {
 			ymz263b_free(gen->ymz);
 			free(gen->ymz);
+			ymf262_free(gen->opl);
 		}
 	} else {
 		ym_free(gen->ym);
@@ -2447,8 +2468,14 @@ static void set_audio_config(genesis_context *gen)
 		config_gain = tern_find_path(config, "audio\0fm_gain\0", TVAL_PTR).ptrval;
 		render_audio_source_gaindb(gen->ym->audio, config_gain ? atof(config_gain) : 0.0f);
 
-		char *config_dac = tern_find_path_default(config, "audio\0fm_dac\0", (tern_val){.ptrval="zero_offset"}, TVAL_PTR).ptrval;
-		ym_enable_zero_offset(gen->ym, !strcmp(config_dac, "zero_offset"));
+		char *config_dac = tern_find_path_default(config, "audio\0fm_dac\0", (tern_val){.ptrval="auto"}, TVAL_PTR).ptrval;
+		uint8_t zero_offset = 0;
+		if (!strcmp(config_dac, "auto")) {
+			zero_offset = gen->ym->status_address_mask != 0;
+		} else if (!strcmp(config_dac, "zero_offset")) {
+			zero_offset = 1;
+		}
+		ym_enable_zero_offset(gen->ym, zero_offset);
 	}
 
 	if (gen->expansion) {
@@ -2488,6 +2515,9 @@ static void start_vgm_log(system_header *system, char *filename)
 			ym_vgm_log(gen->ym, gen->normal_clock, vgm);
 		} else {
 			sync_sound_pico(gen, vgm->last_cycle);
+			if (gen->opl) {
+				ymf262_vgm_log(gen->opl, gen->normal_clock, vgm);
+			}
 		}
 		psg_vgm_log(gen->psg, gen->normal_clock, vgm);
 		gen->header.vgm_logging = 1;
@@ -3223,7 +3253,10 @@ genesis_context* alloc_config_pico(void *rom, uint32_t rom_size, void *lock_on, 
 		//This divider is just a guess, PCB diagram in MAME shows no other crystal
 		//Datasheet says the typical clock is 16.9344 MHz
 		//Master clock / 3 is 17.897725 MHz which is reasonably close
+		//FIXME: Copera does actually have a separate crystal for these
 		ymz263b_init(gen->ymz, gen->master_clock, 3);
+		gen->opl = calloc(1, sizeof(*gen->opl));
+		ymf262_init(gen->opl, gen->master_clock, 3, ym_opts);
 	}
 	
 	gen->work_ram = calloc(2, RAM_WORDS);

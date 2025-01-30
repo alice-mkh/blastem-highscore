@@ -196,8 +196,15 @@ static void mappings_iter(char *key, tern_val val, uint8_t valtype, void *data)
 	}
 	char *mapping = tern_find_ptr(val.ptrval, "mapping");
 	if (mapping) {
-		const char *parts[] = {key, ",", mapping};
+		const char *parts[] = {key, ",", mapping, ","};
+#if SDL_VERSION_ATLEAST(2,0,10)
+		//For reasons that are unclear, in some cases the last mapping element
+		//seems to get dropped unless there is a trailing comma
+		char * full = alloc_concat_m(4, parts);
+#else
+		//In SDL 2.0.9 and below, it is not legal to have a trailing comma
 		char * full = alloc_concat_m(3, parts);
+#endif
 		SDL_GameControllerAddMapping(full);
 		free(full);
 	}
@@ -242,8 +249,15 @@ void save_controller_mapping(int joystick, char *mapping_string)
 	existing = tern_insert_ptr(existing, "mapping", strdup(mapping_string));
 	info_config = tern_insert_node(info_config, guid_string, existing);
 	persist_config_at(config, info_config, "controller_types.cfg");
-	const char *parts[] = {guid_string, ",", mapping_string};
+	const char *parts[] = {guid_string, ",", mapping_string, ","};
+#if SDL_VERSION_ATLEAST(2,0,10)
+	//For reasons that are unclear, in some cases the last mapping element
+	//seems to get dropped unless there is a trailing comma
+	char * full = alloc_concat_m(4, parts);
+#else
+	//In SDL 2.0.9 and below, it is not legal to have a trailing comma
 	char * full = alloc_concat_m(3, parts);
+#endif
 	uint8_t gc_events = render_are_gamepad_events_enabled();
 	render_enable_gamepad_events(0);
 	SDL_GameControllerAddMapping(full);

@@ -149,6 +149,7 @@ uint32_t load_media(char * filename, system_media *dst, system_type *stype)
 #ifndef IS_LIB
 	if (dst->zip) {
 		zip_close(dst->zip);
+		dst->zip = NULL;
 	}
 #endif
 	dst->orig_path = filename;
@@ -233,12 +234,14 @@ uint32_t load_media(char * filename, system_media *dst, system_type *stype)
 	romclose(f);
 	if (!strcasecmp(dst->extension, "cue")) {
 		if (parse_cue(dst)) {
+			ret = dst->size;
 			if (stype) {
 				*stype = SYSTEM_SEGACD;
 			}
 		}
 	} else if (!strcasecmp(dst->extension, "toc")) {
 		if (parse_toc(dst)) {
+			ret = dst->size;
 			if (stype) {
 				*stype = SYSTEM_SEGACD;
 			}

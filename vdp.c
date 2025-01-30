@@ -117,7 +117,9 @@ static void update_video_params(vdp_context *context)
 				context->state = ACTIVE;
 			} else if (context->vcounter == 0x1FF) {
 				context->state = PREPARING;
-				memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				if (!context->done_composite) {
+					memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				}
 			}
 		}
 	} else {
@@ -138,7 +140,9 @@ static void update_video_params(vdp_context *context)
 			}
 			else if (context->vcounter == 0x1FF) {
 				context->state = PREPARING;
-				memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				if (!context->done_composite) {
+					memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				}
 			}
 		}
 	}
@@ -376,27 +380,28 @@ static void increment_address(vdp_context *context)
 
 static void render_sprite_cells(vdp_context * context)
 {
-	if (context->cur_slot > MAX_SPRITES_LINE) {
-		context->cur_slot--;
-		return;
-	}
 	if (context->cur_slot < 0) {
+		//should this be 16 in H32?
+		context->cur_slot += 32;
+	}
+	if (context->cur_slot >= MAX_SPRITES_LINE) {
+		context->cur_slot--;
 		return;
 	}
 	sprite_draw * d = context->sprite_draw_list + context->cur_slot;
 	uint16_t address = d->address;
 	address += context->sprite_x_offset * d->height * 4;
 	context->serial_address = address;
-	uint16_t dir;
-	int16_t x;
-	if (d->h_flip) {
-		x = d->x_pos + 7 + 8 * (d->width - context->sprite_x_offset - 1);
-		dir = -1;
-	} else {
-		x = d->x_pos + context->sprite_x_offset * 8;
-		dir = 1;
-	}
 	if (d->x_pos) {
+		uint16_t dir;
+		int16_t x;
+		if (d->h_flip) {
+			x = d->x_pos + 7 + 8 * (d->width - context->sprite_x_offset - 1);
+			dir = -1;
+		} else {
+			x = d->x_pos + context->sprite_x_offset * 8;
+			dir = 1;
+		}
 		context->flags |= FLAG_CAN_MASK;
 		if (!(context->flags & FLAG_MASKED)) {
 			x -= 128;
@@ -1289,23 +1294,23 @@ static void read_map_scroll(uint16_t column, uint16_t vsram_off, uint32_t line, 
 	}
 	if (!vsram_off) {
 		uint16_t left_col, right_col;
-		if (context->regs[REG_WINDOW_H] & WINDOW_RIGHT) {
-			left_col = (context->regs[REG_WINDOW_H] & 0x1F) * 2 + 2;
+		if (context->window_h_latch & WINDOW_RIGHT) {
+			left_col = (context->window_h_latch & 0x1F) * 2 + 2;
 			right_col = 42;
 		} else {
 			left_col = 0;
-			right_col = (context->regs[REG_WINDOW_H] & 0x1F) * 2;
+			right_col = (context->window_h_latch & 0x1F) * 2;
 			if (right_col) {
 				right_col += 2;
 			}
 		}
 		uint16_t top_line, bottom_line;
-		if (context->regs[REG_WINDOW_V] & WINDOW_DOWN) {
-			top_line = (context->regs[REG_WINDOW_V] & 0x1F) << window_line_shift;
+		if (context->window_v_latch & WINDOW_DOWN) {
+			top_line = (context->window_v_latch & 0x1F) << window_line_shift;
 			bottom_line = context->double_res ? 481 : 241;
 		} else {
 			top_line = 0;
-			bottom_line = (context->regs[REG_WINDOW_V] & 0x1F) << window_line_shift;
+			bottom_line = (context->window_v_latch & 0x1F) << window_line_shift;
 		}
 		if ((column >= left_col && column < right_col) || (line >= top_line && line < bottom_line)) {
 			uint16_t address = context->regs[REG_WINDOW] << 10;
@@ -2100,22 +2105,22 @@ static void vdp_advance_line(vdp_context *context)
 			if (is_mode_5) {
 				uint32_t left, right;
 				uint16_t top_line, bottom_line;
-				if (context->regs[REG_WINDOW_V] & WINDOW_DOWN) {
-					top_line = ((context->regs[REG_WINDOW_V] & 0x1F) << 3) + context->border_top;
+				if (context->window_v_latch & WINDOW_DOWN) {
+					top_line = ((context->window_v_latch & 0x1F) << 3) + context->border_top;
 					bottom_line = context->inactive_start + context->border_top;
 				} else {
 					top_line = context->border_top;
-					bottom_line = ((context->regs[REG_WINDOW_V] & 0x1F) << 3) + context->border_top;
+					bottom_line = ((context->window_v_latch & 0x1F) << 3) + context->border_top;
 				}
 				if (line >= top_line && line < bottom_line) {
 					left = 0;
 					right = 320 + BORDER_LEFT + BORDER_RIGHT;
-				} else if (context->regs[REG_WINDOW_H] & WINDOW_RIGHT) {
-					left = (context->regs[REG_WINDOW_H] & 0x1F) * 16 + BORDER_LEFT;
+				} else if (context->window_h_latch & WINDOW_RIGHT) {
+					left = (context->window_h_latch & 0x1F) * 16 + BORDER_LEFT;
 					right = 320 + BORDER_LEFT + BORDER_RIGHT;
 				} else {
 					left = 0;
-					right = (context->regs[REG_WINDOW_H] & 0x1F) * 16 + BORDER_LEFT;
+					right = (context->window_h_latch & 0x1F) * 16 + BORDER_LEFT;
 				}
 				for (uint32_t i = left; i < right; i++)
 				{
@@ -2134,6 +2139,10 @@ static void vdp_advance_line(vdp_context *context)
 	}
 
 	context->vcounter++;
+	if (is_mode_5) {
+		context->window_h_latch = context->regs[REG_WINDOW_H];
+		context->window_v_latch = context->regs[REG_WINDOW_V];
+	}
 	if (context->vcounter == jump_start) {
 		context->vcounter = jump_end;
 	} else {
@@ -2793,10 +2802,11 @@ static void draw_right_border(vdp_context *context)
 				context->output = dummy_buffer;\
 			}\
 		}\
+		render_sprite_cells( context);\
 		if (slot == 168 || slot == 247 || slot == 248) {\
 			render_border_garbage(\
 				context,\
-				context->sprite_draw_list[context->cur_slot].address,\
+				context->serial_address,\
 				context->tmp_buf_b,\
 				context->buf_b_off + (slot == 247 ? 0 : 8),\
 				slot == 247 ? context->col_1 : context->col_2\
@@ -2808,7 +2818,7 @@ static void draw_right_border(vdp_context *context)
 		} else if (slot == 243) {\
 			render_border_garbage(\
 				context,\
-				context->sprite_draw_list[context->cur_slot].address,\
+				context->serial_address,\
 				context->tmp_buf_a,\
 				context->buf_a_off,\
 				context->col_1\
@@ -2816,7 +2826,6 @@ static void draw_right_border(vdp_context *context)
 		} else if (slot == 169) {\
 			draw_right_border(context);\
 		}\
-		render_sprite_cells( context);\
 		scan_sprite_table(context->vcounter, context);\
 		CHECK_LIMIT_HSYNC(slot)
 
@@ -2831,10 +2840,11 @@ static void draw_right_border(vdp_context *context)
 				context->output = dummy_buffer;\
 			}\
 		}\
+		render_sprite_cells( context);\
 		if (slot == 136 || slot == 247 || slot == 248) {\
 			render_border_garbage(\
 				context,\
-				context->sprite_draw_list[context->cur_slot].address,\
+				context->serial_address,\
 				context->tmp_buf_b,\
 				context->buf_b_off + (slot == 247 ? 0 : 8),\
 				slot == 247 ? context->col_1 : context->col_2\
@@ -2846,7 +2856,6 @@ static void draw_right_border(vdp_context *context)
 		} else if (slot == 137) {\
 			draw_right_border(context);\
 		}\
-		render_sprite_cells( context);\
 		scan_sprite_table(context->vcounter, context);\
 		if (context->flags & FLAG_DMA_RUN) { run_dma_src(context, -1); } \
 		if (slot == 147) {\
@@ -2931,22 +2940,24 @@ static void vdp_h40_line(vdp_context * context)
 	//167
 	context->sprite_index = 0x80;
 	context->slot_counter = 0;
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_b, context->buf_b_off,
 		context->col_1
 	);
-	render_sprite_cells(context);
 	scan_sprite_table(context->vcounter, context);
 	//168
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_b,
 		context->buf_b_off + 8,
 		context->col_2
 	);
+	scan_sprite_table(context->vcounter, context);
 
 	//Do palette lookup for end of previous line
 	uint8_t *src = context->compositebuf + (LINE_CHANGE_H40 - BG_START_SLOT) *2;
@@ -2969,20 +2980,22 @@ static void vdp_h40_line(vdp_context * context)
 		}
 	}
 	advance_output_line(context);
-	//168-242 (inclusive)
-	for (int i = 0; i < 28; i++)
+	//169-242 (inclusive)
+	for (int i = 0; i < 27; i++)
 	{
 		render_sprite_cells(context);
 		scan_sprite_table(context->vcounter, context);
 	}
 	//243
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_a,
 		context->buf_a_off,
 		context->col_1
 	);
+	scan_sprite_table(context->vcounter, context);
 	//244
 	address = (context->regs[REG_HSCROLL] & 0x3F) << 10;
 	mask = 0;
@@ -3006,24 +3019,25 @@ static void vdp_h40_line(vdp_context * context)
 		scan_sprite_table(context->vcounter, context);
 	}
 	//247
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_b,
 		context->buf_b_off,
 		context->col_1
 	);
-	render_sprite_cells(context);
 	scan_sprite_table(context->vcounter, context);
 	//248
+	
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_b,
 		context->buf_b_off + 8,
 		context->col_2
 	);
-	render_sprite_cells(context);
 	scan_sprite_table(context->vcounter, context);
 	context->buf_a_off = (context->buf_a_off + SCROLL_BUFFER_DRAW) & SCROLL_BUFFER_MASK;
 	context->buf_b_off = (context->buf_b_off + SCROLL_BUFFER_DRAW) & SCROLL_BUFFER_MASK;
@@ -3069,22 +3083,26 @@ static void vdp_h40_line(vdp_context * context)
 	//163
 	context->cur_slot = MAX_SPRITES_LINE-1;
 	memset(context->linebuf, 0, LINEBUF_SIZE);
+	context->flags &= ~FLAG_MASKED;
+	while (context->sprite_draws) {
+		context->sprite_draws--;
+		context->sprite_draw_list[context->sprite_draws].x_pos = 0;
+	}
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_a, context->buf_a_off,
 		context->col_1
 	);
-	context->flags &= ~FLAG_MASKED;
-	render_sprite_cells(context);
 	//164
+	render_sprite_cells(context);
 	render_border_garbage(
 		context,
-		context->sprite_draw_list[context->cur_slot].address,
+		context->serial_address,
 		context->tmp_buf_a, context->buf_a_off + 8,
 		context->col_2
 	);
-	render_sprite_cells(context);
 	context->cycles += MCLKS_LINE;
 	vdp_advance_line(context);
 	src = context->compositebuf;
@@ -3170,13 +3188,13 @@ static void vdp_h40(vdp_context * context, uint32_t target_cycles)
 		OUTPUT_PIXEL(167)
 		context->sprite_index = 0x80;
 		context->slot_counter = 0;
+		render_sprite_cells(context);
 		render_border_garbage(
 			context,
-			context->sprite_draw_list[context->cur_slot].address,
+			context->serial_address,
 			context->tmp_buf_b, context->buf_b_off,
 			context->col_1
 		);
-		render_sprite_cells(context);
 		scan_sprite_table(context->vcounter, context);
 		CHECK_LIMIT
 	SPRITE_RENDER_H40(168)
@@ -3304,24 +3322,28 @@ static void vdp_h40(vdp_context * context, uint32_t target_cycles)
 		OUTPUT_PIXEL(163)
 		context->cur_slot = MAX_SPRITES_LINE-1;
 		memset(context->linebuf, 0, LINEBUF_SIZE);
+		context->flags &= ~FLAG_MASKED;
+		while (context->sprite_draws) {
+			context->sprite_draws--;
+			context->sprite_draw_list[context->sprite_draws].x_pos = 0;
+		}
+		render_sprite_cells(context);
 		render_border_garbage(
 			context,
-			context->sprite_draw_list[context->cur_slot].address,
+			context->serial_address,
 			context->tmp_buf_a, context->buf_a_off,
 			context->col_1
 		);
-		context->flags &= ~FLAG_MASKED;
-		render_sprite_cells(context);
 		CHECK_LIMIT
 	case 164:
 		OUTPUT_PIXEL(164)
+		render_sprite_cells(context);
 		render_border_garbage(
 			context,
-			context->sprite_draw_list[context->cur_slot].address,
+			context->serial_address,
 			context->tmp_buf_a, context->buf_a_off + 8,
 			context->col_2
 		);
-		render_sprite_cells(context);
 		if (context->flags & FLAG_DMA_RUN) {
 			run_dma_src(context, -1);
 		}
@@ -3379,13 +3401,13 @@ static void vdp_h32(vdp_context * context, uint32_t target_cycles)
 		OUTPUT_PIXEL(135)
 		context->sprite_index = 0x80;
 		context->slot_counter = 0;
+		render_sprite_cells(context);
 		render_border_garbage(
 			context,
-			context->sprite_draw_list[context->cur_slot].address,
+			context->serial_address,
 			context->tmp_buf_b, context->buf_b_off,
 			context->col_1
 		);
-		render_sprite_cells(context);
 		scan_sprite_table(context->vcounter, context);
 		CHECK_LIMIT
 	SPRITE_RENDER_H32(136)
@@ -3428,7 +3450,7 @@ static void vdp_h32(vdp_context * context, uint32_t target_cycles)
 		//provides "garbage" for border when plane A selected
 		render_border_garbage(
 				context,
-				context->sprite_draw_list[context->cur_slot].address,
+				context->serial_address,
 				context->tmp_buf_a,
 				context->buf_a_off,
 				context->col_1
@@ -3522,24 +3544,28 @@ static void vdp_h32(vdp_context * context, uint32_t target_cycles)
 		OUTPUT_PIXEL(131)
 		context->cur_slot = MAX_SPRITES_LINE_H32-1;
 		memset(context->linebuf, 0, LINEBUF_SIZE);
+		context->flags &= ~FLAG_MASKED;
+		while (context->sprite_draws) {
+			context->sprite_draws--;
+			context->sprite_draw_list[context->sprite_draws].x_pos = 0;
+		}
+		render_sprite_cells(context);
 		render_border_garbage(
 			context,
-			context->sprite_draw_list[context->cur_slot].address,
+			context->serial_address,
 			context->tmp_buf_a, context->buf_a_off,
 			context->col_1
 		);
-		context->flags &= ~FLAG_MASKED;
-		render_sprite_cells(context);
 		CHECK_LIMIT
 	case 132:
 		OUTPUT_PIXEL(132)
+		render_sprite_cells(context);
 		render_border_garbage(
 			context,
-			context->sprite_draw_list[context->cur_slot].address,
+			context->serial_address,
 			context->tmp_buf_a, context->buf_a_off + 8,
 			context->col_2
 		);
-		render_sprite_cells(context);
 		if (context->flags & FLAG_DMA_RUN) {
 			run_dma_src(context, -1);
 		}
@@ -4600,7 +4626,9 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 			vdp_advance_line(context);
 			if (context->vcounter == active_line) {
 				context->state = PREPARING;
-				memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				if (!context->done_composite) {
+					memset(context->compositebuf, 0, sizeof(context->compositebuf));
+				}
 				return;
 			}
 		}
@@ -4744,42 +4772,46 @@ void vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
 		if (reg == REG_MODE_1 || reg == REG_MODE_2 || reg == REG_MODE_4) {
 			update_video_params(context);
 		}
-	} else if (reg == REG_KMOD_CTRL) {
-		if (!(value & 0xFF)) {
-			context->system->enter_debugger = 1;
-		}
-	} else if (reg == REG_KMOD_MSG) {
-		char c = value;
-		if (c) {
-			context->kmod_buffer_length++;
-			if ((context->kmod_buffer_length + 1) > context->kmod_buffer_storage) {
-				context->kmod_buffer_storage = context->kmod_buffer_storage ? context->kmod_buffer_storage * 2 : 128;
-				context->kmod_msg_buffer = realloc(context->kmod_msg_buffer, context->kmod_buffer_storage);
+	} else if (context->type == VDP_GENESIS) {
+		// Apparently Bart vs. the Space Mutants for SMS/GG writes to the timer KMOD timer register
+		// Probably need to add some sort of config toggle for KMOD registers generally, but this is a quick fix
+		if (reg == REG_KMOD_CTRL) {
+			if (!(value & 0xFF)) {
+				context->system->enter_debugger = 1;
 			}
-			context->kmod_msg_buffer[context->kmod_buffer_length - 1] = c;
-		} else if (context->kmod_buffer_length) {
-			context->kmod_msg_buffer[context->kmod_buffer_length] = 0;
-			if (is_stdout_enabled()) {
-				init_terminal();
-				printf("KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
-			} else {
-				// GDB remote debugging is enabled, use stderr instead
-				fprintf(stderr, "KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
+		} else if (reg == REG_KMOD_MSG) {
+			char c = value;
+			if (c) {
+				context->kmod_buffer_length++;
+				if ((context->kmod_buffer_length + 1) > context->kmod_buffer_storage) {
+					context->kmod_buffer_storage = context->kmod_buffer_storage ? context->kmod_buffer_storage * 2 : 128;
+					context->kmod_msg_buffer = realloc(context->kmod_msg_buffer, context->kmod_buffer_storage);
+				}
+				context->kmod_msg_buffer[context->kmod_buffer_length - 1] = c;
+			} else if (context->kmod_buffer_length) {
+				context->kmod_msg_buffer[context->kmod_buffer_length] = 0;
+				if (is_stdout_enabled()) {
+					init_terminal();
+					printf("KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
+				} else {
+					// GDB remote debugging is enabled, use stderr instead
+					fprintf(stderr, "KDEBUG MESSAGE: %s\n", context->kmod_msg_buffer);
+				}
+				context->kmod_buffer_length = 0;
 			}
-			context->kmod_buffer_length = 0;
-		}
-	} else if (reg == REG_KMOD_TIMER) {
-		if (!(value & 0x80)) {
-			if (is_stdout_enabled()) {
-				init_terminal();
-				printf("KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
-			} else {
-				// GDB remote debugging is enabled, use stderr instead
-				fprintf(stderr, "KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
+		} else if (reg == REG_KMOD_TIMER) {
+			if (!(value & 0x80)) {
+				if (is_stdout_enabled()) {
+					init_terminal();
+					printf("KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
+				} else {
+					// GDB remote debugging is enabled, use stderr instead
+					fprintf(stderr, "KDEBUG TIMER: %d\n", (context->cycles - context->timer_start_cycle) / 7);
+				}
 			}
-		}
-		if (value & 0xC0) {
-			context->timer_start_cycle = context->cycles;
+			if (value & 0xC0) {
+				context->timer_start_cycle = context->cycles;
+			}
 		}
 	}
 }
@@ -5371,7 +5403,7 @@ void vdp_int_ack(vdp_context * context)
 	}
 }
 
-#define VDP_STATE_VERSION 3
+#define VDP_STATE_VERSION 4
 void vdp_serialize(vdp_context *context, serialize_buffer *buf)
 {
 	save_int8(buf, VDP_STATE_VERSION);
@@ -5454,6 +5486,8 @@ void vdp_serialize(vdp_context *context, serialize_buffer *buf)
 	save_int32(buf, context->address_latch);
 	//was cd_latch, for compatibility with older builds that expect it
 	save_int8(buf, context->cd);
+	save_int8(buf, context->window_h_latch);
+	save_int8(buf, context->window_v_latch);
 }
 
 void vdp_deserialize(deserialize_buffer *buf, void *vcontext)
@@ -5588,10 +5622,16 @@ void vdp_deserialize(deserialize_buffer *buf, void *vcontext)
 	context->cycles = load_int32(buf);
 	context->pending_vint_start = load_int32(buf);
 	context->pending_hint_start = load_int32(buf);
+	context->window_h_latch = context->regs[REG_WINDOW_H];
+	context->window_v_latch = context->regs[REG_WINDOW_V];
 	if (version > 2) {
 		context->address_latch = load_int32(buf);
 		//was cd_latch, no longer used
 		load_int8(buf);
+		if (version > 3) {
+			context->window_h_latch = load_int8(buf);
+			context->window_v_latch = load_int8(buf);
+		}
 	} else {
 		context->address_latch = context->address;
 	}

@@ -1477,7 +1477,7 @@ static FILE *apng_file;
 #endif
 uint8_t render_saving_video(void)
 {
-#ifdef DISABLE_ZLIB
+#ifndef DISABLE_ZLIB
 	return apng_file != NULL;
 #else
 	return 0;
