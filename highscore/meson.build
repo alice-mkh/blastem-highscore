@@ -60,7 +60,9 @@ blastem_source = [
   '../vgm.c',
   '../wave.c',
   '../xband.c',
+  '../ym_common.c',
   '../ym2612.c',
+  '../ymf262.c',
   '../ymz263b.c',
   '../z80inst.c',
 ]
