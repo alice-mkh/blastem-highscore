@@ -4966,9 +4966,6 @@ void vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
 int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_cycle)
 {
 	//printf("control port write: %X at %d\n", value, context->cycles);
-	if (context->flags & FLAG_DMA_RUN) {
-		return -1;
-	}
 	if (context->flags & FLAG_PENDING) {
 		context->address_latch = value << 14 & 0x1C000;
 		context->address = (context->address & 0x3FFF) | context->address_latch;
@@ -5056,12 +5053,9 @@ void vdp_control_port_write_pbc(vdp_context *context, uint8_t value)
 	}
 }
 
-int vdp_data_port_write(vdp_context * context, uint16_t value)
+void vdp_data_port_write(vdp_context * context, uint16_t value)
 {
 	//printf("data port write: %X at %d\n", value, context->cycles);
-	if (context->flags & FLAG_DMA_RUN && (context->regs[REG_DMASRC_H] & DMA_TYPE_MASK) != DMA_FILL) {
-		return -1;
-	}
 	if (context->flags & FLAG_PENDING) {
 		context->flags &= ~FLAG_PENDING;
 		//Should these be cleared here?
@@ -5095,7 +5089,6 @@ int vdp_data_port_write(vdp_context * context, uint16_t value)
 	}
 	context->fifo_write = (context->fifo_write + 1) & (FIFO_SIZE-1);
 	increment_address(context);
-	return 0;
 }
 
 void vdp_data_port_write_pbc(vdp_context * context, uint8_t value)
