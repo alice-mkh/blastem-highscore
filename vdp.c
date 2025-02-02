@@ -2278,7 +2278,7 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 			break;
 		}
 		uint16_t table_address;
-		switch(context->debug_modes[DEBUG_PLANE] % 3)
+		switch(context->debug_modes[DEBUG_PLANE] & 3)
 		{
 		case 0:
 			table_address = context->regs[REG_SCROLL_A] << 10 & 0xE000;
@@ -2301,63 +2301,210 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 			break;
 		}
 		uint32_t bg_color = context->colors[context->regs[REG_BG_COLOR & 0x3F]];
-		uint16_t num_rows;
-		int num_lines;
-		if (context->double_res) {
-			num_rows = 64;
-			num_lines = 16;
-		} else {
-			num_rows = 128;
-			num_lines = 8;
-		}
-		for (uint16_t row = 0; row < num_rows; row++)
-		{
-			uint16_t row_address = table_address + (row & vscroll_mask) * v_mul;
-			for (uint16_t col = 0; col < 128; col++)
+		if ((context->debug_modes[DEBUG_PLANE] & 3) == 3) {
+			//clear a single alpha channel bit so we can distinguish between actual bg color and sprite
+			//pixels that just happen to be the same color
+			bg_color &= 0xFEFFFFFF;
+			uint32_t *line = fb;
+			uint32_t border_line = render_map_color(0, 0, 255);
+			uint32_t sprite_outline = render_map_color(255, 0, 255);
+			int right_border = 256 + ((context->h40_lines > context->output_lines / 2) ? 640 : 512);
+			for (int y = 0; y < 1024; y++)
 			{
-				uint16_t address = row_address + (col & hscroll_mask) * 2;
-				//pccv hnnn nnnn nnnn
-				//
-				uint16_t entry = context->vdpmem[address] << 8 | context->vdpmem[address + 1];
-				uint8_t pal = entry >> 9 & 0x30;
-
-				uint32_t *dst = fb + (row * pitch * num_lines / sizeof(uint32_t)) + col * 8;
-				if (context->double_res) {
-					address = (entry & 0x3FF) * 64;
-				} else {
-					address = (entry & 0x7FF) * 32;
-				}
-				int y_diff = 4;
-				if (entry & 0x1000) {
-					y_diff = -4;
-					address += (num_lines - 1) * 4;
-				}
-				int x_diff = 1;
-				if (entry & 0x800) {
-					x_diff = -1;
-					address += 3;
-				}
-				for (int y = 0; y < num_lines; y++)
-				{
-					uint16_t trow_address = address;
-					uint32_t *row_dst = dst;
-					for (int x = 0; x < 4; x++)
+				uint32_t *cur = line;
+				if (y != 256 && y != 256+context->inactive_start*2) {
+					for (int x = 0; x < 255; x++)
 					{
-						uint8_t byte = context->vdpmem[trow_address];
-						trow_address += x_diff;
-						uint8_t left, right;
-						if (x_diff > 0) {
-							left = byte >> 4;
-							right = byte & 0xF;
-						} else {
-							left = byte & 0xF;
-							right = byte >> 4;
-						}
-						*(row_dst++) = left ? context->colors[left|pal] : bg_color;
-						*(row_dst++) = right ? context->colors[right|pal] : bg_color;
+						*(cur++) = bg_color;
 					}
-					address += y_diff;
-					dst += pitch / sizeof(uint32_t);
+					*(cur++) = border_line;
+					for (int x = 256; x < right_border; x++)
+					{
+						*(cur++) = bg_color;
+					}
+					*(cur++) = border_line;
+					for (int x = right_border + 1; x < 1024; x++)
+					{
+						*(cur++) = bg_color;
+					}
+				} else {
+					for (int x = 0; x < 1024; x++)
+					{
+						*(cur++) = border_line;
+					}
+				}
+				line += pitch / sizeof(uint32_t);
+			}
+			for (int i = 0, index = 0; i < context->max_sprites_frame; i++)
+			{
+				uint32_t y = (context->sat_cache[index] & 3) << 8 | context->sat_cache[index + 1];
+				if (!context->double_res) {
+					y &= 0x1FF;
+					y <<= 1;
+				}
+				uint8_t tile_width = ((context->sat_cache[index+2] >> 2) & 0x3);
+				uint32_t pixel_width = (tile_width + 1) * 16;
+				uint8_t height = ((context->sat_cache[index+2] & 3) + 1) * 16;
+				uint16_t col_offset = height * (context->double_res ? 4 : 2);
+				uint16_t att_addr = mode5_sat_address(context) + index * 2 + 4;
+				uint16_t tileinfo = (context->vdpmem[att_addr] << 8) | context->vdpmem[att_addr+1];
+				uint16_t tile_addr;
+				if (context->double_res) {
+					tile_addr = (tileinfo & 0x3FF) << 6;
+				} else {
+					tile_addr = (tileinfo & 0x7FF) << 5;
+				}
+				uint8_t pal = (tileinfo >> 9) & 0x30;
+				uint16_t hflip = tileinfo & MAP_BIT_H_FLIP;
+				uint16_t vflip = tileinfo & MAP_BIT_V_FLIP;
+				uint32_t x = (((context->vdpmem[att_addr+ 2] & 0x3) << 8 | context->vdpmem[att_addr + 3]) & 0x1FF) * 2;
+				uint32_t *line = fb + y * pitch / sizeof(uint32_t) + x;
+				uint32_t *cur = line;
+				for (uint32_t cx = x, x2 = x + pixel_width; cx < x2; cx++)
+				{
+					*(cur++) = sprite_outline;
+				}
+				uint8_t advance_source = 1;
+				uint32_t y2 = y + height - 1;
+				if (y2 > 1024) {
+					y2 = 1024;
+				}
+				uint16_t line_offset = 4;
+				if (vflip) {
+					tile_addr += col_offset - 4;
+					line_offset = -line_offset;
+				}
+				if (hflip) {
+					tile_addr += col_offset * tile_width + 3;
+					col_offset = -col_offset;
+				}
+				for (; y < y2; y++)
+				{
+					line += pitch / sizeof(uint32_t);
+					cur = line;
+					*(cur++) = sprite_outline;
+					uint16_t line_addr = tile_addr;
+					for (uint8_t tx = 0; tx <= tile_width; tx++)
+					{
+						uint16_t cur_addr = line_addr;
+						for (uint8_t cx = 0; cx < 4; cx++)
+						{
+							uint8_t pair = context->vdpmem[cur_addr];
+							uint32_t left, right;
+							if (hflip) {
+								right = pair >> 4;
+								left = pair & 0xF;
+								cur_addr--;
+							} else {
+								left = pair >> 4;
+								right = pair & 0xF;
+								cur_addr++;
+							}
+							left = left ? context->colors[pal | left] : bg_color;
+							right = right ? context->colors[pal | right] : bg_color;
+							if (*cur == bg_color) {
+								*(cur) = left;
+							}
+							cur++;
+							if (cx | tx) {
+								if (*cur == bg_color) {
+									*(cur) = left;
+								}
+								cur++;
+							}
+							if (*cur == bg_color) {
+								*(cur) = right;
+							}
+							cur++;
+							if (cx != 3 || tx != tile_width) {
+								if (*cur == bg_color) {
+									*(cur) = right;
+								}
+								cur++;
+							}
+						}
+						line_addr += col_offset;
+					}
+					
+					*(cur++) = sprite_outline;
+					if (advance_source || context->double_res) {
+						tile_addr += line_offset;
+					}
+					advance_source = !advance_source;
+				}
+				if (y2 != 1024) {
+					line += pitch / sizeof(uint32_t);
+					cur = line;
+					for (uint32_t cx = x, x2 = x + pixel_width; cx < x2; cx++)
+					{
+						*(cur++) = sprite_outline;
+					}
+				}
+				index = context->sat_cache[index+3] * 4;
+				if (!index) {
+					break;
+				}
+			}
+		} else {
+			
+			uint16_t num_rows;
+			int num_lines;
+			if (context->double_res) {
+				num_rows = 64;
+				num_lines = 16;
+			} else {
+				num_rows = 128;
+				num_lines = 8;
+			}
+			for (uint16_t row = 0; row < num_rows; row++)
+			{
+				uint16_t row_address = table_address + (row & vscroll_mask) * v_mul;
+				for (uint16_t col = 0; col < 128; col++)
+				{
+					uint16_t address = row_address + (col & hscroll_mask) * 2;
+					//pccv hnnn nnnn nnnn
+					//
+					uint16_t entry = context->vdpmem[address] << 8 | context->vdpmem[address + 1];
+					uint8_t pal = entry >> 9 & 0x30;
+
+					uint32_t *dst = fb + (row * pitch * num_lines / sizeof(uint32_t)) + col * 8;
+					if (context->double_res) {
+						address = (entry & 0x3FF) * 64;
+					} else {
+						address = (entry & 0x7FF) * 32;
+					}
+					int y_diff = 4;
+					if (entry & 0x1000) {
+						y_diff = -4;
+						address += (num_lines - 1) * 4;
+					}
+					int x_diff = 1;
+					if (entry & 0x800) {
+						x_diff = -1;
+						address += 3;
+					}
+					for (int y = 0; y < num_lines; y++)
+					{
+						uint16_t trow_address = address;
+						uint32_t *row_dst = dst;
+						for (int x = 0; x < 4; x++)
+						{
+							uint8_t byte = context->vdpmem[trow_address];
+							trow_address += x_diff;
+							uint8_t left, right;
+							if (x_diff > 0) {
+								left = byte >> 4;
+								right = byte & 0xF;
+							} else {
+								left = byte & 0xF;
+								right = byte >> 4;
+							}
+							*(row_dst++) = left ? context->colors[left|pal] : bg_color;
+							*(row_dst++) = right ? context->colors[right|pal] : bg_color;
+						}
+						address += y_diff;
+						dst += pitch / sizeof(uint32_t);
+					}
 				}
 			}
 		}
