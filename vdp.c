@@ -4073,7 +4073,7 @@ static uint8_t tms_sprite_clock(vdp_context *context, int16_t offset)
 					output = context->sprite_draw_list[i].pal_priority;
 				}
 			}
-			if (!(context->regs[REG_MODE_2] & BIT_SPRITE_SZ) || ((x - context->sprite_draw_list[i].x_pos) & 1)) {
+			if (!(context->regs[REG_MODE_2] & BIT_SPRITE_ZM) || ((x - context->sprite_draw_list[i].x_pos) & 1)) {
 				context->sprite_draw_list[i].address <<= 1;
 			}
 		}
