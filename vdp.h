@@ -52,7 +52,7 @@
 
 #define MCLKS_LINE 3420
 
-#define FLAG_DOT_OFLOW     0x01
+#define FLAG_SPRITE_OFLOW  0x01
 #define FLAG_CAN_MASK      0x02
 #define FLAG_MASKED        0x04
 #define FLAG_WINDOW        0x08

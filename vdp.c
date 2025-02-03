@@ -739,7 +739,7 @@ static uint8_t is_active(vdp_context *context)
 
 static void scan_sprite_table(uint32_t line, vdp_context * context)
 {
-	if (context->sprite_index && ((uint8_t)context->slot_counter) < context->max_sprites_line) {
+	if (context->sprite_index && !(context->flags & FLAG_SPRITE_OFLOW)) {
 		line += 1;
 		uint16_t ymask, ymin;
 		uint8_t height_mult;
@@ -769,6 +769,10 @@ static void scan_sprite_table(uint32_t line, vdp_context * context)
 		uint8_t height = ((context->sat_cache[address+2] & 0x3) + 1) * height_mult;
 		//printf("Sprite %d | y: %d, height: %d\n", context->sprite_index, y, height);
 		if (y <= line && line < (y + height)) {
+			if (((uint8_t)context->slot_counter) == context->max_sprites_line) {
+				context->flags |= FLAG_SPRITE_OFLOW;
+				return;
+			}
 			//printf("Sprite %d at y: %d with height %d is on line %d\n", context->sprite_index, y, height, line);
 			context->sprite_info_list[context->slot_counter].size = context->sat_cache[address+2];
 			context->sprite_info_list[context->slot_counter++].index = context->sprite_index;
@@ -786,6 +790,10 @@ static void scan_sprite_table(uint32_t line, vdp_context * context)
 			height = ((context->sat_cache[address+2] & 0x3) + 1) * height_mult;
 			//printf("Sprite %d | y: %d, height: %d\n", context->sprite_index, y, height);
 			if (y <= line && line < (y + height)) {
+				if (((uint8_t)context->slot_counter) == context->max_sprites_line) {
+					context->flags |= FLAG_SPRITE_OFLOW;
+					return;
+				}
 				//printf("Sprite %d at y: %d with height %d is on line %d\n", context->sprite_index, y, height, line);
 				context->sprite_info_list[context->slot_counter].size = context->sat_cache[address+2];
 				context->sprite_info_list[context->slot_counter++].index = context->sprite_index;
@@ -793,7 +801,6 @@ static void scan_sprite_table(uint32_t line, vdp_context * context)
 			context->sprite_index = context->sat_cache[address+3] & 0x7F;
 		}
 	}
-	//TODO: Seems like the overflow flag should be set here if we run out of sprite info slots without hitting the end of the list
 }
 
 static void scan_sprite_table_mode4(vdp_context * context)
@@ -824,7 +831,7 @@ static void scan_sprite_table_mode4(vdp_context * context)
 			if (y <= line && line < (y + ysize)) {
 				if (!context->slot_counter) {
 					context->sprite_index = MAX_SPRITES_FRAME_H32;
-					context->flags |= FLAG_DOT_OFLOW;
+					context->flags |= FLAG_SPRITE_OFLOW;
 					return;
 				}
 				context->sprite_info_list[--(context->slot_counter)].size = size;
@@ -846,7 +853,7 @@ static void scan_sprite_table_mode4(vdp_context * context)
 				if (y <= line && line < (y + ysize)) {
 					if (!context->slot_counter) {
 						context->sprite_index = MAX_SPRITES_FRAME_H32;
-						context->flags |= FLAG_DOT_OFLOW;
+						context->flags |= FLAG_SPRITE_OFLOW;
 						return;
 					}
 					context->sprite_info_list[--(context->slot_counter)].size = size;
@@ -3199,9 +3206,6 @@ static void vdp_h40_line(vdp_context * context)
 	render_sprite_cells(context);
 	scan_sprite_table(context->vcounter, context);
 	//255
-	if (context->cur_slot >= 0 && context->sprite_draw_list[context->cur_slot].x_pos) {
-		context->flags |= FLAG_DOT_OFLOW;
-	}
 	scan_sprite_table(context->vcounter, context);
 	//0
 	scan_sprite_table(context->vcounter, context);//Just a guess
@@ -3419,9 +3423,6 @@ static void vdp_h40(vdp_context * context, uint32_t target_cycles)
 		CHECK_LIMIT
 	SPRITE_RENDER_H40(254)
 	case 255:
-		if (context->cur_slot >= 0 && context->sprite_draw_list[context->cur_slot].x_pos) {
-			context->flags |= FLAG_DOT_OFLOW;
-		}
 		render_map_3(context);
 		scan_sprite_table(context->vcounter, context);//Just a guess
 		CHECK_LIMIT
@@ -3630,9 +3631,6 @@ static void vdp_h32(vdp_context * context, uint32_t target_cycles)
 		CHECK_LIMIT
 	SPRITE_RENDER_H32(250)
 	case 251:
-		if (context->cur_slot >= 0 && context->sprite_draw_list[context->cur_slot].x_pos) {
-			context->flags |= FLAG_DOT_OFLOW;
-		}
 		render_map_1(context);
 		scan_sprite_table(context->vcounter, context);//Just a guess
 		CHECK_LIMIT
@@ -3969,7 +3967,7 @@ static void tms_sprite_scan(vdp_context *context)
 	if (diff < size) {
 		context->sprite_info_list[context->sprite_draws++].index = context->sprite_index;
 		if (context->sprite_draws == 5) {
-			context->flags |= FLAG_DOT_OFLOW;
+			context->flags |= FLAG_SPRITE_OFLOW;
 		}
 	} else {
 		context->sprite_info_list[4].index = context->sprite_index;
@@ -5148,7 +5146,7 @@ uint16_t vdp_status(vdp_context *context)
 	if (context->flags2 & FLAG2_VINT_PENDING) {
 		value |= 0x80;
 	}
-	if (context->flags & FLAG_DOT_OFLOW) {
+	if (context->flags & FLAG_SPRITE_OFLOW) {
 		value |= 0x40;
 	}
 	if (context->flags2 & FLAG2_SPRITE_COLLIDE) {
@@ -5182,7 +5180,7 @@ uint16_t vdp_status(vdp_context *context)
 uint16_t vdp_control_port_read(vdp_context * context)
 {
 	uint16_t value = vdp_status(context);
-	context->flags &= ~(FLAG_DOT_OFLOW|FLAG_PENDING);
+	context->flags &= ~(FLAG_SPRITE_OFLOW|FLAG_PENDING);
 	context->flags2 &= ~(FLAG2_SPRITE_COLLIDE|FLAG2_BYTE_PENDING);
 	//printf("status read at cycle %d returned %X\n", context->cycles, value);
 	return value;
