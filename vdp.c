@@ -739,7 +739,9 @@ static uint8_t is_active(vdp_context *context)
 
 static void scan_sprite_table(uint32_t line, vdp_context * context)
 {
-	if (context->sprite_index && !(context->flags & FLAG_SPRITE_OFLOW)) {
+	if (context->sprite_index && 
+		(((uint8_t)context->slot_counter) < context->max_sprites_line || !(context->flags & FLAG_SPRITE_OFLOW))
+	) {
 		line += 1;
 		uint16_t ymask, ymin;
 		uint8_t height_mult;
