@@ -13,8 +13,8 @@ if [ $OS = "Linux" ]; then
 	if [ -f ./configure ]; then
 		./configure
 		make all
-		cp build/.libs/libSDL2-*.so.*.*.* ../lib
 		cd ..
+		cp sdl/build/.libs/libSDL2-*.so.*.*.* lib
 		sdl=`ls lib`
 		link=`echo $sdl | sed -E 's/(so\.[0-9]*).*/\1/'`
 		cd lib
