@@ -482,6 +482,22 @@ def _dispatchCImpl(prog, params):
 	else:
 		raise Exception('Unsupported dispatch type ' + prog.dispatch)
 
+def _addExplicitFlagSet(prog, output, flag, flagval):
+	location = prog.flags.getStorage(flag)
+	if type(location) is tuple:
+		reg,bit = location
+		reg = prog.resolveReg(reg, None, {})
+		value = str(1 << bit)
+		if flagval:
+			operator = '|='
+		else:
+			operator = '&='
+			value = '~' + value
+		output.append('\n\t{reg} {op} {val};'.format(reg=reg, op=operator, val=value))
+	else:
+		reg = prog.resolveReg(location, None, {})
+		output.append('\n\t{reg} = {val};'.format(reg=reg, val=flagval))
+
 def _updateFlagsCImpl(prog, params, rawParams):
 	autoUpdate, explicit = prog.flags.parseFlagUpdate(params[0])
 	output = []
@@ -497,15 +513,60 @@ def _updateFlagsCImpl(prog, params, rawParams):
 		storage = prog.flags.getStorage(flag)
 		if calc == 'bit' or calc == 'sign' or calc == 'carry' or calc == 'half' or calc == 'overflow':
 			myRes = lastDst
+			after = ''
 			if calc == 'sign':
 				resultBit = prog.getLastSize() - 1
 			elif calc == 'carry':
-				if prog.lastOp.op in ('asr', 'lsr'):
+				if prog.lastOp.op in ('asr', 'lsr', 'rrc'):
 					if type(prog.lastB) is int:
-						resultBit = prog.lastB - 1
+						if prog.lastB == 0:
+							explicit[flag] = 0
+							continue
+						else:
+							resultBit = prog.lastB - 1
 					else:
+						output.append(f'\n\tif (!{prog.lastB}) {{')
+						_addExplicitFlagSet(prog, output, flag, 0)
+						output.append('\n\t} else {')
+						after = '\n\t}'
 						resultBit = f'({prog.lastB} - 1)'
 					myRes = prog.lastA
+				elif prog.lastOp.op == 'rlc':
+					if type(prog.lastB) is int:
+						if prog.lastB == 0:
+							explicit[flag] = 0
+							continue
+						else:
+							resultBit = prog.getLastSize() - prog.lastB
+					else:
+						output.append(f'\n\tif (!{prog.lastB}) {{')
+						_addExplicitFlagSet(prog, output, flag, 0)
+						output.append('\n\t} else {')
+						after = '\n\t}'
+						resultBit = f'({prog.getLastSize()} - {prog.lastB})'
+					myRes = prog.lastA
+				elif prog.lastOp.op == 'rol':
+					if type(prog.lastB) is int:
+						if prog.lastB == 0:
+							explicit[flag] = 0
+							continue
+					else:
+						output.append(f'\n\tif (!{prog.lastB}) {{')
+						_addExplicitFlagSet(prog, output, flag, 0)
+						output.append('\n\t} else {')
+						after = '\n\t}'
+					resultBit = 0
+				elif prog.lastOp.op == 'ror':
+					if type(prog.lastB) is int:
+						if prog.lastB == 0:
+							explicit[flag] = 0
+							continue
+					else:
+						output.append(f'\n\tif (!{prog.lastB}) {{')
+						_addExplicitFlagSet(prog, output, flag, 0)
+						output.append('\n\t} else {')
+						after = '\n\t}'
+					resultBit = prog.getLastSize() - 1
 				elif prog.lastOp.op == 'neg':
 					if prog.carryFlowDst:
 						realSize = prog.getLastSize()
@@ -525,8 +586,6 @@ def _updateFlagsCImpl(prog, params, rawParams):
 					continue
 				else:
 					resultBit = prog.getLastSize()
-					if prog.lastOp.op == 'ror':
-						resultBit -= 1
 			elif calc == 'half':
 				resultBit = prog.getLastSize() - 4
 				myRes = '({a} ^ {b} ^ {res})'.format(a = prog.lastA, b = prog.lastB, res = lastDst)
@@ -566,6 +625,8 @@ def _updateFlagsCImpl(prog, params, rawParams):
 					output.append('\n\t{reg} = {res} >> {shift} & {mask};'.format(reg=reg, res=myRes, shift = resultBit - maxBit, mask = mask))
 				else:
 					output.append('\n\t{reg} = {res} & {mask};'.format(reg=reg, res=myRes, mask = mask))
+			if after:
+				output.append(after)
 		elif calc == 'zero':
 			if prog.carryFlowDst:
 				realSize = prog.getLastSize()
@@ -636,20 +697,7 @@ def _updateFlagsCImpl(prog, params, rawParams):
 			
 	#TODO: combine explicit flags targeting the same storage location
 	for flag in explicit:
-		location = prog.flags.getStorage(flag)
-		if type(location) is tuple:
-			reg,bit = location
-			reg = prog.resolveReg(reg, None, {})
-			value = str(1 << bit)
-			if explicit[flag]:
-				operator = '|='
-			else:
-				operator = '&='
-				value = '~' + value
-			output.append('\n\t{reg} {op} {val};'.format(reg=reg, op=operator, val=value))
-		else:
-			reg = prog.resolveReg(location, None, {})
-			output.append('\n\t{reg} = {val};'.format(reg=reg, val=explicit[flag]))
+		_addExplicitFlagSet(prog, output, flag, explicit[flag])
 	return ''.join(output)
 	
 def _cmpCImpl(prog, params, rawParams, flagUpdates):
@@ -929,15 +977,37 @@ def _rolCImpl(prog, params, rawParams, flagUpdates):
 			if calc == 'carry':
 				needsCarry = True
 	decl = ''
-	size = prog.paramSize(rawParams[2])
-	if needsCarry:
-		decl,name = prog.getTemp(size * 2)
+	destSize = prog.paramSize(rawParams[2])
+	needsSizeAdjust = False
+	if len(params) > 3:
+		size = params[3]
+		if size == 0:
+			size = 8
+		elif size == 1:
+			size = 16
+		else:
+			size = 32
+		prog.lastSize = size
+		if destSize > size:
+			needsSizeAdjust = True
+			if needsCarry:
+				prog.sizeAdjust = size
+	else:
+		size = destSize
+	
+	prog.lastB = params[1]
+	if needsSizeAdjust:
+		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
 	else:
 		dst = params[2]
-	return decl + '\n\t{dst} = {a} << {b} | {a} >> ({size} - {b});'.format(dst = dst,
+	ret = decl + '\n\t{dst} = {a} << {b} | {a} >> ({size} - {b});'.format(dst = dst,
 		a = params[0], b = params[1], size=size
 	)
+	if needsSizeAdjust and not needsCarry:
+		mask = (1 << size) - 1
+		ret += f'\n\t{params[2]} = ({params[2]} & ~{mask}) | ({dst} & {mask});'
+	return ret
 	
 def _rlcCImpl(prog, params, rawParams, flagUpdates):
 	needsCarry = False
@@ -947,22 +1017,83 @@ def _rlcCImpl(prog, params, rawParams, flagUpdates):
 			if calc == 'carry':
 				needsCarry = True
 	decl = ''
+	destSize = prog.paramSize(rawParams[2])
+	needsSizeAdjust = False
+	if len(params) > 3:
+		size = params[3]
+		if size == 0:
+			size = 8
+		elif size == 1:
+			size = 16
+		else:
+			size = 32
+		prog.lastSize = size
+		if destSize > size:
+			needsSizeAdjust = True
+			if needsCarry:
+				prog.sizeAdjust = size
+	else:
+		size = destSize
 	carryCheck = _getCarryCheck(prog)
 	size = prog.paramSize(rawParams[2])
-	if needsCarry:
-		decl,name = prog.getTemp(size * 2)
+	if needsCarry or needsSizeAdjust:
+		decl,name = prog.getTemp(size)
+		dst = prog.carryFlowDst = name
+		prog.lastA = params[0]
+		prog.lastB = params[1]
+	else:
+		dst = params[2]
+	if size == 32 and (not type(params[1]) is int) or params[1] <= 1:
+		# we may need to shift by 32-bits which is too much for a normal int
+		a = f'((uint64_t){params[0]})'
+	else:
+		a = params[0]
+	ret = decl + '\n\t{dst} = {a} << {b} | {a} >> ({size} + 1 - {b}) | ({check} ? 1 : 0) << ({b} - 1);'.format(dst = dst,
+		a = a, b = params[1], size=size, check=carryCheck
+	)
+	if needsSizeAdjust and not needsCarry:
+		mask = (1 << size) - 1
+		ret += f'\n\t{params[2]} = ({params[2]} & ~{mask}) | ({dst} & {mask});'
+	return ret
+	
+def _rorCImpl(prog, params, rawParams, flagUpdates):
+	needsCarry = False
+	if flagUpdates:
+		for flag in flagUpdates:
+			calc = prog.flags.flagCalc[flag]
+			if calc == 'carry':
+				needsCarry = True
+	decl = ''
+	destSize = prog.paramSize(rawParams[2])
+	needsSizeAdjust = False
+	if len(params) > 3:
+		size = params[3]
+		if size == 0:
+			size = 8
+		elif size == 1:
+			size = 16
+		else:
+			size = 32
+		prog.lastSize = size
+		if destSize > size:
+			needsSizeAdjust = True
+			if needsCarry:
+				prog.sizeAdjust = size
+	else:
+		size = destSize
+	prog.lastB = params[1]
+	if needsSizeAdjust:
+		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
 	else:
 		dst = params[2]
-	return decl + '\n\t{dst} = {a} << {b} | {a} >> ({size} + 1 - {b}) | ({check} ? 1 : 0) << ({b} - 1);'.format(dst = dst,
-		a = params[0], b = params[1], size=size, check=carryCheck
-	)
-	
-def _rorCImpl(prog, params, rawParams, flagUpdates):
-	size = prog.paramSize(rawParams[2])
-	return '\n\t{dst} = {a} >> {b} | {a} << ({size} - {b});'.format(dst = params[2],
+	ret = decl + '\n\t{dst} = {a} >> {b} | {a} << ({size} - {b});'.format(dst = dst,
 		a = params[0], b = params[1], size=size
 	)
+	if needsSizeAdjust and not needsCarry:
+		mask = (1 << size) - 1
+		ret += f'\n\t{params[2]} = ({params[2]} & ~{mask}) | ({dst} & {mask});'
+	return ret
 
 def _rrcCImpl(prog, params, rawParams, flagUpdates):
 	needsCarry = False
@@ -972,16 +1103,44 @@ def _rrcCImpl(prog, params, rawParams, flagUpdates):
 			if calc == 'carry':
 				needsCarry = True
 	decl = ''
+	destSize = prog.paramSize(rawParams[2])
+	needsSizeAdjust = False
+	if len(params) > 3:
+		size = params[3]
+		if size == 0:
+			size = 8
+		elif size == 1:
+			size = 16
+		else:
+			size = 32
+		prog.lastSize = size
+		if destSize > size:
+			needsSizeAdjust = True
+			if needsCarry:
+				prog.sizeAdjust = size
+	else:
+		size = destSize
 	carryCheck = _getCarryCheck(prog)
 	size = prog.paramSize(rawParams[2])
-	if needsCarry:
-		decl,name = prog.getTemp(size * 2)
+	if needsCarry or needsSizeAdjust:
+		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
+		prog.lastA = params[0]
+		prog.lastB = params[1]
 	else:
 		dst = params[2]
-	return decl + '\n\t{dst} = {a} >> {b} | {a} << ({size} + 1 - {b}) | ({check} ? 1 : 0) << ({size}-{b});'.format(dst = dst,
-		a = params[0], b = params[1], size=size, check=carryCheck
+	if size == 32 and (not type(params[1]) is int) or params[1] <= 1:
+		# we may need to shift by 32-bits which is too much for a normal int
+		a = f'((uint64_t){params[0]})'
+	else:
+		a = params[0]
+	ret = decl + '\n\t{dst} = {a} >> {b} | {a} << ({size} + 1 - {b}) | ({check} ? 1 : 0) << ({size}-{b});'.format(dst = dst,
+		a = a, b = params[1], size=size, check=carryCheck
 	)
+	if needsSizeAdjust and not needsCarry:
+		mask = (1 << size) - 1
+		ret += f'\n\t{params[2]} = ({params[2]} & ~{mask}) | ({dst} & {mask});'
+	return ret
 	
 def _updateSyncCImpl(prog, params):
 	return '\n\t{sync}(context, target_cycle);'.format(sync=prog.sync_cycle)
@@ -1683,20 +1842,22 @@ class Program:
 		hFile.write('\n#define {0}_'.format(macro))
 		hFile.write('\n#include <stdio.h>')
 		hFile.write('\n#include "backend.h"')
-		hFile.write('\n\ntypedef struct {')
-		hFile.write('\n\tcpu_options gen;')
-		hFile.write('\n\tFILE* address_log;')
-		hFile.write('\n}} {0}options;'.format(self.prefix))
-		hFile.write('\n\ntypedef struct {')
-		hFile.write('\n\t{0}options *opts;'.format(self.prefix))
-		self.regs.writeHeader(otype, hFile)
-		hFile.write('\n}} {0}context;'.format(self.prefix))
-		hFile.write('\n')
-		hFile.write('\nvoid {pre}execute({type} *context, uint32_t target_cycle);'.format(pre = self.prefix, type = self.context_type))
+		hFile.write(f'\n\ntypedef struct {self.prefix}options {self.prefix}options;')
+		hFile.write(f'\n\ntypedef struct {self.prefix}context {self.prefix}context;')
 		for decl in self.declares:
 			if decl.startswith('define '):
 				decl = '#' + decl
 			hFile.write('\n' + decl)
+		hFile.write(f'\n\nstruct {self.prefix}options {{')
+		hFile.write('\n\tcpu_options gen;')
+		hFile.write('\n\tFILE* address_log;')
+		hFile.write('\n};')
+		hFile.write(f'\n\nstruct {self.prefix}context {{')
+		hFile.write(f'\n\t{self.prefix}options *opts;')
+		self.regs.writeHeader(otype, hFile)
+		hFile.write('\n};')
+		hFile.write('\n')
+		hFile.write('\nvoid {pre}execute({type} *context, uint32_t target_cycle);'.format(pre = self.prefix, type = self.context_type))
 		hFile.write('\n#endif //{0}_'.format(macro))
 		hFile.write('\n')
 		hFile.close()

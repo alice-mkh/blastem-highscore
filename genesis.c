@@ -46,6 +46,7 @@ uint32_t MCLKS_PER_68K;
 #define Z80_CYCLE cycles
 #define Z80_OPTS opts
 #define z80_handle_code_write(...)
+#define int_num int_priority
 #else
 #define Z80_CYCLE current_cycle
 #define Z80_OPTS options
@@ -698,6 +699,11 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 			context->sync_cycle = context->cycles + 1;
 		}
 	}
+#ifdef NEW_CORE
+	if (context->target_cycle == context->cycles) {
+		context->target_cycle++;
+	}
+#endif
 	return context;
 }
 

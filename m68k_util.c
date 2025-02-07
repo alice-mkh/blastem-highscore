@@ -26,11 +26,13 @@ void m68k_write_16(m68k_context *context)
 
 void m68k_sync_cycle(m68k_context *context, uint32_t target_cycle)
 {
-	//TODO: interrupt stuff
-	context->sync_cycle = target_cycle;
+	context->sync_cycle = target_cycle; //why?
+	context->sync_components(context, 0);
 }
 
-void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components, int_ack_fun int_ack)
+static sync_fun *sync_comp_tmp;
+static int_ack_fun int_ack_tmp;
+void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun *sync_components, int_ack_fun int_ack)
 {
 	memset(opts, 0, sizeof(*opts));
 	opts->gen.memmap = memmap;
@@ -40,14 +42,20 @@ void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chun
 	opts->gen.max_address = 0x1000000;
 	opts->gen.bus_cycles = 4;
 	opts->gen.clock_divider = clock_divider;
+	sync_comp_tmp = sync_components;
+	int_ack_tmp = int_ack;
 }
 
-m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler reset_handler)
+m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler *reset_handler)
 {
 	m68k_context *context = calloc(1, sizeof(m68k_context));
 	context->opts = opts;
 	context->reset_handler = reset_handler;
 	context->int_cycle = 0xFFFFFFFFU;
+	context->sync_components = sync_comp_tmp;
+	sync_comp_tmp = NULL;
+	context->int_ack_handler = int_ack_tmp;
+	int_ack_tmp = NULL;
 	return context;
 }
 

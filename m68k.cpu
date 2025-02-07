@@ -8,11 +8,11 @@ info
 	sync_cycle m68k_sync_cycle
 	
 declare
-	typedef m68k_context *(*sync_fun)(m68k_context * context, uint32_t address);
+	typedef m68k_context *(sync_fun)(m68k_context * context, uint32_t address);
 	typedef m68k_context *(*int_ack_fun)(m68k_context * context);
 	typedef m68k_context *(*m68k_reset_handler)(m68k_context *context);
-	void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components, int_ack_fun int_ack);
-	m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler reset_handler);
+	void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun *sync_components, int_ack_fun int_ack);
+	m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler *reset_handler);
 	void m68k_reset(m68k_context *context);
 	void m68k_print_regs(m68k_context *context);
 	void m68k_serialize(m68k_context *context, uint32_t pc, serialize_buffer *buf);
@@ -62,6 +62,8 @@ regs
 	should_return 8
 	system ptrvoid
 	reset_handler ptrvoid
+	int_ack_handler ptrvoid
+	sync_components ptrsync_fun
 	mem_pointers ptr16 10
 	
 flags
@@ -158,59 +160,56 @@ m68k_trap
 	
 	
 m68k_interrupt
-	cmp int_cycle cycles
-	if >=U
+	if cycles >=U int_cycle
 	
-	#INT_PENDING_NONE
-	cmp 255 int_pending
-	if =
-	
-	mov int_priority int_pending
-	mov int_num int_pending_num
-	
-	else
-	
-	#INT_PENDING_SR_CHANGE
-	cmp 254 int_pending
-	if =
-	
-	mov int_priority int_pending
-	mov int_num int_pending_num
-	
-	else
-	
-	check_user_mode_swap_ssp_usp
-	
-	cycles 6
-	#save status reg
-	sub 6 a7 a7
-	m68k_get_sr
-	mov a7 scratch2
-	ocall write_16
-	
-	#update status register
-	and 0x78 status status
-	or int_priority status status
-	or 0x20 status status
-	
-	#Interrupt ack cycle
-	mov int_pending int_ack
-	if int_pending_num
-	cycles 4
-	else
-	#TODO: do the whole E clock variable latency nonsense
-	cycles 13
-	add 24 int_pending int_pending_num
-	end
-	
-	#save pc
-	add 2 a7 scratch2
-	m68k_write32_lowfirst pc
-	
-	lsl int_pending_num 2 scratch1
-	m68k_read32
-	mov scratch1 pc
-	update_sync
+		#INT_PENDING_NONE
+		if 255 = int_pending
+			int_pending = int_priority
+			int_pending_num = int_num
+		else
+		
+			#INT_PENDING_SR_CHANGE
+			if 254 = int_pending
+				int_pending = int_priority
+				int_pending_num = int_num
+			
+			else
+			
+				check_user_mode_swap_ssp_usp
+				
+				cycles 6
+				#save status reg
+				sub 6 a7 a7
+				m68k_get_sr
+				mov a7 scratch2
+				ocall write_16
+				
+				#update status register
+				and 0x78 status status
+				or int_priority status status
+				or 0x20 status status
+				
+				#Interrupt ack cycle
+				mov int_pending int_ack
+				cycles 4
+				if int_ack_handler
+					pcall int_ack_handler int_ack_fun context
+				end
+				if int_pending_num
+				else
+					int_pending_num = int_pending + 24
+				end
+				
+				#save pc
+				add 2 a7 scratch2
+				m68k_write32_lowfirst pc
+				
+				lsl int_pending_num 2 scratch1
+				m68k_read32
+				mov scratch1 pc
+				update_sync
+			end
+		end
 	end
 	
 m68k_run_op
@@ -2561,4 +2560,284 @@ m68k_check_cond
 			cycles 2
 		end
 	end
+	m68k_prefetch
+
+1110CCC0ZZ011RRR rori
+	invalid Z 3
+	switch C
+	case 0
+		meta shift 8
+	default
+		meta shift C
+	end
+	ror dregs.R shift dregs.R Z
+	update_flags NZV0C
+	local cyc 32
+	cyc = shift + shift
+	switch Z
+	case 2
+		cyc += 4
+	default
+		cyc += 2
+	end
+	cycles cyc
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110CCC0ZZ111RRR ror_dn
+	invalid Z 3
+	local shift 8
+	local cycle_shift 8
+	cycle_shift = dregs.C & 63
+	switch Z
+	case 2
+		if cycle_shift = 32
+			ror dregs.R 31 dregs.R Z
+			ror dregs.R 1 dregs.R Z
+			update_flags NZV0C
+		else
+			shift = dregs.C & 31
+			ror dregs.R shift dregs.R Z
+			update_flags NZV0C
+		end
+	default
+		shift = dregs.C & 31
+		ror dregs.R shift dregs.R Z
+		update_flags NZV0C
+	end
+	cycle_shift += cycle_shift
+	switch Z
+	case 2
+		cycle_shift += 4
+	default
+		cycle_shift += 2
+	end
+	cycles cycle_shift
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110011011MMMRRR ror_ea
+	invalid M 0
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 1
+	ror dst 1 dst 1
+	update_flags XNZV0C
+	m68k_save_dst 1
+	m68k_prefetch
+
+1110CCC1ZZ011RRR roli
+	invalid Z 3
+	switch C
+	case 0
+		meta shift 8
+	default
+		meta shift C
+	end
+	rol dregs.R shift dregs.R Z
+	update_flags NZV0C
+	local cyc 32
+	cyc = shift + shift
+	switch Z
+	case 2
+		cyc += 4
+	default
+		cyc += 2
+	end
+	cycles cyc
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110CCC1ZZ111RRR rol_dn
+	invalid Z 3
+	local shift 8
+	local cycle_shift 8
+	cycle_shift = dregs.C & 63
+	switch Z
+	case 2
+		if cycle_shift = 32
+			rol dregs.R 31 dregs.R Z
+			rol dregs.R 1 dregs.R Z
+			update_flags NZV0C
+		else
+			shift = dregs.C & 31
+			rol dregs.R shift dregs.R Z
+			update_flags NZV0C
+		end
+	default
+		shift = dregs.C & 31
+		rol dregs.R shift dregs.R Z
+		update_flags NZV0C
+	end
+	cycle_shift += cycle_shift
+	switch Z
+	case 2
+		cycle_shift += 4
+	default
+		cycle_shift += 2
+	end
+	cycles cycle_shift
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110011111MMMRRR rol_ea
+	invalid M 0
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 1
+	rol dst 1 dst 1
+	update_flags NZV0C
+	m68k_save_dst 1
+	m68k_prefetch
+
+1110CCC0ZZ010RRR roxri
+	invalid Z 3
+	switch C
+	case 0
+		meta shift 8
+	default
+		meta shift C
+	end
+	rrc dregs.R shift dregs.R Z
+	update_flags XNZV0C
+	local cyc 32
+	cyc = shift + shift
+	switch Z
+	case 2
+		cyc += 4
+	default
+		cyc += 2
+	end
+	cycles cyc
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110CCC0ZZ110RRR roxr_dn
+	invalid Z 3
+	local shift 8
+	local cycle_shift 8
+	cycle_shift = dregs.C & 63
+	switch Z
+	case 2
+		if cycle_shift = 32
+			rrc dregs.R 31 dregs.R Z
+			rrc dregs.R 1 dregs.R Z
+			update_flags NZV0C
+		else
+			shift = dregs.C & 31
+			rrc dregs.R shift dregs.R Z
+			update_flags NZV0C
+		end
+	default
+		shift = dregs.C & 31
+		rrc dregs.R shift dregs.R Z
+		update_flags XNZV0C
+	end
+	cycle_shift += cycle_shift
+	switch Z
+	case 2
+		cycle_shift += 4
+	default
+		cycle_shift += 2
+	end
+	cycles cycle_shift
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110010011MMMRRR roxr_ea
+	invalid M 0
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 1
+	rrc dst 1 dst 1
+	update_flags XNZV0C
+	m68k_save_dst 1
+	m68k_prefetch
+
+1110CCC1ZZ010RRR roxli
+	invalid Z 3
+	switch C
+	case 0
+		meta shift 8
+	default
+		meta shift C
+	end
+	rlc dregs.R shift dregs.R Z
+	update_flags XNZV0C
+	local cyc 32
+	cyc = shift + shift
+	switch Z
+	case 2
+		cyc += 4
+	default
+		cyc += 2
+	end
+	cycles cyc
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110CCC1ZZ110RRR roxl_dn
+	invalid Z 3
+	local shift 8
+	local cycle_shift 8
+	cycle_shift = dregs.C & 63
+	switch Z
+	case 2
+		if cycle_shift = 32
+			rrc dregs.R 31 dregs.R Z
+			rlc dregs.R 1 dregs.R Z
+			update_flags NZV0C
+		else
+			shift = dregs.C & 31
+			rlc dregs.R shift dregs.R Z
+			update_flags NZV0C
+		end
+	default
+		shift = dregs.C & 31
+		rlc dregs.R shift dregs.R Z
+		update_flags XNZV0C
+	end
+	cycle_shift += cycle_shift
+	switch Z
+	case 2
+		cycle_shift += 4
+	default
+		cycle_shift += 2
+	end
+	cycles cycle_shift
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110010111MMMRRR roxl_ea
+	invalid M 0
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 1
+	rlc dst 1 dst 1
+	update_flags XNZV0C
+	m68k_save_dst 1
 	m68k_prefetch
