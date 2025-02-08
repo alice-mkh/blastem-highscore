@@ -2550,6 +2550,27 @@ m68k_check_cond
 		invert |= zflag
 	end
 
+0101CCCC11MMMDDD scc
+	invalid M 1
+	invalid M 7 D 2
+	invalid M 7 D 3
+	invalid M 7 D 4
+	invalid M 7 D 5
+	invalid M 7 D 6
+	invalid M 7 D 7
+	m68k_fetch_dst_ea M D 0
+	m68k_check_cond C
+	if istrue
+		if M = 0
+			cycles 2
+		end
+		dst:0 = 0xFF
+	else
+		dst:0 = 0
+	end
+	m68k_save_dst 0
+	m68k_prefetch
+
 0110CCCC00000000 bcc_w
 	#mid-instruction timing isn't quite right
 	#becuase I'm only emulating a 1-word prefetch buffer instead of 2
