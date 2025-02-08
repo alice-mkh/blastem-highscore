@@ -1967,6 +1967,8 @@ class Program:
 			pieces.append('\n\t{')
 			if self.interrupt in self.subroutines:
 				pieces.append('\n\t\tif (context->cycles >= context->sync_cycle) {')
+				pieces.append(f'\n\t\t\t{self.sync_cycle}(context, target_cycle);')
+				pieces.append('\n\t\t}')
 				self.meta = {}
 				self.temp = {}
 				intpieces = []
@@ -1974,7 +1976,6 @@ class Program:
 				for size in self.temp:
 					pieces.append('\n\tuint{sz}_t gen_tmp{sz}__;'.format(sz=size))
 				pieces += intpieces
-				pieces.append('\n\t\t}')
 			self.meta = {}
 			self.temp = {}
 			self.subroutines[self.body].inline(self, [], pieces, otype, None)

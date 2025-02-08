@@ -52,6 +52,7 @@ m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler *reset_ha
 	context->opts = opts;
 	context->reset_handler = reset_handler;
 	context->int_cycle = 0xFFFFFFFFU;
+	context->int_pending = 255;
 	context->sync_components = sync_comp_tmp;
 	sync_comp_tmp = NULL;
 	context->int_ack_handler = int_ack_tmp;
