@@ -820,7 +820,21 @@ m68k_save_dst
 0000001000111100 andi_to_ccr
 	#fetch immediate operand
 	m68k_prefetch
-	and prefetch ccr ccr
+	ccr &= prefetch
+	cycles 12 #TODO: where do these occur relative to fetches
+	m68k_prefetch
+
+0000001001111100 andi_to_sr
+	#TODO: privilege violation exception if in user mode
+	#fetch immediate operand
+	m68k_prefetch
+	ccr &= prefetch
+	scratch1 = prefetch >> 8
+	status &= scratch1
+	m68k_prefetch
+	check_user_mode_swap_ssp_usp
+	update_sync
+	cycles 12 #TODO: where do these occur relative to fetches
 	m68k_prefetch
 	
 1011DDD1ZZMMMRRR eor_dn_ea
@@ -876,10 +890,23 @@ m68k_save_dst
 	m68k_save_dst Z
 	m68k_prefetch
 	
-0000001000111100 eori_to_ccr
+0000101000111100 eori_to_ccr
 	#fetch immediate operand
 	m68k_prefetch
-	xor prefetch ccr ccr
+	ccr ^= prefetch
+	cycles 12 #TODO: where do these occur relative to fetches
+	m68k_prefetch
+
+0000101001111100 eori_to_sr
+	#TODO: privilege violation exception if in user mode
+	#fetch immediate operand
+	m68k_prefetch
+	ccr ^= prefetch
+	scratch1 = prefetch >> 8
+	status ^= scratch1
+	check_user_mode_swap_ssp_usp
+	update_sync
+	cycles 12 #TODO: where do these occur relative to fetches
 	m68k_prefetch
 	
 1000DDD0ZZMMMRRR or_ea_dn
@@ -963,6 +990,18 @@ m68k_save_dst
 	#fetch immediate operand
 	m68k_prefetch
 	or prefetch ccr ccr
+	cycles 12 #TODO: where do these occur relative to fetches
+	m68k_prefetch
+
+0000000001111100 ori_to_sr
+	#TODO: privilege violation exception if in user mode
+	#fetch immediate operand
+	m68k_prefetch
+	ccr |= prefetch
+	scratch1 = prefetch >> 8
+	status |= scratch1
+	update_sync
+	cycles 12 #TODO: where do these occur relative to fetches
 	m68k_prefetch
 	
 1001DDD0ZZMMMRRR sub_ea_dn
@@ -1496,8 +1535,9 @@ m68k_save_dst
 	invalid M 7 R 7
 	#TODO: privilege violation exception if in user mode
 	m68k_fetch_src_ea M R 1
-	mov scratch1 ccr
-	lsr scratch1 8 status
+	ccr = scratch1
+	status = scratch1 >> 8
+	check_user_mode_swap_ssp_usp
 	update_sync
 	cycles 8
 	m68k_prefetch
