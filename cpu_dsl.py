@@ -546,23 +546,23 @@ def _updateFlagsCImpl(prog, params, rawParams):
 						resultBit = f'({prog.getLastSize()} - {prog.lastB})'
 					myRes = prog.lastA
 				elif prog.lastOp.op == 'rol':
-					if type(prog.lastB) is int:
-						if prog.lastB == 0:
+					if type(prog.lastBUnmasked) is int:
+						if prog.lastBUnmasked == 0:
 							explicit[flag] = 0
 							continue
 					else:
-						output.append(f'\n\tif (!{prog.lastB}) {{')
+						output.append(f'\n\tif (!{prog.lastBUnmasked}) {{')
 						_addExplicitFlagSet(prog, output, flag, 0)
 						output.append('\n\t} else {')
 						after = '\n\t}'
 					resultBit = 0
 				elif prog.lastOp.op == 'ror':
-					if type(prog.lastB) is int:
-						if prog.lastB == 0:
+					if type(prog.lastBUnmasked) is int:
+						if prog.lastBUnmasked == 0:
 							explicit[flag] = 0
 							continue
 					else:
-						output.append(f'\n\tif (!{prog.lastB}) {{')
+						output.append(f'\n\tif (!{prog.lastBUnmasked}) {{')
 						_addExplicitFlagSet(prog, output, flag, 0)
 						output.append('\n\t} else {')
 						after = '\n\t}'
@@ -976,7 +976,6 @@ def _rolCImpl(prog, params, rawParams, flagUpdates):
 			calc = prog.flags.flagCalc[flag]
 			if calc == 'carry':
 				needsCarry = True
-	decl = ''
 	destSize = prog.paramSize(rawParams[2])
 	needsSizeAdjust = False
 	if len(params) > 3:
@@ -994,20 +993,29 @@ def _rolCImpl(prog, params, rawParams, flagUpdates):
 				prog.sizeAdjust = size
 	else:
 		size = destSize
-	
-	prog.lastB = params[1]
+	rotMask = size - 1
+	if type(params[1]) is int:
+		b = params[1] & rotMask
+		mdecl = ''
+		ret = ''
+	else:
+		mdecl,b = prog.getTemp(prog.paramSize(rawParams[1]))
+		ret = f'\n\t{b} = {params[1]} & {rotMask};'
+	prog.lastB = b
+	prog.lastBUnmasked = params[1]
 	if needsSizeAdjust:
 		decl,name = prog.getTemp(size)
+		mdecl += decl
 		dst = prog.carryFlowDst = name
 	else:
 		dst = params[2]
-	ret = decl + '\n\t{dst} = {a} << {b} | {a} >> ({size} - {b});'.format(dst = dst,
-		a = params[0], b = params[1], size=size
+	ret += '\n\t{dst} = {a} << {b} | {a} >> ({size} - {b});'.format(dst = dst,
+		a = params[0], b = b, size=size
 	)
 	if needsSizeAdjust and not needsCarry:
 		mask = (1 << size) - 1
 		ret += f'\n\t{params[2]} = ({params[2]} & ~{mask}) | ({dst} & {mask});'
-	return ret
+	return mdecl + ret
 	
 def _rlcCImpl(prog, params, rawParams, flagUpdates):
 	needsCarry = False
@@ -1063,7 +1071,6 @@ def _rorCImpl(prog, params, rawParams, flagUpdates):
 			calc = prog.flags.flagCalc[flag]
 			if calc == 'carry':
 				needsCarry = True
-	decl = ''
 	destSize = prog.paramSize(rawParams[2])
 	needsSizeAdjust = False
 	if len(params) > 3:
@@ -1081,19 +1088,29 @@ def _rorCImpl(prog, params, rawParams, flagUpdates):
 				prog.sizeAdjust = size
 	else:
 		size = destSize
-	prog.lastB = params[1]
+	rotMask = size - 1
+	if type(params[1]) is int:
+		b = params[1] & rotMask
+		mdecl = ''
+		ret = ''
+	else:
+		mdecl,b = prog.getTemp(prog.paramSize(rawParams[1]))
+		ret = f'\n\t{b} = {params[1]} & {rotMask};'
+	prog.lastB = b
+	prog.lastBUnmasked = params[1]
 	if needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
+		mdecl += decl
 	else:
 		dst = params[2]
-	ret = decl + '\n\t{dst} = {a} >> {b} | {a} << ({size} - {b});'.format(dst = dst,
-		a = params[0], b = params[1], size=size
+	ret += '\n\t{dst} = {a} >> {b} | {a} << ({size} - {b});'.format(dst = dst,
+		a = params[0], b = b, size=size
 	)
 	if needsSizeAdjust and not needsCarry:
 		mask = (1 << size) - 1
 		ret += f'\n\t{params[2]} = ({params[2]} & ~{mask}) | ({dst} & {mask});'
-	return ret
+	return mdecl + ret
 
 def _rrcCImpl(prog, params, rawParams, flagUpdates):
 	needsCarry = False

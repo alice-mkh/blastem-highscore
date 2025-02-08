@@ -2587,32 +2587,17 @@ m68k_check_cond
 1110CCC0ZZ111RRR ror_dn
 	invalid Z 3
 	local shift 8
-	local cycle_shift 8
-	cycle_shift = dregs.C & 63
+	shift = dregs.C & 63
+	ror dregs.R shift dregs.R Z
+	update_flags NZV0C
+	shift += shift
 	switch Z
 	case 2
-		if cycle_shift = 32
-			ror dregs.R 31 dregs.R Z
-			ror dregs.R 1 dregs.R Z
-			update_flags NZV0C
-		else
-			shift = dregs.C & 31
-			ror dregs.R shift dregs.R Z
-			update_flags NZV0C
-		end
+		shift += 4
 	default
-		shift = dregs.C & 31
-		ror dregs.R shift dregs.R Z
-		update_flags NZV0C
+		shift += 2
 	end
-	cycle_shift += cycle_shift
-	switch Z
-	case 2
-		cycle_shift += 4
-	default
-		cycle_shift += 2
-	end
-	cycles cycle_shift
+	cycles shift
 	#TODO: should this happen before or after the majority of the rotate?
 	m68k_prefetch
 
@@ -2628,7 +2613,7 @@ m68k_check_cond
 	
 	m68k_fetch_dst_ea M R 1
 	ror dst 1 dst 1
-	update_flags XNZV0C
+	update_flags NZV0C
 	m68k_save_dst 1
 	m68k_prefetch
 
@@ -2657,32 +2642,17 @@ m68k_check_cond
 1110CCC1ZZ111RRR rol_dn
 	invalid Z 3
 	local shift 8
-	local cycle_shift 8
-	cycle_shift = dregs.C & 63
+	shift = dregs.C & 63
+	rol dregs.R shift dregs.R Z
+	update_flags NZV0C
+	shift += shift
 	switch Z
 	case 2
-		if cycle_shift = 32
-			rol dregs.R 31 dregs.R Z
-			rol dregs.R 1 dregs.R Z
-			update_flags NZV0C
-		else
-			shift = dregs.C & 31
-			rol dregs.R shift dregs.R Z
-			update_flags NZV0C
-		end
+		shift += 4
 	default
-		shift = dregs.C & 31
-		rol dregs.R shift dregs.R Z
-		update_flags NZV0C
+		shift += 2
 	end
-	cycle_shift += cycle_shift
-	switch Z
-	case 2
-		cycle_shift += 4
-	default
-		cycle_shift += 2
-	end
-	cycles cycle_shift
+	cycles shift
 	#TODO: should this happen before or after the majority of the rotate?
 	m68k_prefetch
 
