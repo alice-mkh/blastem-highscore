@@ -93,7 +93,7 @@ class Register(object):
 		return self.kind
 
 	def write_init(self, outfile, size, already):
-		if not str(self) in already:
+		if not str(self) in already and not self.kind in ('ccr', 'sr'):
 			minv,maxv = get_size_range(size)
 			val = randint(minv,maxv)
 			already[str(self)] = val
@@ -428,6 +428,8 @@ def get_variations(mode, size):
 			return [Immediate(randint(start, end)) for x in range(0,8)]
 		else:
 			return [Immediate(num) for num in range(start, end+1)]
+	elif mode in ('ccr', 'sr'):
+		return [Register(mode, 0)]
 	else:
 		print("Don't know what to do with source type", mode)
 		return None
@@ -447,7 +449,7 @@ class Inst2Op(object):
 		self.dst.write_init(outfile, self.size, already)
 
 	def invalidate_dest(self, already):
-		if type(self.dst) == Register:
+		if type(self.dst) == Register and not self.dst.kind in ('ccr', 'sr'):
 			del already[str(self.dst)]
 
 	def save_result(self, reg, always):
@@ -458,7 +460,10 @@ class Inst2Op(object):
 				src = Decrement(self.dst.reg)
 			else:
 				src = self.dst
-			return 'move.' + self.size + ' ' + str(src) + ', ' + str(reg)
+			if type(src) is Register and src.kind == 'ccr':
+				return 'move sr, ' + str(reg)
+			else:
+				return 'move.' + self.size + ' ' + str(src) + ', ' + str(reg)
 		else:
 			return ''
 
