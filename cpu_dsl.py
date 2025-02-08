@@ -475,6 +475,8 @@ def _dispatchCImpl(prog, params):
 		table = 'main'
 	else:
 		table = params[1]
+	if table == 'main':
+		prog.mainDispatch.add(params[0])
 	if prog.dispatch == 'call':
 		return '\n\timpl_{tbl}[{op}](context, target_cycle);'.format(tbl = table, op = params[0])
 	elif prog.dispatch == 'goto':
@@ -1841,6 +1843,7 @@ class Program:
 		self.conditional = False
 		self.declares = []
 		self.lastSize = None
+		self.mainDispatch = set()
 		
 	def __str__(self):
 		pieces = []
@@ -1898,15 +1901,15 @@ class Program:
 						bodymap[val] = inst.generateBody(val, self, otype)
 		
 		if self.dispatch == 'call':
-			pieces.append('\nstatic impl_fun impl_{name}[{sz}] = {{'.format(name = table, sz=len(opmap)))
+			lateBody.append('\nstatic impl_fun impl_{name}[{sz}] = {{'.format(name = table, sz=len(opmap)))
 			for inst in range(0, len(opmap)):
 				op = opmap[inst]
 				if op is None:
-					pieces.append('\n\tunimplemented,')
+					lateBody.append('\n\tunimplemented,')
 				else:
-					pieces.append('\n\t' + op + ',')
+					lateBody.append('\n\t' + op + ',')
 					body.append(bodymap[inst])
-			pieces.append('\n};')
+			lateBody.append('\n};')
 		elif self.dispatch == 'goto':
 			body.append('\n\tstatic void *impl_{name}[{sz}] = {{'.format(name = table, sz=len(opmap)))
 			for inst in range(0, len(opmap)):
@@ -1944,10 +1947,6 @@ class Program:
 		for include in self.includes:
 			body.append('#include "{0}"\n'.format(include))
 		if self.dispatch == 'call':
-			body.append('\nstatic void unimplemented({pre}context *context, uint32_t target_cycle)'.format(pre = self.prefix))
-			body.append('\n{')
-			body.append('\n\tfatal_error("Unimplemented instruction\\n");')
-			body.append('\n}\n')
 			body.append('\ntypedef void (*impl_fun)({pre}context *context, uint32_t target_cycle);'.format(pre=self.prefix))
 			for table in self.extra_tables:
 				body.append('\nstatic impl_fun impl_{name}[{sz}];'.format(name = table, sz=(1 << self.opsize)))
@@ -1959,33 +1958,46 @@ class Program:
 		for table in self.extra_tables:
 			self._buildTable(otype, table, body, pieces)
 		self._buildTable(otype, 'main', body, pieces)
-		if self.dispatch == 'call' and self.body in self.subroutines:
-			pieces.append('\nvoid {pre}execute({type} *context, uint32_t target_cycle)'.format(pre = self.prefix, type = self.context_type))
-			pieces.append('\n{')
-			pieces.append('\n\t{sync}(context, target_cycle);'.format(sync=self.sync_cycle))
-			pieces.append('\n\twhile (context->cycles < target_cycle)')
-			pieces.append('\n\t{')
-			if self.interrupt in self.subroutines:
-				pieces.append('\n\t\tif (context->cycles >= context->sync_cycle) {')
-				pieces.append(f'\n\t\t\t{self.sync_cycle}(context, target_cycle);')
-				pieces.append('\n\t\t}')
+		if self.dispatch == 'call':
+			if self.body in self.subroutines:
+				pieces.append('\nvoid {pre}execute({type} *context, uint32_t target_cycle)'.format(pre = self.prefix, type = self.context_type))
+				pieces.append('\n{')
+				pieces.append('\n\t{sync}(context, target_cycle);'.format(sync=self.sync_cycle))
+				pieces.append('\n\twhile (context->cycles < target_cycle)')
+				pieces.append('\n\t{')
+				if self.interrupt in self.subroutines:
+					pieces.append('\n\t\tif (context->cycles >= context->sync_cycle) {')
+					pieces.append(f'\n\t\t\t{self.sync_cycle}(context, target_cycle);')
+					pieces.append('\n\t\t}')
+					self.meta = {}
+					self.temp = {}
+					intpieces = []
+					self.subroutines[self.interrupt].inline(self, [], intpieces, otype, None)
+					for size in self.temp:
+						pieces.append('\n\tuint{sz}_t gen_tmp{sz}__;'.format(sz=size))
+					pieces += intpieces
 				self.meta = {}
 				self.temp = {}
-				intpieces = []
-				self.subroutines[self.interrupt].inline(self, [], intpieces, otype, None)
-				for size in self.temp:
-					pieces.append('\n\tuint{sz}_t gen_tmp{sz}__;'.format(sz=size))
-				pieces += intpieces
-			self.meta = {}
-			self.temp = {}
-			self.subroutines[self.body].inline(self, [], pieces, otype, None)
-			pieces.append('\n\t}')
-			pieces.append('\n}')
+				self.subroutines[self.body].inline(self, [], pieces, otype, None)
+				pieces.append('\n\t}')
+				pieces.append('\n}')
+			body.append('\nstatic void unimplemented({pre}context *context, uint32_t target_cycle)'.format(pre = self.prefix))
+			body.append('\n{')
+			if len(self.mainDispatch) == 1:
+				dispatch = list(self.mainDispatch)[0]
+				body.append(f'\n\tfatal_error("Unimplemented instruction: %X\\n", {dispatch});')
+			else:
+				body.append('\n\tfatal_error("Unimplemented instruction\\n");')
+			body.append('\n}\n')
 		elif self.dispatch == 'goto':
 			body.append('\n\t{sync}(context, target_cycle);'.format(sync=self.sync_cycle))
 			body += self.nextInstruction(otype)
 			pieces.append('\nunimplemented:')
-			pieces.append('\n\tfatal_error("Unimplemented instruction\\n");')
+			if len(self.mainDispatch) == 1:
+				dispatch = list(self.mainDispatch)[0]
+				body.append(f'\n\tfatal_error("Unimplemented instruction: %X\\n", {dispatch});')
+			else:
+				body.append('\n\tfatal_error("Unimplemented instruction\\n");')
 			pieces.append('\n}')
 		return ''.join(body) +  ''.join(pieces)
 		
