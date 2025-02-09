@@ -673,6 +673,84 @@ m68k_save_dst
 	update_flags NZV0C0
 	m68k_prefetch
 
+1100XXX100000YYY abcd_dx_dy
+	local lowx 16
+	local lowy 16
+	local highx 16
+	local highy 16
+	lowx = dregs.X & 0xF
+	lowy = dregs.Y & 0xF
+	adc lowx lowy lowy
+	if lowy >=U 0xA
+		lowy += 6
+	end
+	highx = dregs.X & 0xF0
+	highy = dregs.Y & 0xF0
+	highy += highx
+	highy += lowy
+	if highy >=U 0xA0
+		dregs.X:0 = highy + 0x60
+		update_flags X1C1VN
+		highy &= 0xFF
+		if highy
+			update_flags Z0
+		end
+	else
+		dregs.X:0 = highy
+		nflag = highy & 128
+		if highy
+			update_flags Z0
+		end
+		update_flags X0C0V0
+	end
+	cycles 2
+	m68k_prefetch
+
+1100XXX100001YYY abcd_ax_ay
+	local lowx 32
+	local lowy 32
+	if Y = 7
+		aregs.Y -= 2
+	else
+		aregs.Y -= 1
+	end
+	#predec penalty on src only
+	cycles 2
+	scratch1 = aregs.Y
+	ocall read_8
+	scratch2 = scratch1
+	if X = 7
+		aregs.X -= 2
+	else
+		aregs.X -= 1
+	end
+	scratch1 = aregs.X
+	ocall read_8
+	lowx = scratch1 & 0xF
+	lowy = scratch2 & 0xF
+	scratch1 &= 0xF0
+	scratch2 &= 0xF0
+	adc lowx lowy lowy
+	if lowy >=U 0xA
+		lowy += 6
+	end
+	scratch1 += scratch2
+	scratch1 += lowy
+	if scratch1 >=U 0xA0
+		scratch1:0 += 0x60
+		update_flags X1C1VN
+	else
+		cmp 0 scratch1 0
+		update_flags X0C0V0N
+	end
+	scratch1 &= 0xFF
+	if scratch1
+		update_flags Z0
+	end
+	scratch2 = aregs.X
+	ocall write_8
+	m68k_prefetch
+
 1100XXX101000YYY exg_dn_dn
 	scratch1 = dregs.X
 	dregs.X = dregs.Y
