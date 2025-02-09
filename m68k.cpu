@@ -1128,7 +1128,99 @@ m68k_save_dst
 	end
 	m68k_save_dst Z
 	m68k_prefetch
-	
+
+1001DDD1ZZ000SSS subx_dy_dx
+	invalid Z 3
+	sbc dregs.S dregs.D dregs.D Z
+	update_flags XNVC
+	switch Z
+	case 0
+		local tmp8 8
+		mov dregs.D tmp8
+		if tmp8
+			update_flags Z0
+		end
+	case 1
+		local tmp16 16
+		mov dregs.D tmp16
+		if tmp16
+			update_flags Z0
+		end
+	case 2
+		cycles 4
+		if dregs.D
+			update_flags Z0
+		end
+	end
+	m68k_prefetch
+
+1001DDD1ZZ001SSS subx_ay_ax
+	invalid Z 3
+	if Z
+		decsize Z aregs.S aregs.S
+	else
+		switch S
+		case 7
+			sub 2 aregs.S aregs.S
+		default
+			decsize Z aregs.S aregs.S
+		end
+	end
+	#predec penalty on src only
+	cycles 2
+	mov aregs.S scratch1
+	switch Z
+	case 0
+	ocall read_8
+	case 1
+	ocall read_16
+	case 2
+	m68k_read32
+	end
+	mov scratch1 scratch2
+	if Z
+		decsize Z aregs.D aregs.D
+	else
+		switch D
+		case 7
+			sub 2 aregs.D aregs.D
+		default
+			decsize Z aregs.D aregs.D
+		end
+	end
+	mov aregs.D scratch1
+	switch Z
+	case 0
+	ocall read_8
+	case 1
+	ocall read_16
+	case 2
+	m68k_read32
+	end
+	sbc scratch2 scratch1 scratch1 Z
+	update_flags XNVC
+	switch Z
+	case 0
+	local tmp8 8
+	mov dregs.D tmp8
+	if tmp8
+		update_flags Z0
+	end
+	case 1
+	local tmp16 16
+	mov dregs.D tmp16
+	if tmp16
+		update_flags Z0
+	end
+	case 2
+	if dregs.D
+		update_flags Z0
+	end
+	end
+	mov aregs.D scratch2
+	m68k_write_size Z 0
+	m68k_prefetch
+
 1110CCC0ZZ001RRR lsri
 	invalid Z 3
 	switch C
