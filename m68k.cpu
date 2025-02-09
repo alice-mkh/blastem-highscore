@@ -2231,13 +2231,16 @@ m68k_calc_ea
 	invalid M 7 R 5
 	invalid M 7 R 6
 	invalid M 7 R 7
+	local tmp 32
+	
+	m68k_calc_ea M R 2
+	tmp = ea
 	
 	a7 -= 4
 	scratch2 = a7
 	m68k_write32 pc
 	
-	m68k_calc_ea M R 2
-	pc = ea
+	pc = tmp
 	
 	cycles 4
 	m68k_prefetch
