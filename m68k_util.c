@@ -9,6 +9,7 @@ void m68k_read_8(m68k_context *context)
 void m68k_read_16(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
+	uint32_t tmp = context->scratch1;
 	context->scratch1 = read_word(context->scratch1, context->mem_pointers, &context->opts->gen, context);
 }
 
@@ -28,6 +29,140 @@ void m68k_sync_cycle(m68k_context *context, uint32_t target_cycle)
 {
 	context->sync_cycle = target_cycle; //why?
 	context->sync_components(context, 0);
+}
+
+static void divu(m68k_context *context, uint32_t dividend_reg, uint32_t divisor)
+{
+	uint32_t dividend = context->dregs[dividend_reg];
+	uint32_t divisor_shift = divisor << 16;
+	uint16_t quotient = 0;
+	uint8_t force = 0;
+	uint16_t bit = 0;
+	uint32_t cycles = 2;
+	if (divisor_shift < dividend) {
+		context->nflag = 128;
+		context->zflag = 0;
+		context->vflag = 128;
+		context->cycles += 6 * context->opts->gen.clock_divider;
+		return;
+	}
+	for (int i = 0; i < 16; i++)
+	{
+		force = dividend >> 31;
+		quotient = quotient << 1 | bit;
+		dividend = dividend << 1;
+
+		if (force || dividend >= divisor_shift) {
+			dividend -= divisor_shift;
+			cycles += force ? 4 : 6;
+			bit = 1;
+		} else {
+			bit = 0;
+			cycles += 8;
+		}
+	}
+	cycles += force ? 6 : bit ? 4 : 2;
+	context->cycles += cycles * context->opts->gen.clock_divider;
+	quotient = quotient << 1 | bit;
+	context->dregs[dividend_reg] = dividend | quotient;
+	context->vflag = 0;
+	context->nflag = quotient >> 8 & 128;
+	context->zflag = quotient == 0;
+}
+
+static void divs(m68k_context *context, uint32_t dividend_reg, uint32_t divisor)
+{
+	uint32_t dividend = context->dregs[dividend_reg];
+	uint32_t divisor_shift = divisor << 16;
+	uint32_t orig_divisor = divisor_shift, orig_dividend = dividend;
+	if (divisor_shift & 0x80000000) {
+		divisor_shift = 0 - divisor_shift;
+	}
+
+	uint32_t cycles = 8;
+	if (dividend & 0x80000000) {
+		//dvs10
+		dividend = 0 - dividend;
+		cycles += 2;
+	}
+	if (divisor_shift <= dividend) {
+		context->vflag = 128;
+		context->nflag = 128;
+		context->zflag = 0;
+		cycles += 4;
+		context->cycles += cycles * context->opts->gen.clock_divider;
+		return;
+	}
+	uint16_t quotient = 0;
+	uint16_t bit = 0;
+	for (int i = 0; i < 15; i++)
+	{
+		quotient = quotient << 1 | bit;
+		dividend = dividend << 1;
+
+		if (dividend >= divisor_shift) {
+			dividend -= divisor_shift;
+			cycles += 6;
+			bit = 1;
+		} else {
+			bit = 0;
+			cycles += 8;
+		}
+	}
+	quotient = quotient << 1 | bit;
+	dividend = dividend << 1;
+	if (dividend >= divisor_shift) {
+		dividend -= divisor_shift;
+		quotient = quotient << 1 | 1;
+	} else {
+		quotient = quotient << 1;
+	}
+	cycles += 4;
+
+	context->vflag = 0;
+	if (orig_divisor & 0x80000000) {
+		cycles += 16; //was 10
+		if (orig_dividend & 0x80000000) {
+			if (quotient & 0x8000) {
+				context->vflag = 128;
+				context->nflag = 128;
+				context->zflag = 0;
+				context->cycles += cycles * context->opts->gen.clock_divider;
+				return;
+			} else {
+				dividend = -dividend;
+			}
+		} else {
+			quotient = -quotient;
+			if (quotient && !(quotient & 0x8000)) {
+				context->vflag = 128;
+			}
+		}
+	} else if (orig_dividend & 0x80000000) {
+		cycles += 18; // was 12
+		quotient = -quotient;
+		if (quotient && !(quotient & 0x8000)) {
+			context->vflag = 128;
+		} else {
+			dividend = -dividend;
+		}
+	} else {
+		cycles += 14; //was 10
+		if (quotient & 0x8000) {
+			context->vflag= 128;
+		}
+	}
+	if (context->vflag) {
+		context->nflag = 128;
+		context->zflag = 0;
+		context->cycles += cycles * context->opts->gen.clock_divider;
+		return;
+	}
+	context->nflag = (quotient & 0x8000) ? 128 : 0;
+	context->zflag = quotient == 0;
+	//V was cleared above, C is cleared by the generated machine code
+	context->cycles += cycles * context->opts->gen.clock_divider;
+	context->dregs[dividend_reg] = dividend | quotient;
 }
 
 static sync_fun *sync_comp_tmp;

@@ -1193,6 +1193,9 @@ _opMap = {
 	'ocall': Op().addImplementation('c', None, lambda prog, params: '\n\t{pre}{fun}({args});'.format(
 		pre = prog.prefix, fun = params[0], args = ', '.join(['context'] + [str(p) for p in params[1:]])
 	)),
+	'ccall': Op().addImplementation('c', None, lambda prog, params: '\n\t{fun}({args});'.format(
+		pre = prog.prefix, fun = params[0], args = ', '.join([str(p) for p in params[1:]])
+	)),
 	'pcall': Op().addImplementation('c', None, lambda prog, params: '\n\t(({typ}){fun})({args});'.format(
 		typ = params[1], fun = params[0], args = ', '.join([str(p) for p in params[2:]])
 	)),
@@ -1239,6 +1242,9 @@ class NormalOp:
 			if (not type(param) is int) and len(procParams) != len(self.params) - 1:
 				allParamsConst = False
 			procParams.append(param)
+		if prog.needFlagCoalesce:
+			output.append(prog.flags.coalesceFlags(prog, otype))
+			prog.needFlagCoalesce = False
 			
 		if self.op == 'meta':
 			param,_,index = self.params[1].partition('.')

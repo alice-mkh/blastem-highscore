@@ -1003,6 +1003,40 @@ m68k_save_dst
 	update_sync
 	cycles 12 #TODO: where do these occur relative to fetches
 	m68k_prefetch
+
+1000DDD011MMMRRR divu
+	invalid M 1
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	m68k_fetch_src_ea M R 1
+	
+	if src = 0
+		cycles 4
+		update_flags N0Z0V0
+		m68k_trap 5
+	else
+		ccall divu context D src
+		m68k_prefetch
+	end
+	
+
+1000DDD111MMMRRR divs
+	invalid M 1
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	local tmp 32
+	m68k_fetch_src_ea M R 1
+	
+	if src = 0
+		cycles 4
+		update_flags N0Z0V0
+		m68k_trap 5
+	else
+		ccall divs context D src
+		m68k_prefetch
+	end
 	
 1001DDD0ZZMMMRRR sub_ea_dn
 	invalid M 7 R 5
