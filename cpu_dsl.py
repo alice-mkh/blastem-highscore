@@ -963,7 +963,7 @@ def _sbcCImpl(prog, params, rawParams, flagUpdates):
 		decl,name = prog.getTemp(size)
 		dst = params[2]
 		return '{decl}\n\t{tmp} = ({b} & {mask}) - ({a} & {mask}) - ({check} ? 1 : 0);\n\t{dst} = ({dst} & ~{mask}) | {tmp};'.format(
-			decl = decl, tmp = name, a = params[0], b = params[1], op = op, dst = dst, mask = ((1 << size) - 1), check = carryCheck
+			decl = decl, tmp = name, a = params[0], b = params[1], dst = dst, mask = ((1 << size) - 1), check = carryCheck
 		)
 	else:
 		dst = params[2]
