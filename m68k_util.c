@@ -6,11 +6,30 @@ void m68k_read_8(m68k_context *context)
 	context->scratch1 = read_byte(context->scratch1, context->mem_pointers, &context->opts->gen, context);
 }
 
+#ifdef DEBUG_DISASM
+#include "68kinst.h"
+static uint16_t debug_disasm_fetch(uint32_t address, void *vcontext)
+{
+	m68k_context *context = vcontext;
+	return read_word(address, context->mem_pointers, &context->opts->gen, context);
+}
+#endif
 void m68k_read_16(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
+#ifdef DEBUG_DISASM
 	uint32_t tmp = context->scratch1;
+#endif
 	context->scratch1 = read_word(context->scratch1, context->mem_pointers, &context->opts->gen, context);
+#ifdef DEBUG_DISASM
+	if (tmp == context->pc) {
+		m68kinst inst;
+		m68k_decode(debug_disasm_fetch, context, &inst, tmp);
+		static char disasm_buf[256];
+		m68k_disasm(&inst, disasm_buf);
+		printf("Fetch %05X: %04X - %s, d2 = %X, d3 = %X, d4 = %X, d6 = %X, xflag = %d\n", tmp, context->scratch1, disasm_buf, context->dregs[2], context->dregs[3], context->dregs[4], context->dregs[6], context->xflag);
+	}
+#endif
 }
 
 void m68k_write_8(m68k_context *context)
