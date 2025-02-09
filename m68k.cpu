@@ -2777,6 +2777,7 @@ m68k_movem_mem_to_areg
 	m68k_prefetch
 
 0111RRR0IIIIIIII moveq
+	nospecialize I
 	local tmp 32
 	sext 16 I tmp
 	sext 32 tmp dregs.R
@@ -2803,6 +2804,7 @@ m68k_movem_mem_to_areg
 	
 	
 01100001DDDDDDDD bsr
+	nospecialize D
 	#mid-instruction timing isn't quite right
 	#becuase I'm only emulating a 1-word prefetch buffer instead of 2
 	local offset 32
@@ -2926,6 +2928,7 @@ m68k_check_cond
 	m68k_prefetch
 
 0110CCCCDDDDDDDD bcc
+	nospecialize D
 	#mid-instruction timing isn't quite right
 	#becuase I'm only emulating a 1-word prefetch buffer instead of 2
 	local offset 32

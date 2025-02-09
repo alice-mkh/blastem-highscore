@@ -88,6 +88,10 @@ class Block:
 			else:
 				flagUpdates = None
 			oplist[i].generate(prog, self, fieldVals, output, otype, flagUpdates)
+	
+	def processDispatch(self, prog):
+		for op in self.implementation:
+			op.processDispatch(prog)
 		
 	def resolveLocal(self, name):
 		return None
@@ -111,6 +115,7 @@ class Instruction(Block):
 		self.invalidFieldValues = {}
 		self.invalidCombos = []
 		self.newLocals = []
+		self.noSpecialize = set()
 		for field in fields:
 			self.varyingBits += fields[field][1]
 	
@@ -131,6 +136,9 @@ class Instruction(Block):
 					value = int(op.params[i+1])
 					vmap[name] = value
 				self.invalidCombos.append(vmap)
+		elif op.op == 'nospecialize':
+			for name in op.params:
+				self.noSpecialize.add(name)
 		else:
 			self.implementation.append(op)
 			
@@ -200,6 +208,8 @@ class Instruction(Block):
 	
 	def generateName(self, value):
 		fieldVals,fieldBits = self.getFieldVals(value)
+		for name in self.noSpecialize:
+			del fieldVals[name]
 		names = list(fieldVals.keys())
 		names.sort()
 		funName = self.name
@@ -216,7 +226,21 @@ class Instruction(Block):
 			output.append('\n\tuint{sz}_t {name};'.format(sz=self.locals[var], name=var))
 		self.newLocals = []
 		fieldVals,_ = self.getFieldVals(value)
+		for name in self.noSpecialize:
+			del fieldVals[name]
+			self.locals[name] = prog.opsize
+			if len(prog.mainDispatch) != 1:
+				raise Exception('nospecialize requires exactly 1 field used for main table dispatch')
+			shift,bits = self.fields[name]
+			mask = (1 << bits) - 1
+			opfield = list(prog.mainDispatch)[0]
+			if shift:
+				output.append(f'\n\tuint{prog.opsize}_t {name} = context->{opfield} >> {shift} & {mask};')
+			else:
+				output.append(f'\n\tuint{prog.opsize}_t {name} = context->{opfield} & {mask};')
 		self.processOps(prog, fieldVals, output, otype, self.implementation)
+		for name in self.noSpecialize:
+			del self.locals[name]
 		
 		if prog.dispatch == 'call':
 			begin = '\nvoid ' + self.generateName(value) + '(' + prog.context_type + ' *context, uint32_t target_cycle)\n{'
@@ -1309,6 +1333,10 @@ class NormalOp:
 			output.append('\n\t' + self.op + '(' + ', '.join([str(p) for p in procParams]) + ');')
 		prog.lastOp = self
 	
+	def processDispatch(self, prog):
+		if self.op == 'dispatch' and (len(self.params) == 1 or self.params[1] == 'main'):
+			prog.mainDispatch.add(self.params[0])
+	
 	def __str__(self):
 		return '\n\t' + self.op + ' ' + ' '.join(self.params)
 		
@@ -1408,6 +1436,14 @@ class Switch(ChildBlock):
 			output.append('\n\t}')
 			prog.conditional = oldCond
 		prog.popScope()
+	
+	def processDispatch(self, prog):
+		for case in self.cases:
+			for op in self.cases[case]:
+				op.processDispatch(prog)
+		if self.default:
+			for op in self.default:
+				op.processDispatch(prog)
 	
 	def __str__(self):
 		keys = self.cases.keys()
@@ -1553,6 +1589,12 @@ class If(ChildBlock):
 					output.append('\n\t}')
 					prog.conditional = oldCond
 						
+	
+	def processDispatch(self, prog):
+		for op in self.body:
+			op.processDispatch(prog)
+		for op in self.elseBody:
+			op.processDispatch(prog)
 	
 	def __str__(self):
 		lines = ['\n\tif']
@@ -1903,9 +1945,12 @@ class Program:
 						self.needFlagCoalesce = False
 						self.needFlagDisperse = False
 						self.lastOp = None
-						opmap[val] = inst.generateName(val)
-						bodymap[val] = inst.generateBody(val, self, otype)
+						name = inst.generateName(val)
+						opmap[val] = name
+						if not name in bodymap:
+							bodymap[name] = inst.generateBody(val, self, otype)
 		
+		alreadyAppended = set()
 		if self.dispatch == 'call':
 			lateBody.append('\nstatic impl_fun impl_{name}[{sz}] = {{'.format(name = table, sz=len(opmap)))
 			for inst in range(0, len(opmap)):
@@ -1914,7 +1959,9 @@ class Program:
 					lateBody.append('\n\tunimplemented,')
 				else:
 					lateBody.append('\n\t' + op + ',')
-					body.append(bodymap[inst])
+					if not op in alreadyAppended:
+						body.append(bodymap[op])
+						alreadyAppended.add(op)
 			lateBody.append('\n};')
 		elif self.dispatch == 'goto':
 			body.append('\n\tstatic void *impl_{name}[{sz}] = {{'.format(name = table, sz=len(opmap)))
@@ -1924,7 +1971,8 @@ class Program:
 					body.append('\n\t\t&&unimplemented,')
 				else:
 					body.append('\n\t\t&&' + op + ',')
-					lateBody.append(bodymap[inst])
+					if not op in alreadyAppended:
+						lateBody.append(bodymap[op])
 			body.append('\n\t};')
 		else:
 			raise Exception("unimplmeneted dispatch type " + self.dispatch)
@@ -1960,6 +2008,12 @@ class Program:
 		elif self.dispatch == 'goto':
 			body.append('\nvoid {pre}execute({type} *context, uint32_t target_cycle)'.format(pre = self.prefix, type = self.context_type))
 			body.append('\n{')
+		
+		for table in self.instructions:
+			for inst in self.instructions[table]:
+				inst.processDispatch(self)
+		for sub in self.subroutines:
+			self.subroutines[sub].processDispatch(self)
 			
 		for table in self.extra_tables:
 			self._buildTable(otype, table, body, pieces)
