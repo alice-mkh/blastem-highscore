@@ -6,10 +6,30 @@ void m68k_read_8(m68k_context *context)
 	context->scratch1 = read_byte(context->scratch1, context->mem_pointers, &context->opts->gen, context);
 }
 
+#ifdef DEBUG_DISASM
+#include "68kinst.h"
+static uint16_t debug_disasm_fetch(uint32_t address, void *vcontext)
+{
+	m68k_context *context = vcontext;
+	return read_word(address, context->mem_pointers, &context->opts->gen, context);
+}
+#endif
 void m68k_read_16(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
+#ifdef DEBUG_DISASM
+	uint32_t tmp = context->scratch1;
+#endif
 	context->scratch1 = read_word(context->scratch1, context->mem_pointers, &context->opts->gen, context);
+#ifdef DEBUG_DISASM
+	if (tmp == context->pc) {
+		m68kinst inst;
+		m68k_decode(debug_disasm_fetch, context, &inst, tmp);
+		static char disasm_buf[256];
+		m68k_disasm(&inst, disasm_buf);
+		printf("Fetch %05X: %04X - %s, d2 = %X, d3 = %X, d4 = %X, d6 = %X, xflag = %d\n", tmp, context->scratch1, disasm_buf, context->dregs[2], context->dregs[3], context->dregs[4], context->dregs[6], context->xflag);
+	}
+#endif
 }
 
 void m68k_write_8(m68k_context *context)
@@ -26,11 +46,147 @@ void m68k_write_16(m68k_context *context)
 
 void m68k_sync_cycle(m68k_context *context, uint32_t target_cycle)
 {
-	//TODO: interrupt stuff
-	context->sync_cycle = target_cycle;
+	context->sync_cycle = target_cycle; //why?
+	context->sync_components(context, 0);
 }
 
-void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components, int_ack_fun int_ack)
+static void divu(m68k_context *context, uint32_t dividend_reg, uint32_t divisor)
+{
+	uint32_t dividend = context->dregs[dividend_reg];
+	uint32_t divisor_shift = divisor << 16;
+	uint16_t quotient = 0;
+	uint8_t force = 0;
+	uint16_t bit = 0;
+	uint32_t cycles = 2;
+	if (divisor_shift < dividend) {
+		context->nflag = 128;
+		context->zflag = 0;
+		context->vflag = 128;
+		context->cycles += 6 * context->opts->gen.clock_divider;
+		return;
+	}
+	for (int i = 0; i < 16; i++)
+	{
+		force = dividend >> 31;
+		quotient = quotient << 1 | bit;
+		dividend = dividend << 1;
+
+		if (force || dividend >= divisor_shift) {
+			dividend -= divisor_shift;
+			cycles += force ? 4 : 6;
+			bit = 1;
+		} else {
+			bit = 0;
+			cycles += 8;
+		}
+	}
+	cycles += force ? 6 : bit ? 4 : 2;
+	context->cycles += cycles * context->opts->gen.clock_divider;
+	quotient = quotient << 1 | bit;
+	context->dregs[dividend_reg] = dividend | quotient;
+	context->vflag = 0;
+	context->nflag = quotient >> 8 & 128;
+	context->zflag = quotient == 0;
+}
+
+static void divs(m68k_context *context, uint32_t dividend_reg, uint32_t divisor)
+{
+	uint32_t dividend = context->dregs[dividend_reg];
+	uint32_t divisor_shift = divisor << 16;
+	uint32_t orig_divisor = divisor_shift, orig_dividend = dividend;
+	if (divisor_shift & 0x80000000) {
+		divisor_shift = 0 - divisor_shift;
+	}
+
+	uint32_t cycles = 8;
+	if (dividend & 0x80000000) {
+		//dvs10
+		dividend = 0 - dividend;
+		cycles += 2;
+	}
+	if (divisor_shift <= dividend) {
+		context->vflag = 128;
+		context->nflag = 128;
+		context->zflag = 0;
+		cycles += 4;
+		context->cycles += cycles * context->opts->gen.clock_divider;
+		return;
+	}
+	uint16_t quotient = 0;
+	uint16_t bit = 0;
+	for (int i = 0; i < 15; i++)
+	{
+		quotient = quotient << 1 | bit;
+		dividend = dividend << 1;
+
+		if (dividend >= divisor_shift) {
+			dividend -= divisor_shift;
+			cycles += 6;
+			bit = 1;
+		} else {
+			bit = 0;
+			cycles += 8;
+		}
+	}
+	quotient = quotient << 1 | bit;
+	dividend = dividend << 1;
+	if (dividend >= divisor_shift) {
+		dividend -= divisor_shift;
+		quotient = quotient << 1 | 1;
+	} else {
+		quotient = quotient << 1;
+	}
+	cycles += 4;
+
+	context->vflag = 0;
+	if (orig_divisor & 0x80000000) {
+		cycles += 16; //was 10
+		if (orig_dividend & 0x80000000) {
+			if (quotient & 0x8000) {
+				context->vflag = 128;
+				context->nflag = 128;
+				context->zflag = 0;
+				context->cycles += cycles * context->opts->gen.clock_divider;
+				return;
+			} else {
+				dividend = -dividend;
+			}
+		} else {
+			quotient = -quotient;
+			if (quotient && !(quotient & 0x8000)) {
+				context->vflag = 128;
+			}
+		}
+	} else if (orig_dividend & 0x80000000) {
+		cycles += 18; // was 12
+		quotient = -quotient;
+		if (quotient && !(quotient & 0x8000)) {
+			context->vflag = 128;
+		} else {
+			dividend = -dividend;
+		}
+	} else {
+		cycles += 14; //was 10
+		if (quotient & 0x8000) {
+			context->vflag= 128;
+		}
+	}
+	if (context->vflag) {
+		context->nflag = 128;
+		context->zflag = 0;
+		context->cycles += cycles * context->opts->gen.clock_divider;
+		return;
+	}
+	context->nflag = (quotient & 0x8000) ? 128 : 0;
+	context->zflag = quotient == 0;
+	//V was cleared above, C is cleared by the generated machine code
+	context->cycles += cycles * context->opts->gen.clock_divider;
+	context->dregs[dividend_reg] = dividend | quotient;
+}
+
+static sync_fun *sync_comp_tmp;
+static int_ack_fun int_ack_tmp;
+void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun *sync_components, int_ack_fun int_ack)
 {
 	memset(opts, 0, sizeof(*opts));
 	opts->gen.memmap = memmap;
@@ -40,14 +196,21 @@ void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chun
 	opts->gen.max_address = 0x1000000;
 	opts->gen.bus_cycles = 4;
 	opts->gen.clock_divider = clock_divider;
+	sync_comp_tmp = sync_components;
+	int_ack_tmp = int_ack;
 }
 
-m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler reset_handler)
+m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler *reset_handler)
 {
 	m68k_context *context = calloc(1, sizeof(m68k_context));
 	context->opts = opts;
 	context->reset_handler = reset_handler;
 	context->int_cycle = 0xFFFFFFFFU;
+	context->int_pending = 255;
+	context->sync_components = sync_comp_tmp;
+	sync_comp_tmp = NULL;
+	context->int_ack_handler = int_ack_tmp;
+	int_ack_tmp = NULL;
 	return context;
 }
 

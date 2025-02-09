@@ -739,7 +739,9 @@ static uint8_t is_active(vdp_context *context)
 
 static void scan_sprite_table(uint32_t line, vdp_context * context)
 {
-	if (context->sprite_index && ((uint8_t)context->slot_counter) < context->max_sprites_line) {
+	if (context->sprite_index && 
+		(((uint8_t)context->slot_counter) < context->max_sprites_line || !(context->flags & FLAG_SPRITE_OFLOW))
+	) {
 		line += 1;
 		uint16_t ymask, ymin;
 		uint8_t height_mult;
@@ -769,6 +771,10 @@ static void scan_sprite_table(uint32_t line, vdp_context * context)
 		uint8_t height = ((context->sat_cache[address+2] & 0x3) + 1) * height_mult;
 		//printf("Sprite %d | y: %d, height: %d\n", context->sprite_index, y, height);
 		if (y <= line && line < (y + height)) {
+			if (((uint8_t)context->slot_counter) == context->max_sprites_line) {
+				context->flags |= FLAG_SPRITE_OFLOW;
+				return;
+			}
 			//printf("Sprite %d at y: %d with height %d is on line %d\n", context->sprite_index, y, height, line);
 			context->sprite_info_list[context->slot_counter].size = context->sat_cache[address+2];
 			context->sprite_info_list[context->slot_counter++].index = context->sprite_index;
@@ -786,6 +792,10 @@ static void scan_sprite_table(uint32_t line, vdp_context * context)
 			height = ((context->sat_cache[address+2] & 0x3) + 1) * height_mult;
 			//printf("Sprite %d | y: %d, height: %d\n", context->sprite_index, y, height);
 			if (y <= line && line < (y + height)) {
+				if (((uint8_t)context->slot_counter) == context->max_sprites_line) {
+					context->flags |= FLAG_SPRITE_OFLOW;
+					return;
+				}
 				//printf("Sprite %d at y: %d with height %d is on line %d\n", context->sprite_index, y, height, line);
 				context->sprite_info_list[context->slot_counter].size = context->sat_cache[address+2];
 				context->sprite_info_list[context->slot_counter++].index = context->sprite_index;
@@ -793,7 +803,6 @@ static void scan_sprite_table(uint32_t line, vdp_context * context)
 			context->sprite_index = context->sat_cache[address+3] & 0x7F;
 		}
 	}
-	//TODO: Seems like the overflow flag should be set here if we run out of sprite info slots without hitting the end of the list
 }
 
 static void scan_sprite_table_mode4(vdp_context * context)
@@ -824,7 +833,7 @@ static void scan_sprite_table_mode4(vdp_context * context)
 			if (y <= line && line < (y + ysize)) {
 				if (!context->slot_counter) {
 					context->sprite_index = MAX_SPRITES_FRAME_H32;
-					context->flags |= FLAG_DOT_OFLOW;
+					context->flags |= FLAG_SPRITE_OFLOW;
 					return;
 				}
 				context->sprite_info_list[--(context->slot_counter)].size = size;
@@ -846,7 +855,7 @@ static void scan_sprite_table_mode4(vdp_context * context)
 				if (y <= line && line < (y + ysize)) {
 					if (!context->slot_counter) {
 						context->sprite_index = MAX_SPRITES_FRAME_H32;
-						context->flags |= FLAG_DOT_OFLOW;
+						context->flags |= FLAG_SPRITE_OFLOW;
 						return;
 					}
 					context->sprite_info_list[--(context->slot_counter)].size = size;
@@ -2252,117 +2261,363 @@ static void vram_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
 	}
 }
 
+static void plane_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context)
+{
+	uint16_t hscroll_mask;
+	uint16_t v_mul;
+	uint16_t vscroll_mask = 0x1F | (context->regs[REG_SCROLL] & 0x30) << 1;
+	switch(context->regs[REG_SCROLL] & 0x3)
+	{
+	case 0:
+		hscroll_mask = 0x1F;
+		v_mul = 64;
+		break;
+	case 0x1:
+		hscroll_mask = 0x3F;
+		v_mul = 128;
+		break;
+	case 0x2:
+		//TODO: Verify this behavior
+		hscroll_mask = 0x1F;
+		v_mul = 0;
+		break;
+	case 0x3:
+		hscroll_mask = 0x7F;
+		v_mul = 256;
+		break;
+	}
+	uint16_t table_address;
+	switch(context->debug_modes[DEBUG_PLANE] & 3)
+	{
+	case 0:
+		table_address = context->regs[REG_SCROLL_A] << 10 & 0xE000;
+		break;
+	case 1:
+		table_address = context->regs[REG_SCROLL_B] << 13 & 0xE000;
+		break;
+	case 2:
+		table_address = context->regs[REG_WINDOW] << 10;
+		if (context->regs[REG_MODE_4] & BIT_H40) {
+			table_address &= 0xF000;
+			v_mul = 128;
+			hscroll_mask = 0x3F;
+		} else {
+			table_address &= 0xF800;
+			v_mul = 64;
+			hscroll_mask = 0x1F;
+		}
+		vscroll_mask = 0x1F;
+		break;
+	}
+	uint32_t bg_color = context->colors[context->regs[REG_BG_COLOR] & 0x3F];
+	uint16_t num_rows;
+	int num_lines;
+	if (context->double_res) {
+		num_rows = 64;
+		num_lines = 16;
+	} else {
+		num_rows = 128;
+		num_lines = 8;
+	}
+	for (uint16_t row = 0; row < num_rows; row++)
+	{
+		uint16_t row_address = table_address + (row & vscroll_mask) * v_mul;
+		for (uint16_t col = 0; col < 128; col++)
+		{
+			uint16_t address = row_address + (col & hscroll_mask) * 2;
+			//pccv hnnn nnnn nnnn
+			//
+			uint16_t entry = context->vdpmem[address] << 8 | context->vdpmem[address + 1];
+			uint8_t pal = entry >> 9 & 0x30;
+
+			uint32_t *dst = fb + (row * pitch * num_lines / sizeof(uint32_t)) + col * 8;
+			if (context->double_res) {
+				address = (entry & 0x3FF) * 64;
+			} else {
+				address = (entry & 0x7FF) * 32;
+			}
+			int y_diff = 4;
+			if (entry & 0x1000) {
+				y_diff = -4;
+				address += (num_lines - 1) * 4;
+			}
+			int x_diff = 1;
+			if (entry & 0x800) {
+				x_diff = -1;
+				address += 3;
+			}
+			for (int y = 0; y < num_lines; y++)
+			{
+				uint16_t trow_address = address;
+				uint32_t *row_dst = dst;
+				for (int x = 0; x < 4; x++)
+				{
+					uint8_t byte = context->vdpmem[trow_address];
+					trow_address += x_diff;
+					uint8_t left, right;
+					if (x_diff > 0) {
+						left = byte >> 4;
+						right = byte & 0xF;
+					} else {
+						left = byte & 0xF;
+						right = byte >> 4;
+					}
+					*(row_dst++) = left ? context->colors[left|pal] : bg_color;
+					*(row_dst++) = right ? context->colors[right|pal] : bg_color;
+				}
+				address += y_diff;
+				dst += pitch / sizeof(uint32_t);
+			}
+		}
+	}
+}
+
+static void sprite_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context)
+{
+	uint32_t bg_color = context->colors[context->regs[REG_BG_COLOR] & 0x3F];
+	//clear a single alpha channel bit so we can distinguish between actual bg color and sprite
+	//pixels that just happen to be the same color
+	bg_color &= 0xFEFFFFFF;
+	uint32_t *line = fb;
+	uint32_t border_line = render_map_color(0, 0, 255);
+	uint32_t sprite_outline = render_map_color(255, 0, 255);
+	int right_border = 256 + ((context->h40_lines > context->output_lines / 2) ? 640 : 512);
+	for (int y = 0; y < 1024; y++)
+	{
+		uint32_t *cur = line;
+		if (y != 256 && y != 256+context->inactive_start*2) {
+			for (int x = 0; x < 255; x++)
+			{
+				*(cur++) = bg_color;
+			}
+			*(cur++) = border_line;
+			for (int x = 256; x < right_border; x++)
+			{
+				*(cur++) = bg_color;
+			}
+			*(cur++) = border_line;
+			for (int x = right_border + 1; x < 1024; x++)
+			{
+				*(cur++) = bg_color;
+			}
+		} else {
+			for (int x = 0; x < 1024; x++)
+			{
+				*(cur++) = border_line;
+			}
+		}
+		line += pitch / sizeof(uint32_t);
+	}
+	for (int i = 0, index = 0; i < context->max_sprites_frame; i++)
+	{
+		uint32_t y = (context->sat_cache[index] & 3) << 8 | context->sat_cache[index + 1];
+		if (!context->double_res) {
+			y &= 0x1FF;
+			y <<= 1;
+		}
+		uint8_t tile_width = ((context->sat_cache[index+2] >> 2) & 0x3);
+		uint32_t pixel_width = (tile_width + 1) * 16;
+		uint8_t height = ((context->sat_cache[index+2] & 3) + 1) * 16;
+		uint16_t col_offset = height * (context->double_res ? 4 : 2);
+		uint16_t att_addr = mode5_sat_address(context) + index * 2 + 4;
+		uint16_t tileinfo = (context->vdpmem[att_addr] << 8) | context->vdpmem[att_addr+1];
+		uint16_t tile_addr;
+		if (context->double_res) {
+			tile_addr = (tileinfo & 0x3FF) << 6;
+		} else {
+			tile_addr = (tileinfo & 0x7FF) << 5;
+		}
+		uint8_t pal = (tileinfo >> 9) & 0x30;
+		uint16_t hflip = tileinfo & MAP_BIT_H_FLIP;
+		uint16_t vflip = tileinfo & MAP_BIT_V_FLIP;
+		uint32_t x = (((context->vdpmem[att_addr+ 2] & 0x3) << 8 | context->vdpmem[att_addr + 3]) & 0x1FF) * 2;
+		uint32_t *line = fb + y * pitch / sizeof(uint32_t) + x;
+		uint32_t *cur = line;
+		for (uint32_t cx = x, x2 = x + pixel_width; cx < x2; cx++)
+		{
+			*(cur++) = sprite_outline;
+		}
+		uint8_t advance_source = 1;
+		uint32_t y2 = y + height - 1;
+		if (y2 > 1024) {
+			y2 = 1024;
+		}
+		uint16_t line_offset = 4;
+		if (vflip) {
+			tile_addr += col_offset - 4;
+			line_offset = -line_offset;
+		}
+		if (hflip) {
+			tile_addr += col_offset * tile_width + 3;
+			col_offset = -col_offset;
+		}
+		for (; y < y2; y++)
+		{
+			line += pitch / sizeof(uint32_t);
+			cur = line;
+			*(cur++) = sprite_outline;
+			uint16_t line_addr = tile_addr;
+			for (uint8_t tx = 0; tx <= tile_width; tx++)
+			{
+				uint16_t cur_addr = line_addr;
+				for (uint8_t cx = 0; cx < 4; cx++)
+				{
+					uint8_t pair = context->vdpmem[cur_addr];
+					uint32_t left, right;
+					if (hflip) {
+						right = pair >> 4;
+						left = pair & 0xF;
+						cur_addr--;
+					} else {
+						left = pair >> 4;
+						right = pair & 0xF;
+						cur_addr++;
+					}
+					left = left ? context->colors[pal | left] : bg_color;
+					right = right ? context->colors[pal | right] : bg_color;
+					if (*cur == bg_color) {
+						*(cur) = left;
+					}
+					cur++;
+					if (cx | tx) {
+						if (*cur == bg_color) {
+							*(cur) = left;
+						}
+						cur++;
+					}
+					if (*cur == bg_color) {
+						*(cur) = right;
+					}
+					cur++;
+					if (cx != 3 || tx != tile_width) {
+						if (*cur == bg_color) {
+							*(cur) = right;
+						}
+						cur++;
+					}
+				}
+				line_addr += col_offset;
+			}
+			
+			*(cur++) = sprite_outline;
+			if (advance_source || context->double_res) {
+				tile_addr += line_offset;
+			}
+			advance_source = !advance_source;
+		}
+		if (y2 != 1024) {
+			line += pitch / sizeof(uint32_t);
+			cur = line;
+			for (uint32_t cx = x, x2 = x + pixel_width; cx < x2; cx++)
+			{
+				*(cur++) = sprite_outline;
+			}
+		}
+		index = context->sat_cache[index+3] * 4;
+		if (!index) {
+			break;
+		}
+	}
+}
+
+static void plane_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *context)
+{
+	uint32_t bg_color = context->colors[(context->regs[REG_BG_COLOR] & 0xF) + MODE4_OFFSET];
+	uint32_t address = (context->regs[REG_SCROLL_A] & 0xE) << 10;
+	for (uint32_t row_address = address, end = address + 32*32*2; row_address < end; row_address += 2 * 32)
+	{
+		uint32_t *col = fb;
+		for(uint32_t cur = row_address, row_end = row_address + 2 * 32; cur < row_end; cur += 2)
+		{
+			uint32_t mapped = mode4_address_map[cur];
+			uint16_t entry = context->vdpmem[mapped] << 8 | context->vdpmem[mapped + 1];
+			uint32_t tile_address = (entry & 0x1FF) << 5;
+			uint8_t pal = entry >> 7 & 0x10;
+			uint32_t i_init, i_inc, i_limit, tile_inc;
+			if (entry  & 0x200) {
+				//hflip
+				i_init = 0;
+				i_inc = 4;
+				i_limit = 32;
+			} else {
+				i_init = 28;
+				i_inc = -4;
+				i_limit = -4;
+			}
+			if (entry & 0x400) {
+				//vflip
+				tile_address += 7*4;
+				tile_inc = -4;
+			} else {
+				tile_inc = 4;
+			}
+			uint32_t *line = col;
+			for (int y = 0; y < 16; y++)
+			{
+				uint32_t first = mode4_address_map[tile_address];
+				uint32_t last = mode4_address_map[tile_address + 2];
+				uint32_t pixels = planar_to_chunky[context->vdpmem[first]] << 1;
+				pixels |= planar_to_chunky[context->vdpmem[first+1]];
+				pixels |= planar_to_chunky[context->vdpmem[last]] << 3;
+				pixels |= planar_to_chunky[context->vdpmem[last+1]] << 2;
+				uint32_t *out = line;
+				for (uint32_t i = i_init; i != i_limit; i += i_inc)
+				{
+					uint32_t pixel = context->colors[((pixels >> i & 0xF) | pal) + MODE4_OFFSET];
+					*(out++) = pixel;
+					*(out++) = pixel;
+				}
+				
+				
+				if (y & 1) {
+					tile_address += tile_inc;
+				}
+				line += pitch / sizeof(uint32_t);
+			}
+			
+			
+			
+			col += 16;
+		}
+		fb += 16 * pitch / sizeof(uint32_t);
+	}
+}
+
+static void sprite_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *context)
+{
+}
+
+static void plane_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
+{
+}
+
+static void sprite_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
+{
+}
 
 static void vdp_update_per_frame_debug(vdp_context *context)
 {
 	if (context->enabled_debuggers & (1 << DEBUG_PLANE)) {
+		
 		uint32_t pitch;
 		uint32_t *fb = render_get_framebuffer(context->debug_fb_indices[DEBUG_PLANE], &pitch);
-		uint16_t hscroll_mask;
-		uint16_t v_mul;
-		uint16_t vscroll_mask = 0x1F | (context->regs[REG_SCROLL] & 0x30) << 1;
-		switch(context->regs[REG_SCROLL] & 0x3)
-		{
-		case 0:
-			hscroll_mask = 0x1F;
-			v_mul = 64;
-			break;
-		case 0x1:
-			hscroll_mask = 0x3F;
-			v_mul = 128;
-			break;
-		case 0x2:
-			//TODO: Verify this behavior
-			hscroll_mask = 0x1F;
-			v_mul = 0;
-			break;
-		case 0x3:
-			hscroll_mask = 0x7F;
-			v_mul = 256;
-			break;
-		}
-		uint16_t table_address;
-		switch(context->debug_modes[DEBUG_PLANE] % 3)
-		{
-		case 0:
-			table_address = context->regs[REG_SCROLL_A] << 10 & 0xE000;
-			break;
-		case 1:
-			table_address = context->regs[REG_SCROLL_B] << 13 & 0xE000;
-			break;
-		case 2:
-			table_address = context->regs[REG_WINDOW] << 10;
-			if (context->regs[REG_MODE_4] & BIT_H40) {
-				table_address &= 0xF000;
-				v_mul = 128;
-				hscroll_mask = 0x3F;
+		if (context->type == VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_MODE_5)) {
+			if ((context->debug_modes[DEBUG_PLANE] & 3) == 3) {
+				sprite_debug_mode5(fb, pitch, context);
 			} else {
-				table_address &= 0xF800;
-				v_mul = 64;
-				hscroll_mask = 0x1F;
+				plane_debug_mode5(fb, pitch, context);
 			}
-			vscroll_mask = 0x1F;
-			break;
-		}
-		uint32_t bg_color = context->colors[context->regs[REG_BG_COLOR & 0x3F]];
-		uint16_t num_rows;
-		int num_lines;
-		if (context->double_res) {
-			num_rows = 64;
-			num_lines = 16;
-		} else {
-			num_rows = 128;
-			num_lines = 8;
-		}
-		for (uint16_t row = 0; row < num_rows; row++)
-		{
-			uint16_t row_address = table_address + (row & vscroll_mask) * v_mul;
-			for (uint16_t col = 0; col < 128; col++)
-			{
-				uint16_t address = row_address + (col & hscroll_mask) * 2;
-				//pccv hnnn nnnn nnnn
-				//
-				uint16_t entry = context->vdpmem[address] << 8 | context->vdpmem[address + 1];
-				uint8_t pal = entry >> 9 & 0x30;
-
-				uint32_t *dst = fb + (row * pitch * num_lines / sizeof(uint32_t)) + col * 8;
-				if (context->double_res) {
-					address = (entry & 0x3FF) * 64;
-				} else {
-					address = (entry & 0x7FF) * 32;
-				}
-				int y_diff = 4;
-				if (entry & 0x1000) {
-					y_diff = -4;
-					address += (num_lines - 1) * 4;
-				}
-				int x_diff = 1;
-				if (entry & 0x800) {
-					x_diff = -1;
-					address += 3;
-				}
-				for (int y = 0; y < num_lines; y++)
-				{
-					uint16_t trow_address = address;
-					uint32_t *row_dst = dst;
-					for (int x = 0; x < 4; x++)
-					{
-						uint8_t byte = context->vdpmem[trow_address];
-						trow_address += x_diff;
-						uint8_t left, right;
-						if (x_diff > 0) {
-							left = byte >> 4;
-							right = byte & 0xF;
-						} else {
-							left = byte & 0xF;
-							right = byte >> 4;
-						}
-						*(row_dst++) = left ? context->colors[left|pal] : bg_color;
-						*(row_dst++) = right ? context->colors[right|pal] : bg_color;
-					}
-					address += y_diff;
-					dst += pitch / sizeof(uint32_t);
-				}
+		} else if (context->type != VDP_TMS9918A && (context->regs[REG_MODE_1] & BIT_MODE_4)) {
+			if (context->debug_modes[DEBUG_PLANE] & 1) {
+				sprite_debug_mode4(fb, pitch, context);
+			} else {
+				plane_debug_mode4(fb, pitch, context);
+			}
+		} else if (context->type != VDP_GENESIS) {
+			if (context->debug_modes[DEBUG_PLANE] & 1) {
+				sprite_debug_tms(fb, pitch, context);
+			} else {
+				plane_debug_tms(fb, pitch, context);
 			}
 		}
 		render_framebuffer_updated(context->debug_fb_indices[DEBUG_PLANE], 1024);
@@ -3052,9 +3307,6 @@ static void vdp_h40_line(vdp_context * context)
 	render_sprite_cells(context);
 	scan_sprite_table(context->vcounter, context);
 	//255
-	if (context->cur_slot >= 0 && context->sprite_draw_list[context->cur_slot].x_pos) {
-		context->flags |= FLAG_DOT_OFLOW;
-	}
 	scan_sprite_table(context->vcounter, context);
 	//0
 	scan_sprite_table(context->vcounter, context);//Just a guess
@@ -3272,9 +3524,6 @@ static void vdp_h40(vdp_context * context, uint32_t target_cycles)
 		CHECK_LIMIT
 	SPRITE_RENDER_H40(254)
 	case 255:
-		if (context->cur_slot >= 0 && context->sprite_draw_list[context->cur_slot].x_pos) {
-			context->flags |= FLAG_DOT_OFLOW;
-		}
 		render_map_3(context);
 		scan_sprite_table(context->vcounter, context);//Just a guess
 		CHECK_LIMIT
@@ -3483,9 +3732,6 @@ static void vdp_h32(vdp_context * context, uint32_t target_cycles)
 		CHECK_LIMIT
 	SPRITE_RENDER_H32(250)
 	case 251:
-		if (context->cur_slot >= 0 && context->sprite_draw_list[context->cur_slot].x_pos) {
-			context->flags |= FLAG_DOT_OFLOW;
-		}
 		render_map_1(context);
 		scan_sprite_table(context->vcounter, context);//Just a guess
 		CHECK_LIMIT
@@ -3822,7 +4068,7 @@ static void tms_sprite_scan(vdp_context *context)
 	if (diff < size) {
 		context->sprite_info_list[context->sprite_draws++].index = context->sprite_index;
 		if (context->sprite_draws == 5) {
-			context->flags |= FLAG_DOT_OFLOW;
+			context->flags |= FLAG_SPRITE_OFLOW;
 		}
 	} else {
 		context->sprite_info_list[4].index = context->sprite_index;
@@ -3926,7 +4172,7 @@ static uint8_t tms_sprite_clock(vdp_context *context, int16_t offset)
 					output = context->sprite_draw_list[i].pal_priority;
 				}
 			}
-			if (!(context->regs[REG_MODE_2] & BIT_SPRITE_SZ) || ((x - context->sprite_draw_list[i].x_pos) & 1)) {
+			if (!(context->regs[REG_MODE_2] & BIT_SPRITE_ZM) || ((x - context->sprite_draw_list[i].x_pos) & 1)) {
 				context->sprite_draw_list[i].address <<= 1;
 			}
 		}
@@ -4819,9 +5065,6 @@ void vdp_reg_write(vdp_context *context, uint16_t reg, uint16_t value)
 int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_cycle)
 {
 	//printf("control port write: %X at %d\n", value, context->cycles);
-	if (context->flags & FLAG_DMA_RUN) {
-		return -1;
-	}
 	if (context->flags & FLAG_PENDING) {
 		context->address_latch = value << 14 & 0x1C000;
 		context->address = (context->address & 0x3FFF) | context->address_latch;
@@ -4909,12 +5152,9 @@ void vdp_control_port_write_pbc(vdp_context *context, uint8_t value)
 	}
 }
 
-int vdp_data_port_write(vdp_context * context, uint16_t value)
+void vdp_data_port_write(vdp_context * context, uint16_t value)
 {
 	//printf("data port write: %X at %d\n", value, context->cycles);
-	if (context->flags & FLAG_DMA_RUN && (context->regs[REG_DMASRC_H] & DMA_TYPE_MASK) != DMA_FILL) {
-		return -1;
-	}
 	if (context->flags & FLAG_PENDING) {
 		context->flags &= ~FLAG_PENDING;
 		//Should these be cleared here?
@@ -4948,7 +5188,6 @@ int vdp_data_port_write(vdp_context * context, uint16_t value)
 	}
 	context->fifo_write = (context->fifo_write + 1) & (FIFO_SIZE-1);
 	increment_address(context);
-	return 0;
 }
 
 void vdp_data_port_write_pbc(vdp_context * context, uint8_t value)
@@ -5008,7 +5247,7 @@ uint16_t vdp_status(vdp_context *context)
 	if (context->flags2 & FLAG2_VINT_PENDING) {
 		value |= 0x80;
 	}
-	if (context->flags & FLAG_DOT_OFLOW) {
+	if (context->flags & FLAG_SPRITE_OFLOW) {
 		value |= 0x40;
 	}
 	if (context->flags2 & FLAG2_SPRITE_COLLIDE) {
@@ -5042,7 +5281,7 @@ uint16_t vdp_status(vdp_context *context)
 uint16_t vdp_control_port_read(vdp_context * context)
 {
 	uint16_t value = vdp_status(context);
-	context->flags &= ~(FLAG_DOT_OFLOW|FLAG_PENDING);
+	context->flags &= ~(FLAG_SPRITE_OFLOW|FLAG_PENDING);
 	context->flags2 &= ~(FLAG2_SPRITE_COLLIDE|FLAG2_BYTE_PENDING);
 	//printf("status read at cycle %d returned %X\n", context->cycles, value);
 	return value;
@@ -5664,7 +5903,11 @@ void vdp_toggle_debug_view(vdp_context *context, uint8_t debug_type)
 		{
 		case DEBUG_PLANE:
 			caption = "BlastEm - VDP Plane Debugger";
-			width = height = 1024;
+			if (context->type == VDP_GENESIS) {
+				width = height = 1024;
+			} else {
+				width = height = 512;
+			}
 			break;
 		case DEBUG_VRAM:
 			caption = "BlastEm - VDP VRAM Debugger";

@@ -8,11 +8,11 @@ info
 	sync_cycle m68k_sync_cycle
 	
 declare
-	typedef m68k_context *(*sync_fun)(m68k_context * context, uint32_t address);
+	typedef m68k_context *(sync_fun)(m68k_context * context, uint32_t address);
 	typedef m68k_context *(*int_ack_fun)(m68k_context * context);
 	typedef m68k_context *(*m68k_reset_handler)(m68k_context *context);
-	void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun sync_components, int_ack_fun int_ack);
-	m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler reset_handler);
+	void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chunks, uint32_t clock_divider, sync_fun *sync_components, int_ack_fun int_ack);
+	m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler *reset_handler);
 	void m68k_reset(m68k_context *context);
 	void m68k_print_regs(m68k_context *context);
 	void m68k_serialize(m68k_context *context, uint32_t pc, serialize_buffer *buf);
@@ -62,6 +62,8 @@ regs
 	should_return 8
 	system ptrvoid
 	reset_handler ptrvoid
+	int_ack_handler ptrvoid
+	sync_components ptrsync_fun
 	mem_pointers ptr16 10
 	
 flags
@@ -158,59 +160,59 @@ m68k_trap
 	
 	
 m68k_interrupt
-	cmp int_cycle cycles
-	if >=U
+	if cycles >=U int_cycle
 	
-	#INT_PENDING_NONE
-	cmp 255 int_pending
-	if =
-	
-	mov int_priority int_pending
-	mov int_num int_pending_num
-	
-	else
-	
-	#INT_PENDING_SR_CHANGE
-	cmp 254 int_pending
-	if =
-	
-	mov int_priority int_pending
-	mov int_num int_pending_num
-	
-	else
-	
-	check_user_mode_swap_ssp_usp
-	
-	cycles 6
-	#save status reg
-	sub 6 a7 a7
-	m68k_get_sr
-	mov a7 scratch2
-	ocall write_16
-	
-	#update status register
-	and 0x78 status status
-	or int_priority status status
-	or 0x20 status status
-	
-	#Interrupt ack cycle
-	mov int_pending int_ack
-	if int_pending_num
-	cycles 4
-	else
-	#TODO: do the whole E clock variable latency nonsense
-	cycles 13
-	add 24 int_pending int_pending_num
-	end
-	
-	#save pc
-	add 2 a7 scratch2
-	m68k_write32_lowfirst pc
-	
-	lsl int_pending_num 2 scratch1
-	m68k_read32
-	mov scratch1 pc
-	update_sync
+		#INT_PENDING_NONE
+		if 255 = int_pending
+			int_pending = int_priority
+			int_pending_num = int_num
+		else
+		
+			#INT_PENDING_SR_CHANGE
+			if 254 = int_pending
+				int_pending = int_priority
+				int_pending_num = int_num
+			
+			end
+			
+			check_user_mode_swap_ssp_usp
+			
+			cycles 6
+			#save status reg
+			a7 -= 6
+			m68k_get_sr
+			scratch2 = a7
+			ocall write_16
+			
+			#update status register
+			status &= 0x78
+			status |= int_pending
+			status |= 0x20
+			
+			#Interrupt ack cycle
+			int_ack = int_pending
+			cycles 4
+			if int_ack_handler
+				pcall int_ack_handler int_ack_fun context
+			end
+			if int_pending_num
+			else
+				int_pending_num = int_pending + 24
+			end
+			
+			#save pc
+			scratch2 = a7 + 2
+			scratch1 = pc - 2
+			m68k_write32_lowfirst scratch1
+			
+			scratch1 = int_pending_num << 2
+			int_pending = 255 #INT_PENDING_NONE
+			int_pending_num = 0
+			m68k_read32
+			mov scratch1 pc
+			m68k_prefetch
+			update_sync
+		end
 	end
 	
 m68k_run_op
@@ -671,6 +673,93 @@ m68k_save_dst
 	update_flags NZV0C0
 	m68k_prefetch
 
+1100XXX100000YYY abcd_dy_dx
+	local lowx_corf 8
+	local lowy_cmp 8
+	local res 8
+	lowx_corf = dregs.X & 0xF
+	lowy_cmp = dregs.Y & 0xF
+	adc lowx_corf lowy_cmp lowy_cmp
+	if lowy_cmp >=U 0xA
+		lowx_corf = 6
+		lowy_cmp = 0x9A
+	else
+		lowx_corf = 0
+		lowy_cmp = 0xA0
+	end
+	adc dregs.Y dregs.X res 0
+	update_flags XC
+	if cflag
+		lowx_corf |= 0x60
+		res += lowx_corf
+		update_flags NV
+	else
+		if res >=U lowy_cmp
+			lowx_corf |= 0x60
+		end
+		res += lowx_corf
+		update_flags XCNV
+	end
+	if res
+		update_flags Z0
+	end
+	dregs.X:0 = res
+	cycles 2
+	m68k_prefetch
+
+1100XXX100001YYY abcd_ay_ax
+	local lowx_corf 8
+	local lowy_cmp 8
+	local res 8
+	if Y = 7
+		aregs.Y -= 2
+	else
+		aregs.Y -= 1
+	end
+	#predec penalty on src only
+	cycles 2
+	scratch1 = aregs.Y
+	ocall read_8
+	scratch2 = scratch1
+	if X = 7
+		aregs.X -= 2
+	else
+		aregs.X -= 1
+	end
+	scratch1 = aregs.X
+	ocall read_8
+	lowx_corf = scratch1 & 0xF
+	lowy_cmp = scratch2 & 0xF
+	adc lowx_corf lowy_cmp lowy_cmp
+	if lowy_cmp >=U 0xA
+		lowx_corf = 6
+		lowy_cmp = 0x9A
+	else
+		lowx_corf = 0
+		lowy_cmp = 0xA0
+	end
+	adc scratch2 scratch1 res 0
+	update_flags XC
+	update_flags XC
+	if cflag
+		lowx_corf |= 0x60
+		res += lowx_corf
+		update_flags NV
+	else
+		if res >=U lowy_cmp
+			lowx_corf |= 0x60
+		end
+		res += lowx_corf
+		update_flags XCNV
+	end
+	if res
+		update_flags Z0
+	end
+	scratch1 = res
+	scratch2 = aregs.X
+	ocall write_8
+	m68k_prefetch
+
 1100XXX101000YYY exg_dn_dn
 	scratch1 = dregs.X
 	dregs.X = dregs.Y
@@ -818,7 +907,21 @@ m68k_save_dst
 0000001000111100 andi_to_ccr
 	#fetch immediate operand
 	m68k_prefetch
-	and prefetch ccr ccr
+	ccr &= prefetch
+	cycles 12 #TODO: where do these occur relative to fetches
+	m68k_prefetch
+
+0000001001111100 andi_to_sr
+	#TODO: privilege violation exception if in user mode
+	#fetch immediate operand
+	m68k_prefetch
+	ccr &= prefetch
+	scratch1 = prefetch >> 8
+	status &= scratch1
+	m68k_prefetch
+	check_user_mode_swap_ssp_usp
+	update_sync
+	cycles 12 #TODO: where do these occur relative to fetches
 	m68k_prefetch
 	
 1011DDD1ZZMMMRRR eor_dn_ea
@@ -874,10 +977,23 @@ m68k_save_dst
 	m68k_save_dst Z
 	m68k_prefetch
 	
-0000001000111100 eori_to_ccr
+0000101000111100 eori_to_ccr
 	#fetch immediate operand
 	m68k_prefetch
-	xor prefetch ccr ccr
+	ccr ^= prefetch
+	cycles 12 #TODO: where do these occur relative to fetches
+	m68k_prefetch
+
+0000101001111100 eori_to_sr
+	#TODO: privilege violation exception if in user mode
+	#fetch immediate operand
+	m68k_prefetch
+	ccr ^= prefetch
+	scratch1 = prefetch >> 8
+	status ^= scratch1
+	check_user_mode_swap_ssp_usp
+	update_sync
+	cycles 12 #TODO: where do these occur relative to fetches
 	m68k_prefetch
 	
 1000DDD0ZZMMMRRR or_ea_dn
@@ -961,7 +1077,128 @@ m68k_save_dst
 	#fetch immediate operand
 	m68k_prefetch
 	or prefetch ccr ccr
+	cycles 12 #TODO: where do these occur relative to fetches
 	m68k_prefetch
+
+0000000001111100 ori_to_sr
+	#TODO: privilege violation exception if in user mode
+	#fetch immediate operand
+	m68k_prefetch
+	ccr |= prefetch
+	scratch1 = prefetch >> 8
+	status |= scratch1
+	update_sync
+	cycles 12 #TODO: where do these occur relative to fetches
+	m68k_prefetch
+
+1000YYY100000XXX sbcd_dx_dy
+	local lowx_corf 8
+	local lowy 8
+	local res 8
+	lowx_corf = dregs.X & 0xF
+	lowy = dregs.Y & 0xF
+	sbc lowx_corf lowy lowy
+	if lowy >=U 0x10
+		lowx_corf = 6
+	else
+		lowx_corf = 0
+	end
+	sbc dregs.X dregs.Y res 0
+	update_flags XC
+	if cflag
+		lowx_corf |= 0x60
+		res -= lowx_corf
+		update_flags NV
+	else
+		res -= lowx_corf
+		update_flags XCNV
+	end
+	if res
+		update_flags Z0
+	end
+	dregs.Y:0 = res
+	cycles 2
+	m68k_prefetch
+
+1000YYY100001XXX sbcd_ax_ay
+	local lowx_corf 8
+	local lowy 8
+	if X = 7
+		aregs.X -= 2
+	else
+		aregs.X -= 1
+	end
+	#predec penalty on src only
+	cycles 2
+	scratch1 = aregs.X
+	ocall read_8
+	scratch2 = scratch1
+	if Y = 7
+		aregs.Y -= 2
+	else
+		aregs.Y -= 1
+	end
+	scratch1 = aregs.Y
+	ocall read_8
+	lowy = scratch1 & 0xF
+	lowx_corf = scratch2 & 0xF
+	sbc lowx_corf lowy lowy
+	if lowy >=U 0x10
+		lowx_corf = 6
+	else
+		lowx_corf = 0
+	end
+	sbc scratch2 scratch1 scratch1 0
+	update_flags XC
+	if cflag
+		lowx_corf |= 0x60
+		scratch1:0 -= lowx_corf
+		update_flags NV
+	else
+		scratch1:0 -= lowx_corf
+		update_flags XCNV
+	end
+	scratch1 &= 0xFF
+	if scratch1
+		update_flags Z0
+	end
+	scratch2 = aregs.Y
+	ocall write_8
+	m68k_prefetch
+
+1000DDD011MMMRRR divu
+	invalid M 1
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	m68k_fetch_src_ea M R 1
+	
+	if src = 0
+		cycles 4
+		update_flags N0Z0V0
+		m68k_trap 5
+	else
+		ccall divu context D src
+		m68k_prefetch
+	end
+	
+
+1000DDD111MMMRRR divs
+	invalid M 1
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	local tmp 32
+	m68k_fetch_src_ea M R 1
+	
+	if src = 0
+		cycles 4
+		update_flags N0Z0V0
+		m68k_trap 5
+	else
+		ccall divs context D src
+		m68k_prefetch
+	end
 	
 1001DDD0ZZMMMRRR sub_ea_dn
 	invalid M 7 R 5
@@ -1087,7 +1324,99 @@ m68k_save_dst
 	end
 	m68k_save_dst Z
 	m68k_prefetch
-	
+
+1001DDD1ZZ000SSS subx_dy_dx
+	invalid Z 3
+	sbc dregs.S dregs.D dregs.D Z
+	update_flags XNVC
+	switch Z
+	case 0
+		local tmp8 8
+		mov dregs.D tmp8
+		if tmp8
+			update_flags Z0
+		end
+	case 1
+		local tmp16 16
+		mov dregs.D tmp16
+		if tmp16
+			update_flags Z0
+		end
+	case 2
+		cycles 4
+		if dregs.D
+			update_flags Z0
+		end
+	end
+	m68k_prefetch
+
+1001DDD1ZZ001SSS subx_ay_ax
+	invalid Z 3
+	if Z
+		decsize Z aregs.S aregs.S
+	else
+		switch S
+		case 7
+			sub 2 aregs.S aregs.S
+		default
+			decsize Z aregs.S aregs.S
+		end
+	end
+	#predec penalty on src only
+	cycles 2
+	mov aregs.S scratch1
+	switch Z
+	case 0
+	ocall read_8
+	case 1
+	ocall read_16
+	case 2
+	m68k_read32
+	end
+	mov scratch1 scratch2
+	if Z
+		decsize Z aregs.D aregs.D
+	else
+		switch D
+		case 7
+			sub 2 aregs.D aregs.D
+		default
+			decsize Z aregs.D aregs.D
+		end
+	end
+	mov aregs.D scratch1
+	switch Z
+	case 0
+	ocall read_8
+	case 1
+	ocall read_16
+	case 2
+	m68k_read32
+	end
+	sbc scratch2 scratch1 scratch1 Z
+	update_flags XNVC
+	switch Z
+	case 0
+	local tmp8 8
+	mov dregs.D tmp8
+	if tmp8
+		update_flags Z0
+	end
+	case 1
+	local tmp16 16
+	mov dregs.D tmp16
+	if tmp16
+		update_flags Z0
+	end
+	case 2
+	if dregs.D
+		update_flags Z0
+	end
+	end
+	mov aregs.D scratch2
+	m68k_write_size Z 0
+	m68k_prefetch
+
 1110CCC0ZZ001RRR lsri
 	invalid Z 3
 	switch C
@@ -1483,7 +1812,7 @@ m68k_save_dst
 	invalid M 7 R 6
 	invalid M 7 R 7
 	m68k_fetch_src_ea M R 1
-	mov scratch1 ccr
+	mov src ccr
 	cycles 8
 	m68k_prefetch
 
@@ -1494,8 +1823,9 @@ m68k_save_dst
 	invalid M 7 R 7
 	#TODO: privilege violation exception if in user mode
 	m68k_fetch_src_ea M R 1
-	mov scratch1 ccr
-	lsr scratch1 8 status
+	ccr = src
+	status = src >> 8
+	check_user_mode_swap_ssp_usp
 	update_sync
 	cycles 8
 	m68k_prefetch
@@ -1558,6 +1888,52 @@ m68k_save_dst
 	dst:Z = 0
 	update_flags N0Z1V0C0
 	m68k_save_dst Z
+	m68k_prefetch
+
+0100100000MMMRRR nbcd
+	local lowx_corf 8
+	local lowy_cmp 8
+	local res 8
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	m68k_fetch_dst_ea M R 0
+	lowx_corf = dst & 0xF
+	lowy_cmp = 0
+	sbc lowx_corf lowy_cmp lowy_cmp
+	if lowy_cmp >= 0xA
+		lowx_corf = 6
+		lowy_cmp = 0xA6
+	else
+		lowx_corf = 0
+		lowy_cmp = 0xA0
+	end
+	res = 0
+	sbc dst res res
+	update_flags XC
+	if cflag
+		lowx_corf |= 0x60
+		res -= lowx_corf
+		update_flags NV
+	else
+		if res >=U lowy_cmp
+			lowx_corf |= 0x60
+		end
+		res -= lowx_corf
+		update_flags XCNV
+	end
+	if res
+		update_flags Z0
+	end
+	dst:0 = res
+	if M = 0
+		cycles 2
+	end
+	m68k_save_dst 0
 	m68k_prefetch
 
 00001100ZZMMMRRR cmpi
@@ -2189,13 +2565,16 @@ m68k_calc_ea
 	invalid M 7 R 5
 	invalid M 7 R 6
 	invalid M 7 R 7
+	local tmp 32
+	
+	m68k_calc_ea M R 2
+	tmp = ea
 	
 	a7 -= 4
 	scratch2 = a7
 	m68k_write32 pc
 	
-	m68k_calc_ea M R 2
-	pc = ea
+	pc = tmp
 	
 	cycles 4
 	m68k_prefetch
@@ -2508,6 +2887,27 @@ m68k_check_cond
 		invert |= zflag
 	end
 
+0101CCCC11MMMDDD scc
+	invalid M 1
+	invalid M 7 D 2
+	invalid M 7 D 3
+	invalid M 7 D 4
+	invalid M 7 D 5
+	invalid M 7 D 6
+	invalid M 7 D 7
+	m68k_fetch_dst_ea M D 0
+	m68k_check_cond C
+	if istrue
+		if M = 0
+			cycles 2
+		end
+		dst:0 = 0xFF
+	else
+		dst:0 = 0
+	end
+	m68k_save_dst 0
+	m68k_prefetch
+
 0110CCCC00000000 bcc_w
 	#mid-instruction timing isn't quite right
 	#becuase I'm only emulating a 1-word prefetch buffer instead of 2
@@ -2561,4 +2961,254 @@ m68k_check_cond
 			cycles 2
 		end
 	end
+	m68k_prefetch
+
+1110CCC0ZZ011RRR rori
+	invalid Z 3
+	switch C
+	case 0
+		meta shift 8
+	default
+		meta shift C
+	end
+	ror dregs.R shift dregs.R Z
+	update_flags NZV0C
+	local cyc 32
+	cyc = shift + shift
+	switch Z
+	case 2
+		cyc += 4
+	default
+		cyc += 2
+	end
+	cycles cyc
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110CCC0ZZ111RRR ror_dn
+	invalid Z 3
+	local shift 8
+	shift = dregs.C & 63
+	ror dregs.R shift dregs.R Z
+	update_flags NZV0C
+	shift += shift
+	switch Z
+	case 2
+		shift += 4
+	default
+		shift += 2
+	end
+	cycles shift
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110011011MMMRRR ror_ea
+	invalid M 0
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 1
+	ror dst 1 dst 1
+	update_flags NZV0C
+	m68k_save_dst 1
+	m68k_prefetch
+
+1110CCC1ZZ011RRR roli
+	invalid Z 3
+	switch C
+	case 0
+		meta shift 8
+	default
+		meta shift C
+	end
+	rol dregs.R shift dregs.R Z
+	update_flags NZV0C
+	local cyc 32
+	cyc = shift + shift
+	switch Z
+	case 2
+		cyc += 4
+	default
+		cyc += 2
+	end
+	cycles cyc
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110CCC1ZZ111RRR rol_dn
+	invalid Z 3
+	local shift 8
+	shift = dregs.C & 63
+	rol dregs.R shift dregs.R Z
+	update_flags NZV0C
+	shift += shift
+	switch Z
+	case 2
+		shift += 4
+	default
+		shift += 2
+	end
+	cycles shift
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110011111MMMRRR rol_ea
+	invalid M 0
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 1
+	rol dst 1 dst 1
+	update_flags NZV0C
+	m68k_save_dst 1
+	m68k_prefetch
+
+1110CCC0ZZ010RRR roxri
+	invalid Z 3
+	switch C
+	case 0
+		meta shift 8
+	default
+		meta shift C
+	end
+	rrc dregs.R shift dregs.R Z
+	update_flags XNZV0C
+	local cyc 32
+	cyc = shift + shift
+	switch Z
+	case 2
+		cyc += 4
+	default
+		cyc += 2
+	end
+	cycles cyc
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110CCC0ZZ110RRR roxr_dn
+	invalid Z 3
+	local shift 8
+	local cycle_shift 8
+	cycle_shift = dregs.C & 63
+	switch Z
+	case 2
+		if cycle_shift = 32
+			rrc dregs.R 31 dregs.R Z
+			rrc dregs.R 1 dregs.R Z
+			update_flags NZV0C
+		else
+			shift = dregs.C & 31
+			rrc dregs.R shift dregs.R Z
+			update_flags NZV0C
+		end
+	default
+		shift = dregs.C & 31
+		rrc dregs.R shift dregs.R Z
+		update_flags XNZV0C
+	end
+	cycle_shift += cycle_shift
+	switch Z
+	case 2
+		cycle_shift += 4
+	default
+		cycle_shift += 2
+	end
+	cycles cycle_shift
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110010011MMMRRR roxr_ea
+	invalid M 0
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 1
+	rrc dst 1 dst 1
+	update_flags XNZV0C
+	m68k_save_dst 1
+	m68k_prefetch
+
+1110CCC1ZZ010RRR roxli
+	invalid Z 3
+	switch C
+	case 0
+		meta shift 8
+	default
+		meta shift C
+	end
+	rlc dregs.R shift dregs.R Z
+	update_flags XNZV0C
+	local cyc 32
+	cyc = shift + shift
+	switch Z
+	case 2
+		cyc += 4
+	default
+		cyc += 2
+	end
+	cycles cyc
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110CCC1ZZ110RRR roxl_dn
+	invalid Z 3
+	local shift 8
+	local cycle_shift 8
+	cycle_shift = dregs.C & 63
+	switch Z
+	case 2
+		if cycle_shift = 32
+			rrc dregs.R 31 dregs.R Z
+			rlc dregs.R 1 dregs.R Z
+			update_flags NZV0C
+		else
+			shift = dregs.C & 31
+			rlc dregs.R shift dregs.R Z
+			update_flags NZV0C
+		end
+	default
+		shift = dregs.C & 31
+		rlc dregs.R shift dregs.R Z
+		update_flags XNZV0C
+	end
+	cycle_shift += cycle_shift
+	switch Z
+	case 2
+		cycle_shift += 4
+	default
+		cycle_shift += 2
+	end
+	cycles cycle_shift
+	#TODO: should this happen before or after the majority of the rotate?
+	m68k_prefetch
+
+1110010111MMMRRR roxl_ea
+	invalid M 0
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 1
+	rlc dst 1 dst 1
+	update_flags XNZV0C
+	m68k_save_dst 1
 	m68k_prefetch

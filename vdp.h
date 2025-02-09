@@ -52,7 +52,7 @@
 
 #define MCLKS_LINE 3420
 
-#define FLAG_DOT_OFLOW     0x01
+#define FLAG_SPRITE_OFLOW  0x01
 #define FLAG_CAN_MASK      0x02
 #define FLAG_MASKED        0x04
 #define FLAG_WINDOW        0x08
@@ -287,7 +287,7 @@ uint8_t vdp_load_gst(vdp_context * context, FILE * state_file);
 uint8_t vdp_save_gst(vdp_context * context, FILE * outfile);
 int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_cycle);
 void vdp_control_port_write_pbc(vdp_context * context, uint8_t value);
-int vdp_data_port_write(vdp_context * context, uint16_t value);
+void vdp_data_port_write(vdp_context * context, uint16_t value);
 void vdp_data_port_write_pbc(vdp_context * context, uint8_t value);
 void vdp_test_port_write(vdp_context * context, uint16_t value);
 uint16_t vdp_control_port_read(vdp_context * context);

@@ -4,6 +4,10 @@
 ifndef OS
 OS:=$(shell uname -s)
 endif
+ifndef SDL
+SDL:=sdl2
+endif
+SDL_UPPER:=$(shell echo $(SDL) | tr '[a-z]' '[A-Z]')
 FIXUP:=true
 
 BUNDLED_LIBZ:=zlib/adler32.o zlib/compress.o zlib/crc32.o zlib/deflate.o zlib/gzclose.o zlib/gzlib.o zlib/gzread.o\
@@ -35,8 +39,8 @@ GLEW32S_LIB:=$(GLEW_PREFIX)/lib/Release/$(GLUDIR)/glew32s.lib
 CFLAGS:=-std=gnu99 -Wreturn-type -Werror=return-type -Werror=implicit-function-declaration -Wpointer-arith -Werror=pointer-arith
 LDFLAGS:=-lm -lmingw32 -lws2_32 -lcomdlg32 -mwindows
 ifneq ($(MAKECMDGOALS),libblastem.dll)
-CFLAGS+= -I"$(SDL2_PREFIX)/include/SDL2" -I"$(GLEW_PREFIX)/include" -DGLEW_STATIC
-LDFLAGS+= $(GLEW32S_LIB) -L"$(SDL2_PREFIX)/lib" -lSDL2main -lSDL2 -lopengl32 -lglu32
+CFLAGS+= -I"$(SDL2_PREFIX)/include/$(SDL_UPPER)" -I"$(GLEW_PREFIX)/include" -DGLEW_STATIC
+LDFLAGS+= $(GLEW32S_LIB) -L"$(SDL2_PREFIX)/lib" -l$(SDL_UPPER)main -l$(SDL_UPPER) -lopengl32 -lglu32
 endif
 LIBZOBJS=$(BUNDLED_LIBZ)
 
@@ -51,7 +55,7 @@ HAS_PROC:=$(shell if [ -d /proc ]; then /bin/echo -e -DHAS_PROC; fi)
 CFLAGS:=-std=gnu99 -Wreturn-type -Werror=return-type -Werror=implicit-function-declaration -Wno-unused-value  -Wpointer-arith -Werror=pointer-arith $(HAS_PROC) -DHAVE_UNISTD_H
 
 ifeq ($(OS),Darwin)
-LIBS=sdl2 glew
+LIBS=$(SDL) glew
 FONT:=nuklear_ui/font_mac.o
 CHOOSER:=nuklear_ui/filechooser_null.o
 SO:=dylib
@@ -66,10 +70,10 @@ endif
 CFLAGS+= -DUSE_GLES -DUSE_FBDEV -pthread
 else
 ifdef USE_GLES
-LIBS=sdl2 glesv2
+LIBS=$(SDL) glesv2
 CFLAGS+= -DUSE_GLES
 else
-LIBS=sdl2 glew gl
+LIBS=$(SDL) glew gl
 endif #USE_GLES
 endif #USE_FBDEV
 FONT:=nuklear_ui/font.o
@@ -114,13 +118,18 @@ LDFLAGS:=-lm glew/lib/libGLEW.a -lEGL
 endif #USE_GLES
 
 ifeq ($(OS),Darwin)
-SDL_INCLUDE_PATH:=Frameworks/SDL2.framework/Headers
+SDL_INCLUDE_PATH:=Frameworks/$(SDL_UPPER).framework/Headers
 CFLAGS+=  -mmacosx-version-min=10.10
-LDFLAGS+= -FFrameworks -framework SDL2 -framework OpenGL -framework AppKit -mmacosx-version-min=10.10
-FIXUP:=install_name_tool -change @rpath/SDL2.framework/Versions/A/SDL2 @executable_path/Frameworks/SDL2.framework/Versions/A/SDL2
+LDFLAGS+= -FFrameworks -framework $(SDL_UPPER) -framework OpenGL -framework AppKit -mmacosx-version-min=10.10
+FIXUP:=install_name_tool -change @rpath/$(SDL_UPPER).framework/Versions/A/$(SDL_UPPER) @executable_path/Frameworks/$(SDL_UPPER).framework/Versions/A/$(SDL_UPPER)
 else #Darwin
+ifeq ($(SDL),sdl3)
+SDL_INCLUDE_PATH:=sdl/include/SDL3
+CFLAGS+= -Isdl/include -DSDL_ENABLE_OLD_NAMES
+else
 SDL_INCLUDE_PATH:=sdl/include
-LDFLAGS+= -Wl,-rpath='$$ORIGIN/lib' -Llib -lSDL2
+endif
+LDFLAGS+= -Wl,-rpath='$$ORIGIN/lib' -Llib -l$(SDL_UPPER)
 ifndef USE_GLES
 LDFLAGS+= $(shell pkg-config --libs gl)
 endif

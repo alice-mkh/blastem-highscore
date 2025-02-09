@@ -46,6 +46,7 @@ uint32_t MCLKS_PER_68K;
 #define Z80_CYCLE cycles
 #define Z80_OPTS opts
 #define z80_handle_code_write(...)
+#define int_num int_priority
 #else
 #define Z80_CYCLE current_cycle
 #define Z80_OPTS options
@@ -698,6 +699,11 @@ static m68k_context *sync_components(m68k_context * context, uint32_t address)
 			context->sync_cycle = context->cycles + 1;
 		}
 	}
+#ifdef NEW_CORE
+	if (context->target_cycle == context->cycles) {
+		context->target_cycle++;
+	}
+#endif
 	return context;
 }
 
@@ -994,28 +1000,7 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 	if (vdp_port < 0x10) {
 		int blocked;
 		if (vdp_port < 4) {
-			while (vdp_data_port_write(v_context, value) < 0) {
-				while(v_context->flags & FLAG_DMA_RUN) {
-					did_dma = 1;
-					vdp_run_dma_done(v_context, gen->frame_end);
-					if (v_context->cycles >= gen->frame_end) {
-						uint32_t cycle_diff = v_context->cycles - context->cycles;
-						uint32_t m68k_cycle_diff = (cycle_diff / MCLKS_PER_68K) * MCLKS_PER_68K;
-						if (m68k_cycle_diff < cycle_diff) {
-							m68k_cycle_diff += MCLKS_PER_68K;
-						}
-						context->cycles += m68k_cycle_diff;
-						gen->bus_busy = 1;
-						if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
-							sync_components_pico(context, 0);
-						} else {
-							sync_components(context, 0);
-						}
-						gen->bus_busy = 0;
-					}
-				}
-				//context->cycles = v_context->cycles;
-			}
+			vdp_data_port_write(v_context, value);
 		} else if(vdp_port < 8) {
 			vdp_run_context_full(v_context, context->cycles);
 			before_cycle = v_context->cycles;

@@ -93,7 +93,11 @@ controller_info get_controller_info(int joystick)
 	char guid_string[33];
 	SDL_Joystick *stick = render_get_joystick(joystick);
 	SDL_GameController *control = render_get_controller(joystick);
+#if SDL_VERSION_ATLEAST(3, 2, 0)
+	SDL_GUIDToString(SDL_JoystickGetGUID(stick), guid_string, sizeof(guid_string));
+#else
 	SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(stick), guid_string, sizeof(guid_string));
+#endif
 	tern_node *info = tern_find_node(info_config, guid_string);
 	if (info) {
 		controller_info res;
@@ -223,7 +227,11 @@ void save_controller_info(int joystick, controller_info *info)
 {
 #ifndef USE_FBDEV
 	char guid_string[33];
+#if SDL_VERSION_ATLEAST(3, 2, 0)
+	SDL_GUIDToString(SDL_JoystickGetGUID(render_get_joystick(joystick)), guid_string, sizeof(guid_string));
+#else
 	SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(render_get_joystick(joystick)), guid_string, sizeof(guid_string));
+#endif
 	tern_node *existing = tern_find_node(info_config, guid_string);
 	existing = tern_insert_ptr(existing, "subtype", strdup(subtype_names[info->subtype]));
 	existing = tern_insert_ptr(existing, "variant", strdup(variant_names[info->variant]));
@@ -244,7 +252,11 @@ void save_controller_mapping(int joystick, char *mapping_string)
 {
 #ifndef USE_FBDEV
 	char guid_string[33];
+#if SDL_VERSION_ATLEAST(3, 2, 0)
+	SDL_GUIDToString(SDL_JoystickGetGUID(render_get_joystick(joystick)), guid_string, sizeof(guid_string));
+#else
 	SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(render_get_joystick(joystick)), guid_string, sizeof(guid_string));
+#endif
 	tern_node *existing = tern_find_node(info_config, guid_string);
 	existing = tern_insert_ptr(existing, "mapping", strdup(mapping_string));
 	info_config = tern_insert_node(info_config, guid_string, existing);

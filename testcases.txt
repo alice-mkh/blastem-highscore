@@ -60,6 +60,7 @@ clr		bwl		d;(a);(a)+;-(a);(n,a);(n,a,x);(n).w;(n).l
 ext		wl		d
 neg		bwl		d;(a);(a)+;-(a);(n,a);(n,a,x);(n).w;(n).l
 negx	bwl		d;(a);(a)+;-(a);(n,a);(n,a,x);(n).w;(n).l
+nbcd	b		d;(a);(a)+;-(a);(n,a);(n,a,x);(n).w;(n).l
 not		bwl		d;(a);(a)+;-(a);(n,a);(n,a,x);(n).w;(n).l
 pea		l		(a);(n,a);(n,a,x);(n).w;(n).l;(n,pc);(n,pc,x)
 rol		w		(a);(a)+;-(a);(n,a);(n,a,x);(n).w;(n).l
@@ -85,4 +86,9 @@ sle		b		d;(a);(a)+;-(a);(n,a);(n,a,x);(n).w;(n).l
 swap	w		d
 tst		bwl		d;(a);(a)+;-(a);(n,a);(n,a,x);(n).w;(n).l
 lea		l		(a);(n,a);(n,a,x);(n).w;(n).l;(n,pc);(n,pc,x)					a
-
+ori		b		#n																ccr
+ori		w		#n																sr
+andi	b		#n																ccr
+andi	w		#n																sr
+eori	b		#n																ccr
+eori	w		#n																sr
