@@ -94,6 +94,9 @@ class Register(object):
 
 	def write_init(self, outfile, size, already):
 		if not str(self) in already and not self.kind in ('ccr', 'sr'):
+			if self.kind in ('d', 'a'):
+				#populate all register bits during init to catch masking bugs
+				size = 'l'
 			minv,maxv = get_size_range(size)
 			val = randint(minv,maxv)
 			already[str(self)] = val
