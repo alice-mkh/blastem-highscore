@@ -918,7 +918,6 @@ m68k_save_dst
 	ccr &= prefetch
 	scratch1 = prefetch >> 8
 	status &= scratch1
-	m68k_prefetch
 	check_user_mode_swap_ssp_usp
 	update_sync
 	cycles 12 #TODO: where do these occur relative to fetches
