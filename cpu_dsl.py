@@ -903,6 +903,7 @@ def _getCarryCheck(prog):
 
 def _adcCImpl(prog, params, rawParams, flagUpdates):
 	needsSizeAdjust = False
+	destSize = prog.paramSize(rawParams[2])
 	if len(params) > 3:
 		size = params[3]
 		if size == 0:
@@ -912,10 +913,11 @@ def _adcCImpl(prog, params, rawParams, flagUpdates):
 		else:
 			size = 32
 		prog.lastSize = size
-		destSize = prog.paramSize(rawParams[2])
 		if destSize > size:
 			needsSizeAdjust = True
 			prog.sizeAdjust = size
+	else:
+		size = destSize
 	needsCarry = needsOflow = needsHalf = False
 	if flagUpdates:
 		for flag in flagUpdates:
@@ -929,31 +931,40 @@ def _adcCImpl(prog, params, rawParams, flagUpdates):
 	decl = ''
 	carryCheck = _getCarryCheck(prog)
 	vals = '1 : 0'
+	mask = (1 << size) - 1
+	if prog.paramSize(rawParams[0]) > size:
+		if type(params[0]) is int:
+			a = params[0] & mask
+		else:
+			a = f'({params[0]} & {mask})'
+	else:
+		a = params[0]
+	if prog.paramSize(rawParams[1]) > size:
+		if type(params[1]) is int:
+			b = params[1] & mask
+		else:
+			b = f'({params[1]} & {mask})'
+	else:
+		b = params[1]
 	if needsCarry or needsOflow or needsHalf or (flagUpdates and needsSizeAdjust):
-		if len(params) <= 3:
-			size = prog.paramSize(rawParams[2])
 		if needsCarry:
 			size *= 2
 		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
-		prog.lastA = params[0]
-		prog.lastB = params[1]
-		prog.lastBFlow = '(~{b})'.format(b=params[1])
+		prog.lastA = a
+		prog.lastB = b
+		prog.lastBFlow = f'(~{b})'
 		if size == 64:
-			params[0] = '((uint64_t){a})'.format(a=params[0])
-			params[1] = '((uint64_t){b})'.format(b=params[1])
+			a = f'((uint64_t){a})'
+			b = f'((uint64_t){b})'
 			vals = '((uint64_t)1) : ((uint64_t)0)'
 	elif needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		dst = params[2]
-		return '{decl}\n\t{tmp} = ({a} & {mask}) + ({b} & {mask}) + ({check} ? 1 : 0);\n\t{dst} = ({dst} & ~{mask}) | {tmp};'.format(
-			decl = decl, tmp = name, a = a, b = b, op = op, dst = dst, mask = ((1 << size) - 1), check = carryCheck
-		)
+		return f'{decl}\n\t{tmp} = {a} + {b} + ({carryCheck} ? 1 : 0);\n\t{dst} = ({dst} & ~{mask}) | {tmp};'
 	else:
 		dst = params[2]
-	return decl + '\n\t{dst} = {a} + {b} + ({check} ? {vals});'.format(dst = dst,
-		a = params[0], b = params[1], check = carryCheck, vals = vals
-	)
+	return decl + f'\n\t{dst} = {a} + {b} + ({carryCheck} ? {vals});'
 
 def _sbcCImpl(prog, params, rawParams, flagUpdates):
 	needsSizeAdjust = False
