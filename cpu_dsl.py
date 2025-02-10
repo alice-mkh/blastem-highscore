@@ -1026,6 +1026,11 @@ def _rolCImpl(prog, params, rawParams, flagUpdates):
 		mdecl,b = prog.getTemp(prog.paramSize(rawParams[1]))
 		ret = f'\n\t{b} = {params[1]} & {rotMask};'
 	prog.lastB = b
+	if prog.paramSize(rawParams[0]) > size:
+		mask = (1 << size) - 1
+		a = f'({params[0]} & {mask})'
+	else:
+		a = params[0]
 	prog.lastBUnmasked = params[1]
 	if needsSizeAdjust:
 		decl,name = prog.getTemp(size)
@@ -1034,7 +1039,7 @@ def _rolCImpl(prog, params, rawParams, flagUpdates):
 	else:
 		dst = params[2]
 	ret += '\n\t{dst} = {a} << {b} | {a} >> ({size} - {b});'.format(dst = dst,
-		a = params[0], b = b, size=size
+		a = a, b = b, size=size
 	)
 	if needsSizeAdjust and not needsCarry:
 		mask = (1 << size) - 1
@@ -1067,19 +1072,21 @@ def _rlcCImpl(prog, params, rawParams, flagUpdates):
 	else:
 		size = destSize
 	carryCheck = _getCarryCheck(prog)
-	size = prog.paramSize(rawParams[2])
+	if prog.paramSize(rawParams[0]) > size:
+		mask = (1 << size) - 1
+		a = f'({params[0]} & {mask})'
+	else:
+		a = params[0]
 	if needsCarry or needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
-		prog.lastA = params[0]
+		prog.lastA = a
 		prog.lastB = params[1]
 	else:
 		dst = params[2]
-	if size == 32 and (not type(params[1]) is int) or params[1] <= 1:
+	if size == 32 and ((not type(params[1]) is int) or params[1] <= 1):
 		# we may need to shift by 32-bits which is too much for a normal int
-		a = f'((uint64_t){params[0]})'
-	else:
-		a = params[0]
+		a = f'((uint64_t){a})'
 	ret = decl + '\n\t{dst} = {a} << {b} | {a} >> ({size} + 1 - {b}) | ({check} ? 1 : 0) << ({b} - 1);'.format(dst = dst,
 		a = a, b = params[1], size=size, check=carryCheck
 	)
@@ -1122,6 +1129,11 @@ def _rorCImpl(prog, params, rawParams, flagUpdates):
 		ret = f'\n\t{b} = {params[1]} & {rotMask};'
 	prog.lastB = b
 	prog.lastBUnmasked = params[1]
+	if prog.paramSize(rawParams[0]) > size:
+		mask = (1 << size) - 1
+		a = f'({params[0]} & {mask})'
+	else:
+		a = params[0]
 	if needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
@@ -1129,7 +1141,7 @@ def _rorCImpl(prog, params, rawParams, flagUpdates):
 	else:
 		dst = params[2]
 	ret += '\n\t{dst} = {a} >> {b} | {a} << ({size} - {b});'.format(dst = dst,
-		a = params[0], b = b, size=size
+		a = a, b = b, size=size
 	)
 	if needsSizeAdjust and not needsCarry:
 		mask = (1 << size) - 1
@@ -1162,19 +1174,21 @@ def _rrcCImpl(prog, params, rawParams, flagUpdates):
 	else:
 		size = destSize
 	carryCheck = _getCarryCheck(prog)
-	size = prog.paramSize(rawParams[2])
+	if prog.paramSize(rawParams[0]) > size:
+		mask = (1 << size) - 1
+		a = f'({params[0]} & {mask})'
+	else:
+		a = params[0]
 	if needsCarry or needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
-		prog.lastA = params[0]
+		prog.lastA = a
 		prog.lastB = params[1]
 	else:
 		dst = params[2]
-	if size == 32 and (not type(params[1]) is int) or params[1] <= 1:
+	if size == 32 and ((not type(params[1]) is int) or params[1] <= 1):
 		# we may need to shift by 32-bits which is too much for a normal int
-		a = f'((uint64_t){params[0]})'
-	else:
-		a = params[0]
+		a = f'((uint64_t){a})'
 	ret = decl + '\n\t{dst} = {a} >> {b} | {a} << ({size} + 1 - {b}) | ({check} ? 1 : 0) << ({size}-{b});'.format(dst = dst,
 		a = a, b = params[1], size=size, check=carryCheck
 	)
