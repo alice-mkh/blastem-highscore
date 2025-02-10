@@ -818,13 +818,28 @@ def _sext(size, src):
 	else:
 		return src | 0xFFFF0000 if src & 0x8000 else src & 0x7FFF
 
-def _sextCImpl(prog, params, rawParms):
-	if params[0] == 16:
-		fmt = '\n\t{dst} = {src} & 0x80 ? {src} | 0xFF00 : {src} & 0x7F;'
+def _sextCImpl(prog, params, rawParams):
+	if not type(params[0]) is int:
+		raise Exception('First param to sext must resolve to an integer')
+	if not params[0] in (16, 32):
+		raise Exception('First param to sext must be 16 or 32')
+	fromSize = params[0] >> 1
+	srcMask = (1 << fromSize) - 1
+	dstMask = (1 << params[0]) - 1
+	if prog.paramSize(rawParams[1]) > fromSize:
+		if type(params[1]) is int:
+			src = params[1] & srcMask
+		else:
+			src = f'({params[1]} & {srcMask})'
 	else:
-		fmt = '\n\t{dst} = {src} & 0x8000 ? {src} | 0xFFFF0000 : {src} & 0x7FFF;'
+		src = params[1]
+	signBit = 1 << (fromSize - 1)
+	extend = (0xFFFFFFFF << fromSize) & dstMask
 	prog.lastSize = params[0]
-	return fmt.format(src=params[1], dst=params[2])
+	if prog.paramSize(rawParams[2]) > params[0]:
+		return f'\n\t{params[2]} = ({params[2]} & ~{dstMask}) | ({src} & {signBit} ? {src} | {extend} : {src});'
+	else:
+		return f'\n\t{params[2]} = {src} & {signBit} ? {src} | {extend} : {src};'
 
 def _mulsCImpl(prog, params, rawParams, flagUpdates):
 	p0Size = prog.paramSize(rawParams[0])
