@@ -203,6 +203,17 @@ ifeq ($(CPU),i386)
 CPU:=i686
 endif
 endif
+ifeq ($(CPU),x86_64)
+CFLAGS+=-DX86_64 -m64
+LDFLAGS+=-m64
+else
+ifeq ($(CPU),i686)
+CFLAGS+=-DX86_32 -m32
+LDFLAGS+=-m32
+else
+NEW_CORE:=1
+endif
+endif
 
 TRANSOBJS=gen.o backend.o $(MEM) arena.o tern.o
 M68KOBJS=68kinst.o disasm.o
@@ -258,18 +269,6 @@ CFLAGS+= -DDISABLE_NUKLEAR
 else
 MAINOBJS+= $(NUKLEAROBJS)
 LDFLAGS+=$(EXTRA_NUKLEAR_LDFLAGS)
-endif
-
-ifeq ($(CPU),x86_64)
-CFLAGS+=-DX86_64 -m64
-LDFLAGS+=-m64
-else
-ifeq ($(CPU),i686)
-CFLAGS+=-DX86_32 -m32
-LDFLAGS+=-m32
-else
-$(error $(CPU) is not a supported architecture)
-endif
 endif
 
 ifdef NOZ80
