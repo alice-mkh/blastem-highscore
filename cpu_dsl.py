@@ -499,8 +499,6 @@ def _dispatchCImpl(prog, params):
 		table = 'main'
 	else:
 		table = params[1]
-	if table == 'main':
-		prog.mainDispatch.add(params[0])
 	if prog.dispatch == 'call':
 		return '\n\timpl_{tbl}[{op}](context, target_cycle);'.format(tbl = table, op = params[0])
 	elif prog.dispatch == 'goto':
@@ -2044,7 +2042,7 @@ class Program:
 			body.append('\nstatic void unimplemented({pre}context *context, uint32_t target_cycle)'.format(pre = self.prefix))
 			body.append('\n{')
 			if len(self.mainDispatch) == 1:
-				dispatch = list(self.mainDispatch)[0]
+				dispatch = self.resolveParam(list(self.mainDispatch)[0], None, {})
 				body.append(f'\n\tfatal_error("Unimplemented instruction: %X\\n", {dispatch});')
 			else:
 				body.append('\n\tfatal_error("Unimplemented instruction\\n");')
