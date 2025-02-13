@@ -1099,12 +1099,6 @@ static void run_sms(system_header *system)
 {
 	sms_context *sms = (sms_context *)system;
 	uint32_t target_cycle = sms->z80->Z80_CYCLE + 3420*16;
-	//TODO: PAL support
-	if (sms->vdp->type == VDP_GAMEGEAR) {
-		render_set_video_standard(VID_GAMEGEAR);
-	} else {
-		render_set_video_standard(VID_NTSC);
-	}
 	while (!sms->should_return)
 	{
 		if (system->delayed_load_slot) {
@@ -1214,6 +1208,12 @@ static void resume_sms(system_header *system)
 	sms_context *sms = (sms_context *)system;
 	if (sms->header.force_release || render_should_release_on_exit()) {
 		sms->header.force_release = 0;
+		//TODO: PAL support
+		if (sms->vdp->type == VDP_GAMEGEAR) {
+			render_set_video_standard(VID_GAMEGEAR);
+		} else {
+			render_set_video_standard(VID_NTSC);
+		}
 		bindings_reacquire_capture();
 		vdp_reacquire_framebuffer(sms->vdp);
 		render_resume_source(sms->psg->audio);
@@ -1239,6 +1239,12 @@ static void start_sms(system_header *system, char *statefile)
 #endif
 	}
 
+	//TODO: PAL support
+	if (sms->vdp->type == VDP_GAMEGEAR) {
+		render_set_video_standard(VID_GAMEGEAR);
+	} else {
+		render_set_video_standard(VID_NTSC);
+	}
 	run_sms(system);
 }
 

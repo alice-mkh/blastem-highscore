@@ -90,40 +90,42 @@ z80_run_op
 	dispatch scratch1
 
 z80_interrupt
-	if cycles >=U int_cycle
-	
+	if cycles >=U nmi_cycle
+		
+		nmi_cycle = 0xFFFFFFFF
 		iff1 = 0
-		iff2 = 0
-		cycles 6
+		local pch 8
+		pch = pc >> 8
+		meta high pch
+		meta low pc
+		z80_push
+		pc = 0x66
 		update_sync
-		
-		switch imode
-		case 0
-			dispatch int_value
-		
-		case 1
-			dispatch 0xFF
-		
-		case 2
-			pc = i << 8
-			pc |= int_value
-			#CD is call
-			dispatch 0xCD
-		end
-		
+	
 	else
-		if cycles >=U nmi_cycle
-		
-			nmi_cycle = 0xFFFFFFFF
-			iff1 = 0
-			local pch 8
-			pch = pc >> 8
-			meta high pch
-			meta low pc
-			z80_push
-			pc = 0x66
-			update_sync
-		
+		if iff1
+			if cycles >=U int_cycle
+			
+				iff1 = 0
+				iff2 = 0
+				cycles 6
+				update_sync
+				
+				switch imode
+				case 0
+					dispatch int_value
+				
+				case 1
+					dispatch 0xFF
+				
+				case 2
+					pc = i << 8
+					pc |= int_value
+					#CD is call
+					dispatch 0xCD
+				end
+				
+			end
 		end
 	end
 	

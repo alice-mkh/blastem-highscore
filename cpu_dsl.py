@@ -243,7 +243,7 @@ class Instruction(Block):
 			del self.locals[name]
 		
 		if prog.dispatch == 'call':
-			begin = '\nvoid ' + self.generateName(value) + '(' + prog.context_type + ' *context, uint32_t target_cycle)\n{'
+			begin = '\nstatic void ' + self.generateName(value) + '(' + prog.context_type + ' *context, uint32_t target_cycle)\n{'
 		elif prog.dispatch == 'goto':
 			begin = '\n' + self.generateName(value) + ': {'
 		else:

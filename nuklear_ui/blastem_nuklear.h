@@ -15,6 +15,9 @@ void show_pause_menu(void);
 void show_play_view(void);
 uint8_t is_nuklear_active(void);
 uint8_t is_nuklear_available(void);
+//ui_idle_loop calls these automatically, needed externally for browser target
+void ui_enter(void);
+void ui_exit(void);
 void ui_idle_loop(void);
 
 #endif //BLASTEM_NUKLEAR_H_

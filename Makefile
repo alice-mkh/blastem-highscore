@@ -9,6 +9,7 @@ SDL:=sdl2
 endif
 SDL_UPPER:=$(shell echo $(SDL) | tr '[a-z]' '[A-Z]')
 FIXUP:=true
+Z80_DISPATCH:=goto
 
 BUNDLED_LIBZ:=zlib/adler32.o zlib/compress.o zlib/crc32.o zlib/deflate.o zlib/gzclose.o zlib/gzlib.o zlib/gzread.o\
 	zlib/gzwrite.o zlib/infback.o zlib/inffast.o zlib/inflate.o zlib/inftrees.o zlib/trees.o zlib/uncompr.o zlib/zutil.o
@@ -62,6 +63,10 @@ SO:=dylib
 else
 SO:=so
 
+ifeq ($(CPU),wasm)
+USE_GLES:=1
+endif
+
 ifdef USE_FBDEV
 LIBS=alsa
 ifndef NOGL
@@ -76,6 +81,11 @@ else
 LIBS=$(SDL) glew gl
 endif #USE_GLES
 endif #USE_FBDEV
+ifeq ($(CPU),wasm)
+CHOOSER:=nuklear_ui/filechooser_null.o
+FONT:=nuklear_ui/font_web.o
+Z80_DISPATCH:=call
+else #CPU=wasm
 FONT:=nuklear_ui/font.o
 ifneq ($(MAKECMDGOALS),libblastem.$(SO))
 CHOOSER:=nuklear_ui/filechooser_gtk.o
@@ -87,6 +97,7 @@ CHOOSER:=nuklear_ui/filechooser_null.o
 endif
 endif
 endif #neq ($(MAKECMDGOALS),libblastem.$(SO))
+endif #CPU=wasm
 ifeq ($(GTKFLAGS),)
 else
 EXTRA_NUKLEAR_LDFLAGS:=-ldl
@@ -105,6 +116,12 @@ ifeq ($(OS),Darwin)
 #This should really be based on whether or not the C compiler is clang rather than based on the OS
 CFLAGS+= -Wno-logical-op-parentheses
 endif
+
+ifeq ($(CPU),wasm)
+CFLAGS+= --use-port=sdl2
+LDFLAGS+= --use-port=sdl2 --embed-file rom.db --embed-file default.cfg --embed-file systems.cfg --embed-file shaders/ --embed-file images/ --embed-file DroidSans.ttf --embed-file roms/
+EXE:=.html
+else #CPU=wasm
 
 ifdef PORTABLE
 ifdef USE_GLES
@@ -152,6 +169,7 @@ LDFLAGS+= -framework OpenGL -framework AppKit
 endif
 
 endif #PORTABLE
+endif #CPU=wasm
 endif #Windows
 
 ifndef OPT
@@ -372,8 +390,9 @@ vos_prog_info : vos_prog_info.o vos_program_module.o
 m68k.c : m68k.cpu cpu_dsl.py
 	./cpu_dsl.py -d call $< > $@
 
+.PRECIOUS: %.c
 %.c : %.cpu cpu_dsl.py
-	./cpu_dsl.py -d goto $< > $@
+	./cpu_dsl.py -d $(Z80_DISPATCH) $< > $@
 
 %.db.c : %.db
 	sed $< -e 's/"/\\"/g' -e 's/^\(.*\)$$/"\1\\n"/' -e'1s/^\(.*\)$$/const char $(shell echo $< | tr '.' '_')_data[] = \1/' -e '$$s/^\(.*\)$$/\1;/' > $@
