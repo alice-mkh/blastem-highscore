@@ -45,6 +45,6 @@ typedef struct {
 	wave_header   cassette_wave;
 } sms_context;
 
-sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t force_region);
+sms_context *alloc_configure_sms(system_media *media, system_type stype, uint32_t opts, uint8_t force_region);
 
 #endif //SMS_H_

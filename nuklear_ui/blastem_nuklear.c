@@ -22,7 +22,6 @@
 #include "../controller_info.h"
 #include "../bindings.h"
 #include "../mediaplayer.h"
-#include "../sms.h"
 
 static struct nk_context *context;
 static struct rawfb_context *fb_context;
@@ -2470,7 +2469,7 @@ void view_pause(struct nk_context *context)
 	};
 
 	if (nk_begin(context, "Main Menu", nk_rect(0, 0, render_width(), render_height()), 0)) {
-		if (current_system->type == SYSTEM_SMS && ((sms_context *)current_system)->i8255) {
+		if (current_system->type == SYSTEM_SC3000) {
 			menu(context, sizeof(sc3k_items)/sizeof(*sc3k_items), sc3k_items, exit_handler);
 		} else {
 			menu(context, sizeof(items)/sizeof(*items), items, exit_handler);
@@ -2485,7 +2484,9 @@ void view_menu(struct nk_context *context)
 		{"Load ROM", view_load},
 		{"Settings", view_settings},
 		{"About", view_about},
+#ifndef __EMSCRIPTEN__
 		{"Exit", NULL}
+#endif
 	};
 
 	if (nk_begin(context, "Main Menu", nk_rect(0, 0, render_width(), render_height()), 0)) {

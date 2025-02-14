@@ -431,10 +431,16 @@ int main(int argc, char ** argv)
 			case 'm':
 				i++;
 				if (i >= argc) {
-					fatal_error("-r must be followed by a machine type (sms, gen or jag)\n");
+					fatal_error("-r must be followed by a machine type (sms, gg, sg, sc, gen, pico, copera, jag or media)\n");
 				}
 				if (!strcmp("sms", argv[i])) {
 					stype = force_stype = SYSTEM_SMS;
+				} else if (!strcmp("gg", argv[i])) {
+					stype = force_stype = SYSTEM_GAME_GEAR;
+				} else if (!strcmp("sg", argv[i])) {
+					stype = force_stype = SYSTEM_SG1000;
+				} else if (!strcmp("sc", argv[i])) {
+					stype = force_stype = SYSTEM_SC3000;
 				} else if (!strcmp("gen", argv[i])) {
 					stype = force_stype = SYSTEM_GENESIS;
 				} else if (!strcmp("pico", argv[i])) {
@@ -480,10 +486,14 @@ int main(int argc, char ** argv)
 					"	-h          Print this help text\n"
 					"	-r (J|U|E)  Force region to Japan, US or Europe respectively\n"
 					"	-m MACHINE  Force emulated machine type to MACHINE. Valid values are:\n"
-					"                   sms   - Sega Master System/Mark III\n"
-					"                   gen   - Sega Genesis/Megadrive\n"
-					"                   pico  - Sega Pico\n"
-					"                   media - Media Player\n"
+					"                   sms    - Sega Master System/Mark III\n"
+					"                   gg     - Sega Game Gear\n"
+					"                   sg     - Sega SG-1000\n"
+					"                   sc     - Sega SC-3000\n"
+					"                   gen    - Sega Genesis/Megadrive\n"
+					"                   pico   - Sega Pico\n"
+					"                   copera - Yamaha Copera\n"
+					"                   media  - Media Player\n"
 					"	-f          Toggles fullscreen mode\n"
 					"	-g          Disable OpenGL rendering\n"
 					"	-s FILE     Load a GST format savestate from FILE\n"
