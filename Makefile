@@ -372,12 +372,9 @@ blastcpm : $(CPMOBJS:%.o=$(OBJDIR)/%.o)
 vos_prog_info : $(OBJDIR)/vos_prog_info.o $(OBJDIR)/vos_program_module.o
 	$(CC) -o $@ $^ $(OPT)
 
-m68k.c m68k.h &: m68k.cpu cpu_dsl.py
-	./cpu_dsl.py -d call $< > m68k.c
-
 .PRECIOUS: %.c
-%.c %.h &: %.cpu cpu_dsl.py
-	./cpu_dsl.py -d $(Z80_DISPATCH) $< > $(shell echo $@ | sed -E 's/\.[ch]$$/./')c
+%.c %.h : %.cpu cpu_dsl.py
+	./cpu_dsl.py -d $(shell echo $@ | sed -E -e "s/^z80.*$$/$(Z80_DISPATCH)/" -e '/^goto/! s/^.*$$/call/') $< > $(shell echo $@ | sed -E 's/\.[ch]$$/./')c
 
 %.db.c : %.db
 	sed $< -e 's/"/\\"/g' -e 's/^\(.*\)$$/"\1\\n"/' -e'1s/^\(.*\)$$/const char $(shell echo $< | tr '.' '_')_data[] = \1/' -e '$$s/^\(.*\)$$/\1;/' > $@
