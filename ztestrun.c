@@ -17,13 +17,13 @@
 #include <stddef.h>
 #include <stdarg.h>
 
-void fatal_error(char *format, ...)
+int headless = 1;
+void render_errorbox(char * title, char * buf)
 {
-	va_list args;
-	va_start(args, format);
-	vfprintf(stderr, format, args);
-	va_end(args);
-	exit(1);
+}
+
+void render_infobox(char * title, char * buf)
+{
 }
 
 uint8_t z80_ram[0x2000];
@@ -39,12 +39,12 @@ void * z80_unmapped_write(uint32_t location, void * context, uint8_t value)
 }
 
 const memmap_chunk z80_map[] = {
-	{ 0x0000, 0x4000,  0x1FFF, 0, 0, MMAP_READ | MMAP_WRITE | MMAP_CODE, z80_ram, NULL, NULL, NULL,              NULL },
-	{ 0x4000, 0x10000, 0xFFFF, 0, 0, 0,                                  NULL,    NULL, NULL, z80_unmapped_read, z80_unmapped_write}
+	{ 0x0000, 0x4000,  0x1FFF, .flags = MMAP_READ | MMAP_WRITE | MMAP_CODE, .buffer = z80_ram},
+	{ 0x4000, 0x10000, 0xFFFF, .read_8 = z80_unmapped_read, .write_8 = z80_unmapped_write}
 };
 
 const memmap_chunk port_map[] = {
-	{ 0x0000, 0x100, 0xFF, 0, 0, 0,                                  NULL,    NULL, NULL, z80_unmapped_read, z80_unmapped_write}
+	{ 0x0000, 0x100, 0xFF, .read_8 = z80_unmapped_read, .write_8 = z80_unmapped_write}
 };
 
 #ifndef NEW_CORE

@@ -1,6 +1,8 @@
 #ifndef JAGCPU_H_
 #define JAGCPU_H_
 
+#include "backend.h"
+
 enum {
 	JAG_ADD,
 	JAG_ADDC,

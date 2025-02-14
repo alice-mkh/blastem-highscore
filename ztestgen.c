@@ -21,7 +21,6 @@ extern z80inst z80_tbl_iy[256];
 extern z80inst z80_tbl_ix_bit[256];
 extern z80inst z80_tbl_iy_bit[256];
 extern char *z80_mnemonics[Z80_OTDR+1];
-extern char * z80_regs[Z80_USE_IMMED];
 #define PRE_IX  0xDD
 #define PRE_IY  0xFD
 #define LD_IR16 0x01
