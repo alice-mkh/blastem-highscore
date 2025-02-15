@@ -411,8 +411,8 @@ $(LIBOBJDIR)/%.o : %.m | $(LIBOBJDIR)
 
 %.bin : %.sz8
 	vasmz80_mot -Fbin -spaces -o $@ $<
-res.o : blastem.rc
-	$(WINDRES) blastem.rc res.o
+$(OBJDIR)/res.o : blastem.rc
+	$(WINDRES) $< $@
 
 arrow.tiles : arrow.png
 cursor.tiles : cursor.png
