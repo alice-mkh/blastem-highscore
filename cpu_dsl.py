@@ -351,6 +351,7 @@ class Op:
 				a = params[0]
 				b = params[1]
 			needsSizeAdjust = False
+			destSize = prog.paramSize(rawParams[2])
 			if len(params) > 3:
 				size = params[3]
 				if size == 0:
@@ -359,11 +360,12 @@ class Op:
 					size = 16
 				else:
 					size = 32
-				prog.lastSize = size
-				destSize = prog.paramSize(rawParams[2])
 				if destSize > size:
 					needsSizeAdjust = True
 					prog.sizeAdjust = size
+			else:
+				size = destSize
+			prog.lastSize = size
 			needsCarry = needsOflow = needsHalf = False
 			if flagUpdates:
 				for flag in flagUpdates:
@@ -376,8 +378,6 @@ class Op:
 						needsOflow = True
 			decl = ''
 			if needsCarry or needsOflow or needsHalf or (flagUpdates and needsSizeAdjust):
-				if len(params) <= 3:
-					size = prog.paramSize(rawParams[2])
 				if needsCarry and op != '>>':
 					size *= 2
 				decl,name = prog.getTemp(size)
@@ -412,6 +412,7 @@ class Op:
 			dst = params[1]
 			decl = ''
 			needsSizeAdjust = False
+			destSize = prog.paramSize(rawParams[1])
 			if len(params) > 2:
 				size = params[2]
 				if size == 0:
@@ -420,11 +421,12 @@ class Op:
 					size = 16
 				else:
 					size = 32
-				prog.lastSize = size
-				destSize = prog.paramSize(rawParams[1])
 				if destSize > size:
 					needsSizeAdjust = True
 					prog.sizeAdjust = size
+			else:
+				size = destSize
+			prog.lastSize = size
 			needsCarry = needsOflow = needsHalf = False
 			if op == '-':
 				if flagUpdates:
@@ -437,7 +439,6 @@ class Op:
 						elif calc == 'overflow':
 							needsOflow = True
 				if needsCarry or needsOflow or needsHalf or (flagUpdates and needsSizeAdjust):
-					size = prog.paramSize(rawParams[1])
 					decl,name = prog.getTemp(size)
 					dst = prog.carryFlowDst = name
 					prog.lastA = 0
@@ -784,12 +785,12 @@ def _asrCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	mask = 1 << (size - 1)
 	if needsCarry:
 		decl,name = prog.getTemp(size)
@@ -912,12 +913,12 @@ def _adcCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	needsCarry = needsOflow = needsHalf = False
 	if flagUpdates:
 		for flag in flagUpdates:
@@ -977,12 +978,12 @@ def _sbcCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	needsCarry = needsOflow = needsHalf = False
 	if flagUpdates:
 		for flag in flagUpdates:
@@ -1048,13 +1049,13 @@ def _rolCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			if needsCarry:
 				prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	rotMask = size - 1
 	if type(params[1]) is int:
 		b = params[1] & rotMask
@@ -1102,13 +1103,13 @@ def _rlcCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			if needsCarry:
 				prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	carryCheck = _getCarryCheck(prog)
 	if prog.paramSize(rawParams[0]) > size:
 		mask = (1 << size) - 1
@@ -1150,13 +1151,13 @@ def _rorCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			if needsCarry:
 				prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	rotMask = size - 1
 	if type(params[1]) is int:
 		b = params[1] & rotMask
@@ -1204,13 +1205,13 @@ def _rrcCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			if needsCarry:
 				prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	carryCheck = _getCarryCheck(prog)
 	if prog.paramSize(rawParams[0]) > size:
 		mask = (1 << size) - 1
