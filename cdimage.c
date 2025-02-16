@@ -340,7 +340,7 @@ uint8_t parse_cue(system_media *media)
 										if (wave.audio_format != 1 || wave.num_channels != 2 || wave.sample_rate != 44100 || wave.bits_per_sample != 16) {
 											warning("BlastEm only suports WAVE tracks in 16-bit stereo PCM format at 44100 hz, file %s does not match\n", fname);
 										}
-										extra_offset = wave.format_header.size + sizeof(wave.data_header) + sizeof(wave.chunk);
+										extra_offset = wave.data_offset;
 									} else {
 										fseek(f, 0, SEEK_SET);
 										flac = flac_file_from_file(f);
