@@ -2077,6 +2077,7 @@ static void start_genesis(system_header *system, char *statefile)
 		sync_components(gen->m68k, 0);
 		m68k_execute(gen->m68k, gen->m68k->target_cycle);
 	}
+	gen->m68k->should_return = 0;
 #endif
 	handle_reset_requests(gen);
 	return;
@@ -2099,7 +2100,15 @@ static void resume_genesis(system_header *system)
 		}
 		render_resume_source(gen->psg->audio);
 	}
+#ifdef NEW_CORE
+	while (!gen->m68k->should_return) {
+		sync_components(gen->m68k, 0);
+		m68k_execute(gen->m68k, gen->m68k->target_cycle);
+	}
+	gen->m68k->should_return = 0;
+#else
 	resume_68k(gen->m68k);
+#endif
 	handle_reset_requests(gen);
 }
 

@@ -32,6 +32,7 @@ typedef struct {
 	uint16_t       block_align;
 	uint16_t       bits_per_sample;
 	riff_sub_chunk data_header;
+	long           data_offset;
 } wave_header;
 
 #pragma pack(pop)

@@ -918,7 +918,6 @@ m68k_save_dst
 	ccr &= prefetch
 	scratch1 = prefetch >> 8
 	status &= scratch1
-	m68k_prefetch
 	check_user_mode_swap_ssp_usp
 	update_sync
 	cycles 12 #TODO: where do these occur relative to fetches
@@ -1443,8 +1442,59 @@ m68k_save_dst
 	invalid Z 3
 	local shift 8
 	and dregs.C 63 shift
-	lsr dregs.R shift dregs.R Z
-	update_flags XNZV0C
+	switch Z
+	case 2
+		if shift >=U 32
+			if shift = 32
+				lsr dregs.R 31 dregs.R Z
+				lsr dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsr dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 1
+		if shift >=U 16
+			if shift = 16
+				lsr dregs.R 15 dregs.R Z
+				lsr dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsr dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 0
+		if shift >=U 8
+			if shift = 8
+				lsr dregs.R 7 dregs.R Z
+				lsr dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsr dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	end
 	add shift shift shift
 	switch Z
 	case 2
@@ -1497,38 +1547,59 @@ m68k_save_dst
 1110CCC0ZZ100RRR asr_dn
 	invalid Z 3
 	local shift 32
-	local shift_cycles 32
 	and dregs.C 63 shift
-	shift_cycles = shift
-	if shift = 0
-		cmp 0 dregs.R Z
-		update_flags NZV0C0
-	else
-		switch Z
-		case 0
-			if shift >=U 9
-				shift = 8
-			end
-		case 1
-			if shift >=U 17
-				shift = 16
-			end
-		case 2
-			if shift >=U 33
-				shift = 32
-			end
-		end
-		asr dregs.R shift dregs.R Z
-		update_flags XNZV0C
-	end
-	shift_cycles += shift_cycles
 	switch Z
 	case 2
-		shift_cycles += 4
-	default
-		shift_cycles += 2
+		if shift >=U 32
+			asr dregs.R 31 dregs.R Z
+			asr dregs.R 1 dregs.R Z
+			update_flags NZV0
+			cflag = nflag
+			xflag = nflag
+		else
+			asr dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 1
+		if shift >=U 16
+			asr dregs.R 15 dregs.R Z
+			asr dregs.R 1 dregs.R Z
+			update_flags NZV0
+			cflag = nflag
+			xflag = nflag
+		else
+			asr dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 0
+		if shift >=U 8
+			asr dregs.R 7 dregs.R Z
+			asr dregs.R 1 dregs.R Z
+			update_flags NZV0
+			cflag = nflag
+			xflag = nflag
+		else
+			asr dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
 	end
-	cycles shift_cycles
+	shift += shift
+	switch Z
+	case 2
+		shift += 4
+	default
+		shift += 2
+	end
+	cycles shift
 	#TODO: should this happen before or after the majority of the shift?
 	m68k_prefetch
 
@@ -1574,8 +1645,59 @@ m68k_save_dst
 	invalid Z 3
 	local shift 8
 	and dregs.C 63 shift
-	lsl dregs.R shift dregs.R Z
-	update_flags XNZV0C
+	switch Z
+	case 2
+		if shift >=U 32
+			if shift = 32
+				lsl dregs.R 31 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 1
+		if shift >=U 16
+			if shift = 16
+				lsl dregs.R 15 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 0
+		if shift >=U 8
+			if shift = 8
+				lsl dregs.R 7 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	end
 	add shift shift shift
 	switch Z
 	case 2
@@ -1629,8 +1751,60 @@ m68k_save_dst
 	invalid Z 3
 	local shift 8
 	and dregs.C 63 shift
-	lsl dregs.R shift dregs.R Z
-	update_flags XNZV0C
+	#TODO: implement loops and do this a bit at a time to implement V flag
+	switch Z
+	case 2
+		if shift >=U 32
+			if shift = 32
+				lsl dregs.R 31 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XNZ1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 1
+		if shift >=U 16
+			if shift = 16
+				lsl dregs.R 15 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 0
+		if shift >=U 8
+			if shift = 8
+				lsl dregs.R 7 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	end
 	add shift shift shift
 	switch Z
 	case 2
@@ -2777,6 +2951,7 @@ m68k_movem_mem_to_areg
 	m68k_prefetch
 
 0111RRR0IIIIIIII moveq
+	nospecialize I
 	local tmp 32
 	sext 16 I tmp
 	sext 32 tmp dregs.R
@@ -2803,6 +2978,7 @@ m68k_movem_mem_to_areg
 	
 	
 01100001DDDDDDDD bsr
+	nospecialize D
 	#mid-instruction timing isn't quite right
 	#becuase I'm only emulating a 1-word prefetch buffer instead of 2
 	local offset 32
@@ -2926,6 +3102,7 @@ m68k_check_cond
 	m68k_prefetch
 
 0110CCCCDDDDDDDD bcc
+	nospecialize D
 	#mid-instruction timing isn't quite right
 	#becuase I'm only emulating a 1-word prefetch buffer instead of 2
 	local offset 32

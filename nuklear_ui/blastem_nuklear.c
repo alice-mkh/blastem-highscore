@@ -22,7 +22,6 @@
 #include "../controller_info.h"
 #include "../bindings.h"
 #include "../mediaplayer.h"
-#include "../sms.h"
 
 static struct nk_context *context;
 static struct rawfb_context *fb_context;
@@ -2453,7 +2452,9 @@ void view_pause(struct nk_context *context)
 		{"Save State", view_save_state},
 		{"Load State", view_load_state},
 		{"Settings", view_settings},
+#ifndef __EMSCRIPTEN__
 		{"Exit", NULL}
+#endif
 	};
 	static menu_item sc3k_items[] = {
 		{"Resume", view_play},
@@ -2462,11 +2463,13 @@ void view_pause(struct nk_context *context)
 		{"Save State", view_save_state},
 		{"Load State", view_load_state},
 		{"Settings", view_settings},
+#ifndef __EMSCRIPTEN__
 		{"Exit", NULL}
+#endif
 	};
 
 	if (nk_begin(context, "Main Menu", nk_rect(0, 0, render_width(), render_height()), 0)) {
-		if (current_system->type == SYSTEM_SMS && ((sms_context *)current_system)->i8255) {
+		if (current_system->type == SYSTEM_SC3000) {
 			menu(context, sizeof(sc3k_items)/sizeof(*sc3k_items), sc3k_items, exit_handler);
 		} else {
 			menu(context, sizeof(items)/sizeof(*items), items, exit_handler);
@@ -2481,7 +2484,9 @@ void view_menu(struct nk_context *context)
 		{"Load ROM", view_load},
 		{"Settings", view_settings},
 		{"About", view_about},
+#ifndef __EMSCRIPTEN__
 		{"Exit", NULL}
+#endif
 	};
 
 	if (nk_begin(context, "Main Menu", nk_rect(0, 0, render_width(), render_height()), 0)) {
@@ -2511,9 +2516,25 @@ void blastem_nuklear_render(void)
 	}
 }
 
-void ui_idle_loop(void)
+void ui_enter(void)
 {
 	render_enable_gamepad_events(1);
+}
+
+void ui_exit(void)
+{
+	if (config_dirty) {
+		apply_updated_config();
+		persist_config(config);
+		config_dirty = 0;
+	}
+	render_enable_gamepad_events(0);
+}
+
+void ui_idle_loop(void)
+{
+#ifndef __EMSCRIPTEN__
+	ui_enter();
 	const uint32_t MIN_UI_DELAY = 15;
 	static uint32_t last;
 	while (current_view != view_play)
@@ -2525,12 +2546,8 @@ void ui_idle_loop(void)
 		last = current;
 		render_update_display();
 	}
-	if (config_dirty) {
-		apply_updated_config();
-		persist_config(config);
-		config_dirty = 0;
-	}
-	render_enable_gamepad_events(0);
+	ui_exit();
+#endif
 }
 static void handle_event(SDL_Event *event)
 {

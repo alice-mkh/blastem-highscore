@@ -30,6 +30,9 @@
 #ifndef DISABLE_NUKLEAR
 #include "nuklear_ui/blastem_nuklear.h"
 #endif
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #include "version.inc"
 
@@ -271,6 +274,64 @@ void init_system_with_media(char *path, system_type force_stype)
 	update_title(game_system->info.name);
 }
 
+static uint8_t menu;
+static uint8_t use_nuklear;
+#ifdef __EMSCRIPTEN__
+void handle_frame_presented(void)
+{
+	if (current_system) {
+		current_system->request_exit(current_system);
+	}
+}
+
+void browser_main_loop(void)
+{
+	static uint8_t system_started;
+#ifndef DISABLE_NUKLEAR
+	static uint8_t was_menu;
+	if (use_nuklear) {
+		if (menu && !was_menu) {
+			ui_enter();
+		} else if (!menu && was_menu) {
+			ui_exit();
+		}
+		if (menu) {
+			render_update_display();
+		}
+	}
+#endif
+	if (!current_system && game_system) {
+		current_system = game_system;
+		menu = 0;
+#ifndef DISABLE_NUKLEAR
+		was_menu = 0;
+		ui_exit();
+#endif
+	}
+	if (current_system) {
+		if (current_system->next_rom) {
+			char *next_rom = current_system->next_rom;
+			current_system->next_rom = NULL;
+			init_system_with_media(next_rom, 0);
+			system_started = 0;
+			menu = 0;
+			current_system = game_system;
+		} else if (!menu) {
+			if (system_started) {
+				current_system->resume_context(current_system);
+			} else {
+				system_started = 1;
+				current_system->start_context(current_system, NULL);
+			}
+			if (current_system->force_release) {
+				menu = 1;
+			}
+		}
+	}
+	
+}
+#endif
+
 char *parse_addr_port(char *arg)
 {
 	while (*arg && *arg != ':') {
@@ -370,10 +431,16 @@ int main(int argc, char ** argv)
 			case 'm':
 				i++;
 				if (i >= argc) {
-					fatal_error("-r must be followed by a machine type (sms, gen or jag)\n");
+					fatal_error("-r must be followed by a machine type (sms, gg, sg, sc, gen, pico, copera, jag or media)\n");
 				}
 				if (!strcmp("sms", argv[i])) {
 					stype = force_stype = SYSTEM_SMS;
+				} else if (!strcmp("gg", argv[i])) {
+					stype = force_stype = SYSTEM_GAME_GEAR;
+				} else if (!strcmp("sg", argv[i])) {
+					stype = force_stype = SYSTEM_SG1000;
+				} else if (!strcmp("sc", argv[i])) {
+					stype = force_stype = SYSTEM_SC3000;
 				} else if (!strcmp("gen", argv[i])) {
 					stype = force_stype = SYSTEM_GENESIS;
 				} else if (!strcmp("pico", argv[i])) {
@@ -419,10 +486,14 @@ int main(int argc, char ** argv)
 					"	-h          Print this help text\n"
 					"	-r (J|U|E)  Force region to Japan, US or Europe respectively\n"
 					"	-m MACHINE  Force emulated machine type to MACHINE. Valid values are:\n"
-					"                   sms   - Sega Master System/Mark III\n"
-					"                   gen   - Sega Genesis/Megadrive\n"
-					"                   pico  - Sega Pico\n"
-					"                   media - Media Player\n"
+					"                   sms    - Sega Master System/Mark III\n"
+					"                   gg     - Sega Game Gear\n"
+					"                   sg     - Sega SG-1000\n"
+					"                   sc     - Sega SC-3000\n"
+					"                   gen    - Sega Genesis/Megadrive\n"
+					"                   pico   - Sega Pico\n"
+					"                   copera - Yamaha Copera\n"
+					"                   media  - Media Player\n"
 					"	-f          Toggles fullscreen mode\n"
 					"	-g          Disable OpenGL rendering\n"
 					"	-s FILE     Load a GST format savestate from FILE\n"
@@ -478,6 +549,12 @@ int main(int argc, char ** argv)
 	if (config_fullscreen && !strcmp("on", config_fullscreen)) {
 		fullscreen = !fullscreen;
 	}
+#ifdef __EMSCRIPTEN__
+	config = tern_insert_path(config, "system\0sync_source\0", (tern_val){.ptrval = strdup("video")}, TVAL_PTR);
+	config = tern_insert_path(config, "ui\0initial_path\0", (tern_val){.ptrval = strdup("/roms")}, TVAL_PTR);
+	render_set_frame_presented_fun(handle_frame_presented);
+	emscripten_set_main_loop(browser_main_loop, 0, 0);
+#endif
 	if (!headless) {
 		if (reader_addr) {
 			render_set_external_sync(1);
@@ -486,9 +563,8 @@ int main(int argc, char ** argv)
 		render_set_drag_drop_handler(on_drag_drop);
 	}
 	set_bindings();
+	menu = !loaded;
 
-	uint8_t menu = !loaded;
-	uint8_t use_nuklear = 0;
 #ifndef DISABLE_NUKLEAR
 	use_nuklear = !headless && is_nuklear_available();
 #endif
@@ -554,8 +630,10 @@ int main(int argc, char ** argv)
 #ifndef DISABLE_NUKLEAR
 	if (use_nuklear) {
 		blastem_nuklear_init(!menu);
+#ifndef __EMSCRIPTEN__
 		current_system = game_system;
 		menu = 0;
+#endif
 	}
 #endif
 
@@ -574,6 +652,7 @@ int main(int argc, char ** argv)
 
 	current_system->debugger_type = dtype;
 	current_system->enter_debugger = start_in_debugger && menu == debug_target;
+#ifndef __EMSCRIPTEN__
 	current_system->start_context(current_system,  menu ? NULL : statefile);
 	render_video_loop();
 	for(;;)
@@ -614,6 +693,7 @@ int main(int argc, char ** argv)
 			break;
 		}
 	}
+#endif //__EMSCRIPTEN__
 
 	return 0;
 }

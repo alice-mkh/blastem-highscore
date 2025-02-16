@@ -1099,12 +1099,6 @@ static void run_sms(system_header *system)
 {
 	sms_context *sms = (sms_context *)system;
 	uint32_t target_cycle = sms->z80->Z80_CYCLE + 3420*16;
-	//TODO: PAL support
-	if (sms->vdp->type == VDP_GAMEGEAR) {
-		render_set_video_standard(VID_GAMEGEAR);
-	} else {
-		render_set_video_standard(VID_NTSC);
-	}
 	while (!sms->should_return)
 	{
 		if (system->delayed_load_slot) {
@@ -1214,6 +1208,12 @@ static void resume_sms(system_header *system)
 	sms_context *sms = (sms_context *)system;
 	if (sms->header.force_release || render_should_release_on_exit()) {
 		sms->header.force_release = 0;
+		//TODO: PAL support
+		if (sms->vdp->type == VDP_GAMEGEAR) {
+			render_set_video_standard(VID_GAMEGEAR);
+		} else {
+			render_set_video_standard(VID_NTSC);
+		}
 		bindings_reacquire_capture();
 		vdp_reacquire_framebuffer(sms->vdp);
 		render_resume_source(sms->psg->audio);
@@ -1239,6 +1239,12 @@ static void start_sms(system_header *system, char *statefile)
 #endif
 	}
 
+	//TODO: PAL support
+	if (sms->vdp->type == VDP_GAMEGEAR) {
+		render_set_video_standard(VID_GAMEGEAR);
+	} else {
+		render_set_video_standard(VID_NTSC);
+	}
 	run_sms(system);
 }
 
@@ -1524,7 +1530,7 @@ static void lockon_change(system_header *system, system_media *media)
 	load_cassette(sms, media);
 }
 
-sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t force_region)
+sms_context *alloc_configure_sms(system_media *media, system_type stype, uint32_t opts, uint8_t force_region)
 {
 	sms_context *sms = calloc(1, sizeof(sms_context));
 	tern_node *rom_db = get_rom_db();
@@ -1535,19 +1541,26 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	uint32_t rom_size = sms->header.info.rom_size;
 	z80_options *zopts = malloc(sizeof(z80_options));
 	tern_node *model_def;
-	uint8_t is_gamegear = !strcasecmp(media->extension, "gg");
-	uint8_t is_sc3000 = !strcasecmp(media->extension, "sc");
-	if (is_gamegear) {
+	uint8_t vdp_type = VDP_SMS2;
+	switch (stype)
+	{
+	case SYSTEM_GAME_GEAR:
 		model_def = tern_find_node(get_systems_config(), "gg");
-	} else if (!strcasecmp(media->extension, "sg")) {
+		vdp_type = VDP_GAMEGEAR;
+		break;
+	case SYSTEM_SG1000:
 		model_def = tern_find_node(get_systems_config(), "sg1000");
-	} else if (is_sc3000) {
+		vdp_type = VDP_TMS9918A;
+		break;
+	case SYSTEM_SC3000:
 		model_def = tern_find_node(get_systems_config(), "sc3000");
-	} else {
+		vdp_type = VDP_TMS9918A;
+		break;
+	default:
 		model_def = get_model(config, SYSTEM_SMS);
+		break;
 	}
 	char *vdp_str = tern_find_ptr(model_def, "vdp");
-	uint8_t vdp_type = is_gamegear ? VDP_GAMEGEAR : is_sc3000 ? VDP_TMS9918A : VDP_SMS2;
 	if (vdp_str) {
 		if (!strcmp(vdp_str, "sms1")) {
 			vdp_type = VDP_SMS;
@@ -1570,6 +1583,7 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 			chunk->buffer = sms->ram + ((chunk->start - 0xC000) & 0x1FFF);
 		}
 	}
+	uint8_t is_gamegear = stype == SYSTEM_GAME_GEAR, is_sc3000 = stype == SYSTEM_SC3000;
 	char *io_type = tern_find_ptr(model_def, "io");
 	if (io_type) {
 		if (!strcmp(io_type, "gamegear")) {
@@ -1666,7 +1680,7 @@ sms_context *alloc_configure_sms(system_media *media, uint32_t opts, uint8_t for
 	sms->header.stop_vgm_log = stop_vgm_log;
 	sms->header.toggle_debug_view = toggle_debug_view;
 	sms->header.cassette_action = cassette_action;
-	sms->header.type = SYSTEM_SMS;
+	sms->header.type = stype;
 	if (is_sc3000) {
 		sms->header.lockon_change = lockon_change;
 	}

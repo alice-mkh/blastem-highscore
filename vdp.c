@@ -2587,8 +2587,106 @@ static void sprite_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *contex
 {
 }
 
+uint32_t tms_map_color(vdp_context *context, uint8_t color)
+{
+	if (context->type == VDP_GAMEGEAR) {
+		//Game Gear uses CRAM entries 16-31 for TMS9918A modes
+		return context->colors[color + 16 + MODE4_OFFSET];
+	} else {
+		color <<= 1;
+		color = (color & 0xE) | (color << 1 & 0x20);
+		return context->color_map[color | FBUF_TMS];
+	}
+}
+
 static void plane_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
 {
+	uint16_t table_address = context->regs[REG_SCROLL_A] << 10 & 0x3C00;
+	uint16_t color_address = context->regs[REG_COLOR_TABLE] << 6;
+	uint16_t pattern_address = context->regs[REG_PATTERN_GEN] << 11 & 0x3800;
+	uint16_t upper_vcounter_mask;
+	uint16_t upper_vcounter_pmask;
+	uint16_t pattern_name_mask;
+	if (context->type > VDP_SMS2) {
+		//SMS1 and TMS9918A
+		upper_vcounter_mask = color_address & 0x1800;
+		upper_vcounter_pmask = pattern_address & 0x1800;
+		pattern_name_mask = (color_address & 0x07C0) | 0x0038;
+	} else {
+		//SMS2 and Game Gear
+		upper_vcounter_mask = 0x1800;
+		upper_vcounter_pmask = 0x1800;
+		pattern_name_mask = 0x07F8;
+	}
+	uint32_t cols, pixels;
+	if (context->regs[REG_MODE_2] & BIT_M1) {
+		//Text mode
+		cols = 40;
+		pixels = 12;
+	} else {
+		//Graphics/Multicolor
+		cols = 32;
+		pixels = 16;
+	}
+	uint32_t fg, bg;
+	if (context->regs[REG_MODE_2] & BIT_M1) {
+		//Text mode uses TC and BD colors
+		fg = tms_map_color(context, context->regs[REG_BG_COLOR] >> 4);
+		bg = tms_map_color(context, context->regs[REG_BG_COLOR] & 0xF);
+	}
+	for (uint32_t row = 0; row < 24; row++)
+	{
+		uint32_t *colfb = fb;
+		for (uint32_t col = 0; col < cols; col++)
+		{
+			uint32_t *linefb = colfb;
+			uint8_t pattern = context->vdpmem[mode4_address_map[table_address] ^ 1];
+			uint16_t caddress = color_address;
+			uint16_t paddress = pattern_address;
+			if (context->regs[REG_MODE_2] & BIT_M2) {
+			} else {
+				if (context->regs[REG_MODE_1] & BIT_M3) {
+					//Graphics II
+					caddress &= 0x2000;
+					paddress &= 0x2000;
+					caddress |= (row * 8) << 5 & upper_vcounter_mask;
+					caddress |= pattern << 3 & pattern_name_mask;
+					paddress |= (row * 8) << 5 & upper_vcounter_pmask;
+				} else {
+					caddress |= pattern >> 3;
+				}
+				paddress |= pattern << 3 & 0x7F8;
+				for (uint32_t y = 0; y < 16; y++)
+				{
+					uint8_t bits = context->vdpmem[mode4_address_map[paddress] ^ 1];
+					if (!(context->regs[REG_MODE_2] & BIT_M1)) {
+						uint8_t colors = context->vdpmem[mode4_address_map[caddress] ^ 1];
+						fg = tms_map_color(context, colors >> 4);
+						bg = tms_map_color(context, colors & 0xF);
+					}
+					
+					uint32_t *curfb = linefb;
+					for (uint32_t x = 0; x < pixels; x++)
+					{
+						*(curfb++) = (bits & 0x80) ? fg : bg;
+						if (x & 1) {
+							bits <<= 1;
+						}
+					}
+					linefb += pitch / sizeof(uint32_t);
+					if (y & 1) {
+						if (context->regs[REG_MODE_1] & BIT_M3) {
+							caddress++;
+						}
+						paddress++;
+					}
+				}
+			}
+			table_address++;
+			colfb += pixels;
+		}
+		fb += 16 * pitch / sizeof(uint32_t);
+	}
 }
 
 static void sprite_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
@@ -4231,59 +4329,33 @@ static void tms_composite(vdp_context *context)
 		tms_sprite_clock(context, 1);
 		return;
 	}
+	uint8_t fg,bg;
+	if (context->regs[REG_MODE_2] & BIT_M1) {
+		//Text mode uses TC and BD colors
+		fg = context->regs[REG_BG_COLOR] >> 4;
+		bg = context->regs[REG_BG_COLOR] & 0xF;
+	} else {
+		fg = context->tmp_buf_b[0] >> 4;
+		bg = context->tmp_buf_b[0] & 0xF;
+		if (!bg) {
+			bg = context->regs[REG_BG_COLOR] & 0xF;
+		}
+	}
 	uint8_t pattern = context->tmp_buf_a[0] & 0x80;
 	context->tmp_buf_a[0] <<= 1;
 	if (!color) {
-		uint8_t fg,bg;
-		if (context->regs[REG_MODE_2] & BIT_M1) {
-			//Text mode uses TC and BD colors
-			fg = context->regs[REG_BG_COLOR] >> 4;
-			bg = context->regs[REG_BG_COLOR] & 0xF;
-		} else {
-			fg = context->tmp_buf_b[0] >> 4;
-			bg = context->tmp_buf_b[0] & 0xF;
-			if (!bg) {
-				bg = context->regs[REG_BG_COLOR] & 0xF;
-			}
-		}
 		color = pattern ? fg : bg;
 	}
 	//TODO: composite debug output
-	if (context->type == VDP_GAMEGEAR) {
-		//Game Gear uses CRAM entries 16-31 for TMS9918A modes
-		context->output[context->hslot * 2 - 8 + BORDER_LEFT] = context->colors[color + 16 + MODE4_OFFSET];
-	} else {
-		color <<= 1;
-		color = (color & 0xE) | (color << 1 & 0x20);
-		context->output[context->hslot * 2 - 8 + BORDER_LEFT] = context->color_map[color | FBUF_TMS];
-	}
+	context->output[context->hslot * 2 - 8 + BORDER_LEFT] = tms_map_color(context, color);
 	color = tms_sprite_clock(context, 1);
 	pattern = context->tmp_buf_a[0] & 0x80;
 	context->tmp_buf_a[0] <<= 1;
 	if (!color) {
-		uint8_t fg,bg;
-		if (context->regs[REG_MODE_2] & BIT_M1) {
-			//Text mode uses TC and BD colors
-			fg = context->regs[REG_BG_COLOR] >> 4;
-			bg = context->regs[REG_BG_COLOR] & 0xF;
-		} else {
-			fg = context->tmp_buf_b[0] >> 4;
-			bg = context->tmp_buf_b[0] & 0xF;
-			if (!bg) {
-				bg = context->regs[REG_BG_COLOR] & 0xF;
-			}
-		}
 		color = pattern ? fg : bg;
 	}
 	//TODO: composite debug output
-	if (context->type == VDP_GAMEGEAR) {
-		//Game Gear uses CRAM entries 16-31 for TMS9918A modes
-		context->output[context->hslot * 2 - 7 + BORDER_LEFT] = context->colors[color + 16 + MODE4_OFFSET];
-	} else {
-		color <<= 1;
-		color = (color & 0xE) | (color << 1 & 0x20);
-		context->output[context->hslot * 2 - 7 + BORDER_LEFT] = context->color_map[color | FBUF_TMS];
-	}
+	context->output[context->hslot * 2 - 7 + BORDER_LEFT] = tms_map_color(context, color);
 }
 
 #define TMS_OUTPUT(slot) if ((slot) < 4 || (slot) > (256 + BORDER_LEFT - 8) / 2) { tms_border(context); } else { tms_composite(context); }

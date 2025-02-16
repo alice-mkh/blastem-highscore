@@ -107,7 +107,11 @@ uint8_t render_is_audio_sync(void)
 
 uint8_t render_should_release_on_exit(void)
 {
+#ifdef __EMSCRIPTEN__
+	return 0;
+#else
 	return sync_src != SYNC_AUDIO_THREAD;
+#endif
 }
 
 void render_buffer_consumed(audio_source *src)
@@ -1271,7 +1275,11 @@ void render_init(int width, int height, char * title, uint8_t fullscreen)
 	SDL_DisplayMode mode;
 	//TODO: Explicit multiple monitor support
 	SDL_GetCurrentDisplayMode(0, &mode);
+#ifdef __EMSCRIPTEN__
+	display_hz = 60; //TODO: FIXME
+#else
 	display_hz = mode.refresh_rate;
+#endif
 
 	if (fullscreen) {
 		//the SDL2 migration guide suggests setting width and height to 0 when using SDL_WINDOW_FULLSCREEN_DESKTOP
@@ -1509,10 +1517,12 @@ void render_save_video(char *path)
 	free(path);
 }
 
+#ifndef __EMSCRIPTEN__
 void GLAPIENTRY gl_message_callback(GLenum source, GLenum type, GLenum id, GLenum severity, GLsizei length, const GLchar *message, const void *user)
 {
 	fprintf(stderr, "GL Message: %d, %d, %d - %s\n", source, type, severity, message);
 }
+#endif
 
 uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, window_close_handler close_handler)
 {
@@ -1553,10 +1563,12 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 	if (render_gl) {
 		extras[win_idx].gl_context = SDL_GL_CreateContext(extras[win_idx].win);
 		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
+#ifndef __EMSCRIPTEN__
 		glEnable(GL_DEBUG_OUTPUT);
 		if (glDebugMessageCallback) {
 			glDebugMessageCallback(gl_message_callback, NULL);
 		}
+#endif
 		glGenTextures(2, extras[win_idx].gl_texture);
 		for (int i = 0; i < 2; i++)
 		{
@@ -2256,6 +2268,12 @@ void render_set_ui_render_fun(ui_render_fun fun)
 	render_ui = fun;
 }
 
+static ui_render_fun frame_presented;
+void render_set_frame_presented_fun(ui_render_fun fun)
+{
+	frame_presented = fun;
+}
+
 void render_update_display()
 {
 #ifndef DISABLE_OPENGL
@@ -2328,6 +2346,9 @@ void render_update_display()
 		process_events();
 	}
 	events_processed = 0;
+	if (frame_presented) {
+		frame_presented();
+	}
 }
 
 uint32_t render_emulated_width()

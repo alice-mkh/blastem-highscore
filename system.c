@@ -286,7 +286,7 @@ system_type detect_system_type(system_media *media)
 		|| safe_cmp("TMR SEGA", 0x3FF0, media->buffer, media->size)
 		|| safe_cmp("TMR SEGA", 0x7FF0, media->buffer, media->size)
 	) {
-		return SYSTEM_SMS;
+		return strcmp("gg", media->extension) ? SYSTEM_SMS : SYSTEM_GAME_GEAR;
 	}
 	if (media->size > 400) {
 		uint8_t *buffer = media->buffer;
@@ -333,9 +333,19 @@ system_type detect_system_type(system_media *media)
 		if (!strcmp("md", media->extension) || !strcmp("gen", media->extension)) {
 			return SYSTEM_GENESIS;
 		}
-		if (!strcmp("sms", media->extension) || !strcmp("sg", media->extension) || !strcmp("gg", media->extension)
-			|| !strcmp("sc", media->extension) || !strcmp("sf7", media->extension)) {
+		if (!strcmp("sms", media->extension)) {
 			return SYSTEM_SMS;
+		}
+		if (!strcmp("gg", media->extension)) {
+			return SYSTEM_GAME_GEAR;
+		}
+		if (!strcmp("sg", media->extension) || !strcmp("sg1", media->extension)) {
+			return SYSTEM_SG1000;
+		}
+		if (!strcmp("sc", media->extension) || !strcmp("sf7", media->extension) ||
+			!strcmp("sc3", media->extension)
+		) {
+			return SYSTEM_SC3000;
 		}
 		if (!strcmp("j64", media->extension)) {
 			return SYSTEM_JAGUAR;
@@ -375,7 +385,10 @@ system_header *alloc_config_system(system_type stype, system_media *media, uint3
 		return &(alloc_config_genesis_cdboot(media, opts, force_region))->header;
 #ifndef NO_Z80
 	case SYSTEM_SMS:
-		return &(alloc_configure_sms(media, opts, force_region))->header;
+	case SYSTEM_GAME_GEAR:
+	case SYSTEM_SG1000:
+	case SYSTEM_SC3000:
+		return &(alloc_configure_sms(media, stype, opts, force_region))->header;
 	case SYSTEM_COLECOVISION:
 		return &(alloc_configure_coleco(media))->header;
 #endif

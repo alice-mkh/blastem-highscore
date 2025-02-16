@@ -88,6 +88,10 @@ class Block:
 			else:
 				flagUpdates = None
 			oplist[i].generate(prog, self, fieldVals, output, otype, flagUpdates)
+	
+	def processDispatch(self, prog):
+		for op in self.implementation:
+			op.processDispatch(prog)
 		
 	def resolveLocal(self, name):
 		return None
@@ -111,6 +115,7 @@ class Instruction(Block):
 		self.invalidFieldValues = {}
 		self.invalidCombos = []
 		self.newLocals = []
+		self.noSpecialize = set()
 		for field in fields:
 			self.varyingBits += fields[field][1]
 	
@@ -131,6 +136,9 @@ class Instruction(Block):
 					value = int(op.params[i+1])
 					vmap[name] = value
 				self.invalidCombos.append(vmap)
+		elif op.op == 'nospecialize':
+			for name in op.params:
+				self.noSpecialize.add(name)
 		else:
 			self.implementation.append(op)
 			
@@ -200,6 +208,8 @@ class Instruction(Block):
 	
 	def generateName(self, value):
 		fieldVals,fieldBits = self.getFieldVals(value)
+		for name in self.noSpecialize:
+			del fieldVals[name]
 		names = list(fieldVals.keys())
 		names.sort()
 		funName = self.name
@@ -216,10 +226,24 @@ class Instruction(Block):
 			output.append('\n\tuint{sz}_t {name};'.format(sz=self.locals[var], name=var))
 		self.newLocals = []
 		fieldVals,_ = self.getFieldVals(value)
+		for name in self.noSpecialize:
+			del fieldVals[name]
+			self.locals[name] = prog.opsize
+			if len(prog.mainDispatch) != 1:
+				raise Exception('nospecialize requires exactly 1 field used for main table dispatch')
+			shift,bits = self.fields[name]
+			mask = (1 << bits) - 1
+			opfield = list(prog.mainDispatch)[0]
+			if shift:
+				output.append(f'\n\tuint{prog.opsize}_t {name} = context->{opfield} >> {shift} & {mask};')
+			else:
+				output.append(f'\n\tuint{prog.opsize}_t {name} = context->{opfield} & {mask};')
 		self.processOps(prog, fieldVals, output, otype, self.implementation)
+		for name in self.noSpecialize:
+			del self.locals[name]
 		
 		if prog.dispatch == 'call':
-			begin = '\nvoid ' + self.generateName(value) + '(' + prog.context_type + ' *context, uint32_t target_cycle)\n{'
+			begin = '\nstatic void ' + self.generateName(value) + '(' + prog.context_type + ' *context, uint32_t target_cycle)\n{'
 		elif prog.dispatch == 'goto':
 			begin = '\n' + self.generateName(value) + ': {'
 		else:
@@ -327,6 +351,7 @@ class Op:
 				a = params[0]
 				b = params[1]
 			needsSizeAdjust = False
+			destSize = prog.paramSize(rawParams[2])
 			if len(params) > 3:
 				size = params[3]
 				if size == 0:
@@ -335,11 +360,12 @@ class Op:
 					size = 16
 				else:
 					size = 32
-				prog.lastSize = size
-				destSize = prog.paramSize(rawParams[2])
 				if destSize > size:
 					needsSizeAdjust = True
 					prog.sizeAdjust = size
+			else:
+				size = destSize
+			prog.lastSize = size
 			needsCarry = needsOflow = needsHalf = False
 			if flagUpdates:
 				for flag in flagUpdates:
@@ -352,8 +378,6 @@ class Op:
 						needsOflow = True
 			decl = ''
 			if needsCarry or needsOflow or needsHalf or (flagUpdates and needsSizeAdjust):
-				if len(params) <= 3:
-					size = prog.paramSize(rawParams[2])
 				if needsCarry and op != '>>':
 					size *= 2
 				decl,name = prog.getTemp(size)
@@ -388,6 +412,7 @@ class Op:
 			dst = params[1]
 			decl = ''
 			needsSizeAdjust = False
+			destSize = prog.paramSize(rawParams[1])
 			if len(params) > 2:
 				size = params[2]
 				if size == 0:
@@ -396,11 +421,12 @@ class Op:
 					size = 16
 				else:
 					size = 32
-				prog.lastSize = size
-				destSize = prog.paramSize(rawParams[1])
 				if destSize > size:
 					needsSizeAdjust = True
 					prog.sizeAdjust = size
+			else:
+				size = destSize
+			prog.lastSize = size
 			needsCarry = needsOflow = needsHalf = False
 			if op == '-':
 				if flagUpdates:
@@ -413,7 +439,6 @@ class Op:
 						elif calc == 'overflow':
 							needsOflow = True
 				if needsCarry or needsOflow or needsHalf or (flagUpdates and needsSizeAdjust):
-					size = prog.paramSize(rawParams[1])
 					decl,name = prog.getTemp(size)
 					dst = prog.carryFlowDst = name
 					prog.lastA = 0
@@ -475,8 +500,6 @@ def _dispatchCImpl(prog, params):
 		table = 'main'
 	else:
 		table = params[1]
-	if table == 'main':
-		prog.mainDispatch.add(params[0])
 	if prog.dispatch == 'call':
 		return '\n\timpl_{tbl}[{op}](context, target_cycle);'.format(tbl = table, op = params[0])
 	elif prog.dispatch == 'goto':
@@ -519,11 +542,13 @@ def _updateFlagsCImpl(prog, params, rawParams):
 			if calc == 'sign':
 				resultBit = prog.getLastSize() - 1
 			elif calc == 'carry':
-				if prog.lastOp.op in ('asr', 'lsr', 'rrc'):
+				if prog.lastOp.op in ('asr', 'lsr', 'rrc', 'rlc'):
 					if type(prog.lastB) is int:
 						if prog.lastB == 0:
 							explicit[flag] = 0
 							continue
+						elif prog.lastOp.op == 'rlc':
+							resultBit = prog.getLastSize() - prog.lastB
 						else:
 							resultBit = prog.lastB - 1
 					else:
@@ -531,23 +556,12 @@ def _updateFlagsCImpl(prog, params, rawParams):
 						_addExplicitFlagSet(prog, output, flag, 0)
 						output.append('\n\t} else {')
 						after = '\n\t}'
-						resultBit = f'({prog.lastB} - 1)'
-					myRes = prog.lastA
-				elif prog.lastOp.op == 'rlc':
-					if type(prog.lastB) is int:
-						if prog.lastB == 0:
-							explicit[flag] = 0
-							continue
+						if prog.lastOp.op == 'rlc':
+							resultBit = f'({prog.getLastSize()} - {prog.lastB})'
 						else:
-							resultBit = prog.getLastSize() - prog.lastB
-					else:
-						output.append(f'\n\tif (!{prog.lastB}) {{')
-						_addExplicitFlagSet(prog, output, flag, 0)
-						output.append('\n\t} else {')
-						after = '\n\t}'
-						resultBit = f'({prog.getLastSize()} - {prog.lastB})'
+							resultBit = f'({prog.lastB} - 1)'
 					myRes = prog.lastA
-				elif prog.lastOp.op == 'rol':
+				elif prog.lastOp.op in('rol', 'ror'):
 					if type(prog.lastBUnmasked) is int:
 						if prog.lastBUnmasked == 0:
 							explicit[flag] = 0
@@ -557,18 +571,10 @@ def _updateFlagsCImpl(prog, params, rawParams):
 						_addExplicitFlagSet(prog, output, flag, 0)
 						output.append('\n\t} else {')
 						after = '\n\t}'
-					resultBit = 0
-				elif prog.lastOp.op == 'ror':
-					if type(prog.lastBUnmasked) is int:
-						if prog.lastBUnmasked == 0:
-							explicit[flag] = 0
-							continue
+					if prog.lastOp.op == 'ror':
+						resultBit = prog.getLastSize() - 1
 					else:
-						output.append(f'\n\tif (!{prog.lastBUnmasked}) {{')
-						_addExplicitFlagSet(prog, output, flag, 0)
-						output.append('\n\t} else {')
-						after = '\n\t}'
-					resultBit = prog.getLastSize() - 1
+						resultBit = 0
 				elif prog.lastOp.op == 'neg':
 					if prog.carryFlowDst:
 						realSize = prog.getLastSize()
@@ -587,6 +593,16 @@ def _updateFlagsCImpl(prog, params, rawParams):
 						))
 					continue
 				else:
+					if prog.lastOp.op == 'lsl':
+						if type(prog.lastB) is int:
+							if prog.lastB == 0:
+								explicit[flag] = 0
+								continue
+						else:
+							output.append(f'\n\tif (!{prog.lastB}) {{')
+							_addExplicitFlagSet(prog, output, flag, 0)
+							output.append('\n\t} else {')
+							after = '\n\t}'
 					resultBit = prog.getLastSize()
 			elif calc == 'half':
 				resultBit = prog.getLastSize() - 4
@@ -630,10 +646,9 @@ def _updateFlagsCImpl(prog, params, rawParams):
 			if after:
 				output.append(after)
 		elif calc == 'zero':
-			if prog.carryFlowDst:
-				realSize = prog.getLastSize()
-				if realSize != prog.paramSize(prog.carryFlowDst):
-					lastDst = '({res} & {mask})'.format(res=lastDst, mask = (1 << realSize) - 1)
+			realSize = prog.getLastSize()
+			if realSize != prog.paramSize(lastDst):
+				lastDst = '({res} & {mask})'.format(res=lastDst, mask = (1 << realSize) - 1)
 			if type(storage) is tuple:
 				reg,storageBit = storage
 				reg = prog.resolveParam(reg, None, {})
@@ -762,12 +777,12 @@ def _asrCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	mask = 1 << (size - 1)
 	if needsCarry:
 		decl,name = prog.getTemp(size)
@@ -776,18 +791,18 @@ def _asrCImpl(prog, params, rawParams, flagUpdates):
 		prog.lastB = params[1]
 		if needsSizeAdjust:
 			sizeMask = (1 << size) - 1
-			return decl + '\n\t{name} = (({a} & {sizeMask}) >> ({b} & {sizeMask})) | ({a} & {mask} ? 0xFFFFFFFFU << ({size} - ({b} & {sizeMask})) : 0);'.format(
+			return decl + '\n\t{name} = (({a} & {sizeMask}) >> ({b} & {sizeMask})) | (({a} & {mask}) && {b} ? 0xFFFFFFFFU << ({size} - ({b} & {sizeMask})) : 0);'.format(
 				name = name, a = params[0], b = params[1], dst = dst, mask = mask, size=size, sizeMask=sizeMask)
 	elif needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		sizeMask = (1 << size) - 1
-		return decl + ('\n\t{name} = (({a} & {sizeMask}) >> ({b} & {sizeMask})) | ({a} & {mask} ? 0xFFFFFFFFU << ({size} - ({b} & {sizeMask})) : 0);' +
+		return decl + ('\n\t{name} = (({a} & {sizeMask}) >> ({b} & {sizeMask})) | (({a} & {mask}) && {b} ? 0xFFFFFFFFU << ({size} - ({b} & {sizeMask})) : 0);' +
 			'\n\t{dst} = ({dst} & ~{sizeMask}) | {name};').format(
-			name = name, a = params[0], b = params[1], dst = dst, mask = mask, size=size, sizeMask=sizeMask)
+			name = name, a = params[0], b = params[1], dst = params[2], mask = mask, size=size, sizeMask=sizeMask)
 	else:
 		dst = params[2]
 	
-	return decl + '\n\t{dst} = ({a} >> {b}) | ({a} & {mask} ? 0xFFFFFFFFU << ({size} - {b}) : 0);'.format(
+	return decl + '\n\t{dst} = ({a} >> {b}) | (({a} & {mask}) && {b} ? 0xFFFFFFFFU << ({size} - {b}) : 0);'.format(
 		a = params[0], b = params[1], dst = dst, mask = mask, size=size)
 	
 def _sext(size, src):
@@ -796,13 +811,28 @@ def _sext(size, src):
 	else:
 		return src | 0xFFFF0000 if src & 0x8000 else src & 0x7FFF
 
-def _sextCImpl(prog, params, rawParms):
-	if params[0] == 16:
-		fmt = '\n\t{dst} = {src} & 0x80 ? {src} | 0xFF00 : {src} & 0x7F;'
+def _sextCImpl(prog, params, rawParams):
+	if not type(params[0]) is int:
+		raise Exception('First param to sext must resolve to an integer')
+	if not params[0] in (16, 32):
+		raise Exception('First param to sext must be 16 or 32')
+	fromSize = params[0] >> 1
+	srcMask = (1 << fromSize) - 1
+	dstMask = (1 << params[0]) - 1
+	if prog.paramSize(rawParams[1]) > fromSize:
+		if type(params[1]) is int:
+			src = params[1] & srcMask
+		else:
+			src = f'({params[1]} & {srcMask})'
 	else:
-		fmt = '\n\t{dst} = {src} & 0x8000 ? {src} | 0xFFFF0000 : {src} & 0x7FFF;'
+		src = params[1]
+	signBit = 1 << (fromSize - 1)
+	extend = (0xFFFFFFFF << fromSize) & dstMask
 	prog.lastSize = params[0]
-	return fmt.format(src=params[1], dst=params[2])
+	if prog.paramSize(rawParams[2]) > params[0]:
+		return f'\n\t{params[2]} = ({params[2]} & ~{dstMask}) | ({src} & {signBit} ? {src} | {extend} : {src});'
+	else:
+		return f'\n\t{params[2]} = {src} & {signBit} ? {src} | {extend} : {src};'
 
 def _mulsCImpl(prog, params, rawParams, flagUpdates):
 	p0Size = prog.paramSize(rawParams[0])
@@ -866,6 +896,7 @@ def _getCarryCheck(prog):
 
 def _adcCImpl(prog, params, rawParams, flagUpdates):
 	needsSizeAdjust = False
+	destSize = prog.paramSize(rawParams[2])
 	if len(params) > 3:
 		size = params[3]
 		if size == 0:
@@ -874,11 +905,12 @@ def _adcCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
-		destSize = prog.paramSize(rawParams[2])
 		if destSize > size:
 			needsSizeAdjust = True
 			prog.sizeAdjust = size
+	else:
+		size = destSize
+	prog.lastSize = size
 	needsCarry = needsOflow = needsHalf = False
 	if flagUpdates:
 		for flag in flagUpdates:
@@ -892,34 +924,44 @@ def _adcCImpl(prog, params, rawParams, flagUpdates):
 	decl = ''
 	carryCheck = _getCarryCheck(prog)
 	vals = '1 : 0'
+	mask = (1 << size) - 1
+	if prog.paramSize(rawParams[0]) > size:
+		if type(params[0]) is int:
+			a = params[0] & mask
+		else:
+			a = f'({params[0]} & {mask})'
+	else:
+		a = params[0]
+	if prog.paramSize(rawParams[1]) > size:
+		if type(params[1]) is int:
+			b = params[1] & mask
+		else:
+			b = f'({params[1]} & {mask})'
+	else:
+		b = params[1]
 	if needsCarry or needsOflow or needsHalf or (flagUpdates and needsSizeAdjust):
-		if len(params) <= 3:
-			size = prog.paramSize(rawParams[2])
 		if needsCarry:
 			size *= 2
 		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
-		prog.lastA = params[0]
-		prog.lastB = params[1]
-		prog.lastBFlow = '(~{b})'.format(b=params[1])
+		prog.lastA = a
+		prog.lastB = b
+		prog.lastBFlow = f'(~{b})'
 		if size == 64:
-			params[0] = '((uint64_t){a})'.format(a=params[0])
-			params[1] = '((uint64_t){b})'.format(b=params[1])
+			a = f'((uint64_t){a})'
+			b = f'((uint64_t){b})'
 			vals = '((uint64_t)1) : ((uint64_t)0)'
 	elif needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		dst = params[2]
-		return '{decl}\n\t{tmp} = ({a} & {mask}) + ({b} & {mask}) + ({check} ? 1 : 0);\n\t{dst} = ({dst} & ~{mask}) | {tmp};'.format(
-			decl = decl, tmp = name, a = a, b = b, op = op, dst = dst, mask = ((1 << size) - 1), check = carryCheck
-		)
+		return f'{decl}\n\t{tmp} = {a} + {b} + ({carryCheck} ? 1 : 0);\n\t{dst} = ({dst} & ~{mask}) | {tmp};'
 	else:
 		dst = params[2]
-	return decl + '\n\t{dst} = {a} + {b} + ({check} ? {vals});'.format(dst = dst,
-		a = params[0], b = params[1], check = carryCheck, vals = vals
-	)
+	return decl + f'\n\t{dst} = {a} + {b} + ({carryCheck} ? {vals});'
 
 def _sbcCImpl(prog, params, rawParams, flagUpdates):
 	needsSizeAdjust = False
+	destSize = prog.paramSize(rawParams[2])
 	if len(params) > 3:
 		size = params[3]
 		if size == 0:
@@ -928,11 +970,12 @@ def _sbcCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
-		destSize = prog.paramSize(rawParams[2])
 		if destSize > size:
 			needsSizeAdjust = True
 			prog.sizeAdjust = size
+	else:
+		size = destSize
+	prog.lastSize = size
 	needsCarry = needsOflow = needsHalf = False
 	if flagUpdates:
 		for flag in flagUpdates:
@@ -946,30 +989,40 @@ def _sbcCImpl(prog, params, rawParams, flagUpdates):
 	decl = ''
 	carryCheck = _getCarryCheck(prog)
 	vals = '1 : 0'
+	mask = (1 << size) - 1
+	if prog.paramSize(rawParams[0]) > size:
+		if type(params[0]) is int:
+			b = params[0] & mask
+		else:
+			b = f'({params[0]} & {mask})'
+	else:
+		b = params[0]
+	if prog.paramSize(rawParams[1]) > size:
+		if type(params[1]) is int:
+			a = params[1] & mask
+		else:
+			a = f'({params[1]} & {mask})'
+	else:
+		a = params[1]
 	if needsCarry or needsOflow or needsHalf or (flagUpdates and needsSizeAdjust):
-		size = prog.paramSize(rawParams[2])
 		if needsCarry:
 			size *= 2
 		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
-		prog.lastA = params[1]
-		prog.lastB = params[0]
-		prog.lastBFlow = params[0]
+		prog.lastA = a
+		prog.lastB = b
+		prog.lastBFlow = b
 		if size == 64:
-			params[1] = '((uint64_t){a})'.format(a=params[1])
-			params[0] = '((uint64_t){b})'.format(b=params[0])
+			a = f'((uint64_t){a})'
+			b = f'((uint64_t){b})'
 			vals = '((uint64_t)1) : ((uint64_t)0)'
 	elif needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		dst = params[2]
-		return '{decl}\n\t{tmp} = ({b} & {mask}) - ({a} & {mask}) - ({check} ? 1 : 0);\n\t{dst} = ({dst} & ~{mask}) | {tmp};'.format(
-			decl = decl, tmp = name, a = params[0], b = params[1], dst = dst, mask = ((1 << size) - 1), check = carryCheck
-		)
+		return f'{decl}\n\t{name} = {a} - {b} - ({carryCheck} ? 1 : 0);\n\t{dst} = ({dst} & ~{mask}) | {tmp};'
 	else:
 		dst = params[2]
-	return decl + '\n\t{dst} = {b} - {a} - ({check} ? {vals});'.format(dst = dst,
-		a = params[0], b = params[1], check=_getCarryCheck(prog), vals = vals
-	)
+	return decl + f'\n\t{dst} = {a} - {b} - ({_getCarryCheck(prog)} ? {vals});'
 	
 def _rolCImpl(prog, params, rawParams, flagUpdates):
 	needsCarry = False
@@ -988,13 +1041,13 @@ def _rolCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			if needsCarry:
 				prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	rotMask = size - 1
 	if type(params[1]) is int:
 		b = params[1] & rotMask
@@ -1004,6 +1057,11 @@ def _rolCImpl(prog, params, rawParams, flagUpdates):
 		mdecl,b = prog.getTemp(prog.paramSize(rawParams[1]))
 		ret = f'\n\t{b} = {params[1]} & {rotMask};'
 	prog.lastB = b
+	if prog.paramSize(rawParams[0]) > size:
+		mask = (1 << size) - 1
+		a = f'({params[0]} & {mask})'
+	else:
+		a = params[0]
 	prog.lastBUnmasked = params[1]
 	if needsSizeAdjust:
 		decl,name = prog.getTemp(size)
@@ -1012,7 +1070,7 @@ def _rolCImpl(prog, params, rawParams, flagUpdates):
 	else:
 		dst = params[2]
 	ret += '\n\t{dst} = {a} << {b} | {a} >> ({size} - {b});'.format(dst = dst,
-		a = params[0], b = b, size=size
+		a = a, b = b, size=size
 	)
 	if needsSizeAdjust and not needsCarry:
 		mask = (1 << size) - 1
@@ -1037,27 +1095,29 @@ def _rlcCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			if needsCarry:
 				prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	carryCheck = _getCarryCheck(prog)
-	size = prog.paramSize(rawParams[2])
+	if prog.paramSize(rawParams[0]) > size:
+		mask = (1 << size) - 1
+		a = f'({params[0]} & {mask})'
+	else:
+		a = params[0]
 	if needsCarry or needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
-		prog.lastA = params[0]
+		prog.lastA = a
 		prog.lastB = params[1]
 	else:
 		dst = params[2]
-	if size == 32 and (not type(params[1]) is int) or params[1] <= 1:
+	if size == 32 and ((not type(params[1]) is int) or params[1] <= 1):
 		# we may need to shift by 32-bits which is too much for a normal int
-		a = f'((uint64_t){params[0]})'
-	else:
-		a = params[0]
+		a = f'((uint64_t){a})'
 	ret = decl + '\n\t{dst} = {a} << {b} | {a} >> ({size} + 1 - {b}) | ({check} ? 1 : 0) << ({b} - 1);'.format(dst = dst,
 		a = a, b = params[1], size=size, check=carryCheck
 	)
@@ -1083,13 +1143,13 @@ def _rorCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			if needsCarry:
 				prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	rotMask = size - 1
 	if type(params[1]) is int:
 		b = params[1] & rotMask
@@ -1100,6 +1160,11 @@ def _rorCImpl(prog, params, rawParams, flagUpdates):
 		ret = f'\n\t{b} = {params[1]} & {rotMask};'
 	prog.lastB = b
 	prog.lastBUnmasked = params[1]
+	if prog.paramSize(rawParams[0]) > size:
+		mask = (1 << size) - 1
+		a = f'({params[0]} & {mask})'
+	else:
+		a = params[0]
 	if needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
@@ -1107,7 +1172,7 @@ def _rorCImpl(prog, params, rawParams, flagUpdates):
 	else:
 		dst = params[2]
 	ret += '\n\t{dst} = {a} >> {b} | {a} << ({size} - {b});'.format(dst = dst,
-		a = params[0], b = b, size=size
+		a = a, b = b, size=size
 	)
 	if needsSizeAdjust and not needsCarry:
 		mask = (1 << size) - 1
@@ -1132,27 +1197,29 @@ def _rrcCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 		if destSize > size:
 			needsSizeAdjust = True
 			if needsCarry:
 				prog.sizeAdjust = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	carryCheck = _getCarryCheck(prog)
-	size = prog.paramSize(rawParams[2])
+	if prog.paramSize(rawParams[0]) > size:
+		mask = (1 << size) - 1
+		a = f'({params[0]} & {mask})'
+	else:
+		a = params[0]
 	if needsCarry or needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		dst = prog.carryFlowDst = name
-		prog.lastA = params[0]
+		prog.lastA = a
 		prog.lastB = params[1]
 	else:
 		dst = params[2]
-	if size == 32 and (not type(params[1]) is int) or params[1] <= 1:
+	if size == 32 and ((not type(params[1]) is int) or params[1] <= 1):
 		# we may need to shift by 32-bits which is too much for a normal int
-		a = f'((uint64_t){params[0]})'
-	else:
-		a = params[0]
+		a = f'((uint64_t){a})'
 	ret = decl + '\n\t{dst} = {a} >> {b} | {a} << ({size} + 1 - {b}) | ({check} ? 1 : 0) << ({size}-{b});'.format(dst = dst,
 		a = a, b = params[1], size=size, check=carryCheck
 	)
@@ -1309,6 +1376,10 @@ class NormalOp:
 			output.append('\n\t' + self.op + '(' + ', '.join([str(p) for p in procParams]) + ');')
 		prog.lastOp = self
 	
+	def processDispatch(self, prog):
+		if self.op == 'dispatch' and (len(self.params) == 1 or self.params[1] == 'main'):
+			prog.mainDispatch.add(self.params[0])
+	
 	def __str__(self):
 		return '\n\t' + self.op + ' ' + ' '.join(self.params)
 		
@@ -1408,6 +1479,14 @@ class Switch(ChildBlock):
 			output.append('\n\t}')
 			prog.conditional = oldCond
 		prog.popScope()
+	
+	def processDispatch(self, prog):
+		for case in self.cases:
+			for op in self.cases[case]:
+				op.processDispatch(prog)
+		if self.default:
+			for op in self.default:
+				op.processDispatch(prog)
 	
 	def __str__(self):
 		keys = self.cases.keys()
@@ -1553,6 +1632,12 @@ class If(ChildBlock):
 					output.append('\n\t}')
 					prog.conditional = oldCond
 						
+	
+	def processDispatch(self, prog):
+		for op in self.body:
+			op.processDispatch(prog)
+		for op in self.elseBody:
+			op.processDispatch(prog)
 	
 	def __str__(self):
 		lines = ['\n\tif']
@@ -1903,9 +1988,12 @@ class Program:
 						self.needFlagCoalesce = False
 						self.needFlagDisperse = False
 						self.lastOp = None
-						opmap[val] = inst.generateName(val)
-						bodymap[val] = inst.generateBody(val, self, otype)
+						name = inst.generateName(val)
+						opmap[val] = name
+						if not name in bodymap:
+							bodymap[name] = inst.generateBody(val, self, otype)
 		
+		alreadyAppended = set()
 		if self.dispatch == 'call':
 			lateBody.append('\nstatic impl_fun impl_{name}[{sz}] = {{'.format(name = table, sz=len(opmap)))
 			for inst in range(0, len(opmap)):
@@ -1914,7 +2002,9 @@ class Program:
 					lateBody.append('\n\tunimplemented,')
 				else:
 					lateBody.append('\n\t' + op + ',')
-					body.append(bodymap[inst])
+					if not op in alreadyAppended:
+						body.append(bodymap[op])
+						alreadyAppended.add(op)
 			lateBody.append('\n};')
 		elif self.dispatch == 'goto':
 			body.append('\n\tstatic void *impl_{name}[{sz}] = {{'.format(name = table, sz=len(opmap)))
@@ -1924,7 +2014,8 @@ class Program:
 					body.append('\n\t\t&&unimplemented,')
 				else:
 					body.append('\n\t\t&&' + op + ',')
-					lateBody.append(bodymap[inst])
+					if not op in alreadyAppended:
+						lateBody.append(bodymap[op])
 			body.append('\n\t};')
 		else:
 			raise Exception("unimplmeneted dispatch type " + self.dispatch)
@@ -1960,6 +2051,12 @@ class Program:
 		elif self.dispatch == 'goto':
 			body.append('\nvoid {pre}execute({type} *context, uint32_t target_cycle)'.format(pre = self.prefix, type = self.context_type))
 			body.append('\n{')
+		
+		for table in self.instructions:
+			for inst in self.instructions[table]:
+				inst.processDispatch(self)
+		for sub in self.subroutines:
+			self.subroutines[sub].processDispatch(self)
 			
 		for table in self.extra_tables:
 			self._buildTable(otype, table, body, pieces)
@@ -1990,7 +2087,7 @@ class Program:
 			body.append('\nstatic void unimplemented({pre}context *context, uint32_t target_cycle)'.format(pre = self.prefix))
 			body.append('\n{')
 			if len(self.mainDispatch) == 1:
-				dispatch = list(self.mainDispatch)[0]
+				dispatch = self.resolveParam(list(self.mainDispatch)[0], None, {})
 				body.append(f'\n\tfatal_error("Unimplemented instruction: %X\\n", {dispatch});')
 			else:
 				body.append('\n\tfatal_error("Unimplemented instruction\\n");')
@@ -2116,6 +2213,9 @@ class Program:
 			return self.regs.regArrays[begin][0]
 		if self.regs.isReg(name):
 			return self.regs.regs[name]
+		for size in self.temp:
+			if self.temp[size] == name:
+				return size
 		return 32
 	
 	def getLastSize(self):
