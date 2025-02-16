@@ -646,11 +646,9 @@ def _updateFlagsCImpl(prog, params, rawParams):
 			if after:
 				output.append(after)
 		elif calc == 'zero':
-			if prog.carryFlowDst:
-				realSize = prog.getLastSize()
-				output.append(f'\n\t//realSize = {realSize}, carryFlowDst size = {prog.paramSize(prog.carryFlowDst)}, carryFLowDst = {prog.carryFlowDst}')
-				if realSize != prog.paramSize(prog.carryFlowDst):
-					lastDst = '({res} & {mask})'.format(res=lastDst, mask = (1 << realSize) - 1)
+			realSize = prog.getLastSize()
+			if realSize != prog.paramSize(lastDst):
+				lastDst = '({res} & {mask})'.format(res=lastDst, mask = (1 << realSize) - 1)
 			if type(storage) is tuple:
 				reg,storageBit = storage
 				reg = prog.resolveParam(reg, None, {})
@@ -793,18 +791,18 @@ def _asrCImpl(prog, params, rawParams, flagUpdates):
 		prog.lastB = params[1]
 		if needsSizeAdjust:
 			sizeMask = (1 << size) - 1
-			return decl + '\n\t{name} = (({a} & {sizeMask}) >> ({b} & {sizeMask})) | ({a} & {mask} ? 0xFFFFFFFFU << ({size} - ({b} & {sizeMask})) : 0);'.format(
+			return decl + '\n\t{name} = (({a} & {sizeMask}) >> ({b} & {sizeMask})) | (({a} & {mask}) && {b} ? 0xFFFFFFFFU << ({size} - ({b} & {sizeMask})) : 0);'.format(
 				name = name, a = params[0], b = params[1], dst = dst, mask = mask, size=size, sizeMask=sizeMask)
 	elif needsSizeAdjust:
 		decl,name = prog.getTemp(size)
 		sizeMask = (1 << size) - 1
-		return decl + ('\n\t{name} = (({a} & {sizeMask}) >> ({b} & {sizeMask})) | ({a} & {mask} ? 0xFFFFFFFFU << ({size} - ({b} & {sizeMask})) : 0);' +
+		return decl + ('\n\t{name} = (({a} & {sizeMask}) >> ({b} & {sizeMask})) | (({a} & {mask}) && {b} ? 0xFFFFFFFFU << ({size} - ({b} & {sizeMask})) : 0);' +
 			'\n\t{dst} = ({dst} & ~{sizeMask}) | {name};').format(
-			name = name, a = params[0], b = params[1], dst = dst, mask = mask, size=size, sizeMask=sizeMask)
+			name = name, a = params[0], b = params[1], dst = params[2], mask = mask, size=size, sizeMask=sizeMask)
 	else:
 		dst = params[2]
 	
-	return decl + '\n\t{dst} = ({a} >> {b}) | ({a} & {mask} ? 0xFFFFFFFFU << ({size} - {b}) : 0);'.format(
+	return decl + '\n\t{dst} = ({a} >> {b}) | (({a} & {mask}) && {b} ? 0xFFFFFFFFU << ({size} - {b}) : 0);'.format(
 		a = params[0], b = params[1], dst = dst, mask = mask, size=size)
 	
 def _sext(size, src):
