@@ -1573,8 +1573,59 @@ m68k_save_dst
 	invalid Z 3
 	local shift 8
 	and dregs.C 63 shift
-	lsl dregs.R shift dregs.R Z
-	update_flags XNZV0C
+	switch Z
+	case 2
+		if shift >=U 32
+			if shift = 32
+				lsl dregs.R 31 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 1
+		if shift >=U 16
+			if shift = 16
+				lsl dregs.R 15 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 0
+		if shift >=U 8
+			if shift = 8
+				lsl dregs.R 7 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	end
 	add shift shift shift
 	switch Z
 	case 2
@@ -1628,8 +1679,60 @@ m68k_save_dst
 	invalid Z 3
 	local shift 8
 	and dregs.C 63 shift
-	lsl dregs.R shift dregs.R Z
-	update_flags XNZV0C
+	#TODO: implement loops and do this a bit at a time to implement V flag
+	switch Z
+	case 2
+		if shift >=U 32
+			if shift = 32
+				lsl dregs.R 31 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XNZ1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 1
+		if shift >=U 16
+			if shift = 16
+				lsl dregs.R 15 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	case 0
+		if shift >=U 8
+			if shift = 8
+				lsl dregs.R 7 dregs.R Z
+				lsl dregs.R 1 dregs.R Z
+				update_flags XN0Z1V0C
+			else
+				dregs.R:Z = 0
+				update_flags X0N0Z1V0C0
+			end
+		else
+			lsl dregs.R shift dregs.R Z
+			update_flags NZV0C
+			if shift
+				xflag = cflag
+			end
+		end
+	end
 	add shift shift shift
 	switch Z
 	case 2

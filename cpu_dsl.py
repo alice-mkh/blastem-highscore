@@ -542,11 +542,13 @@ def _updateFlagsCImpl(prog, params, rawParams):
 			if calc == 'sign':
 				resultBit = prog.getLastSize() - 1
 			elif calc == 'carry':
-				if prog.lastOp.op in ('asr', 'lsr', 'rrc'):
+				if prog.lastOp.op in ('asr', 'lsr', 'rrc', 'rlc'):
 					if type(prog.lastB) is int:
 						if prog.lastB == 0:
 							explicit[flag] = 0
 							continue
+						elif prog.lastOp.op == 'rlc':
+							resultBit = prog.getLastSize() - prog.lastB
 						else:
 							resultBit = prog.lastB - 1
 					else:
@@ -554,23 +556,12 @@ def _updateFlagsCImpl(prog, params, rawParams):
 						_addExplicitFlagSet(prog, output, flag, 0)
 						output.append('\n\t} else {')
 						after = '\n\t}'
-						resultBit = f'({prog.lastB} - 1)'
-					myRes = prog.lastA
-				elif prog.lastOp.op == 'rlc':
-					if type(prog.lastB) is int:
-						if prog.lastB == 0:
-							explicit[flag] = 0
-							continue
+						if prog.lastOp.op == 'rlc':
+							resultBit = f'({prog.getLastSize()} - {prog.lastB})'
 						else:
-							resultBit = prog.getLastSize() - prog.lastB
-					else:
-						output.append(f'\n\tif (!{prog.lastB}) {{')
-						_addExplicitFlagSet(prog, output, flag, 0)
-						output.append('\n\t} else {')
-						after = '\n\t}'
-						resultBit = f'({prog.getLastSize()} - {prog.lastB})'
+							resultBit = f'({prog.lastB} - 1)'
 					myRes = prog.lastA
-				elif prog.lastOp.op == 'rol':
+				elif prog.lastOp.op in('rol', 'ror'):
 					if type(prog.lastBUnmasked) is int:
 						if prog.lastBUnmasked == 0:
 							explicit[flag] = 0
@@ -580,18 +571,10 @@ def _updateFlagsCImpl(prog, params, rawParams):
 						_addExplicitFlagSet(prog, output, flag, 0)
 						output.append('\n\t} else {')
 						after = '\n\t}'
-					resultBit = 0
-				elif prog.lastOp.op == 'ror':
-					if type(prog.lastBUnmasked) is int:
-						if prog.lastBUnmasked == 0:
-							explicit[flag] = 0
-							continue
+					if prog.lastOp.op == 'ror':
+						resultBit = prog.getLastSize() - 1
 					else:
-						output.append(f'\n\tif (!{prog.lastBUnmasked}) {{')
-						_addExplicitFlagSet(prog, output, flag, 0)
-						output.append('\n\t} else {')
-						after = '\n\t}'
-					resultBit = prog.getLastSize() - 1
+						resultBit = 0
 				elif prog.lastOp.op == 'neg':
 					if prog.carryFlowDst:
 						realSize = prog.getLastSize()
@@ -610,6 +593,16 @@ def _updateFlagsCImpl(prog, params, rawParams):
 						))
 					continue
 				else:
+					if prog.lastOp.op == 'lsl':
+						if type(prog.lastB) is int:
+							if prog.lastB == 0:
+								explicit[flag] = 0
+								continue
+						else:
+							output.append(f'\n\tif (!{prog.lastB}) {{')
+							_addExplicitFlagSet(prog, output, flag, 0)
+							output.append('\n\t} else {')
+							after = '\n\t}'
 					resultBit = prog.getLastSize()
 			elif calc == 'half':
 				resultBit = prog.getLastSize() - 4
@@ -655,6 +648,7 @@ def _updateFlagsCImpl(prog, params, rawParams):
 		elif calc == 'zero':
 			if prog.carryFlowDst:
 				realSize = prog.getLastSize()
+				output.append(f'\n\t//realSize = {realSize}, carryFlowDst size = {prog.paramSize(prog.carryFlowDst)}, carryFLowDst = {prog.carryFlowDst}')
 				if realSize != prog.paramSize(prog.carryFlowDst):
 					lastDst = '({res} & {mask})'.format(res=lastDst, mask = (1 << realSize) - 1)
 			if type(storage) is tuple:
@@ -2221,6 +2215,9 @@ class Program:
 			return self.regs.regArrays[begin][0]
 		if self.regs.isReg(name):
 			return self.regs.regs[name]
+		for size in self.temp:
+			if self.temp[size] == name:
+				return size
 		return 32
 	
 	def getLastSize(self):
