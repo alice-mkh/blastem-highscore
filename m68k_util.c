@@ -27,7 +27,9 @@ void m68k_read_16(m68k_context *context)
 		m68k_decode(debug_disasm_fetch, context, &inst, tmp);
 		static char disasm_buf[256];
 		m68k_disasm(&inst, disasm_buf);
-		printf("Fetch %05X: %04X - %s, d0=%X, d2=%X, d3=%X, d4=%X, d6=%X, xflag=%d\n", tmp, context->scratch1, disasm_buf, context->dregs[0], context->dregs[2], context->dregs[3], context->dregs[4], context->dregs[6], context->xflag);
+		printf("Fetch %05X: %04X - %s, d0=%X, d1=%X, d2=%X, d3=%X, d4=%X, d6=%X, a7=%X, xflag=%d\n", tmp, context->scratch1, disasm_buf, context->dregs[0], context->dregs[1], context->dregs[2], context->dregs[3], context->dregs[4], context->dregs[6], context->aregs[7], context->xflag);
+	} else {
+		printf("Read %05X: %04X\n", tmp, context->scratch1);
 	}
 #endif
 }
