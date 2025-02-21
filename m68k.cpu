@@ -60,6 +60,7 @@ regs
 	wp_hit 8
 	trace_pending 8
 	should_return 8
+	stopped 8
 	system ptrvoid
 	reset_handler ptrvoid
 	int_ack_handler ptrvoid
@@ -167,7 +168,6 @@ m68k_interrupt
 			int_pending = int_priority
 			int_pending_num = int_num
 		else
-		
 			#INT_PENDING_SR_CHANGE
 			if 254 = int_pending
 				int_pending = int_priority
@@ -202,7 +202,12 @@ m68k_interrupt
 			
 			#save pc
 			scratch2 = a7 + 2
-			scratch1 = pc - 2
+			if stopped
+				scratch1 = pc
+				stopped = 0
+			else
+				scratch1 = pc - 2
+			end
 			m68k_write32_lowfirst scratch1
 			
 			scratch1 = int_pending_num << 2
@@ -2686,6 +2691,28 @@ m68k_calc_ea
 
 0100111001110001 nop
 	m68k_prefetch
+
+0100111001110010 stop
+	if stopped
+	else
+		mov pc scratch1
+		ocall read_16
+		pc += 2
+		ccr = scratch1
+		status = scratch1 >> 8
+		check_user_mode_swap_ssp_usp
+		update_sync
+		stopped = 1
+	end
+	loop
+		cycles 4
+		if cycles >=U int_cycle
+			break
+		end
+		if cycles >=U target_cycle
+			break
+		end
+	end
 
 0100111001110011 rte
 	#TODO: privilege violation exception if in user mode

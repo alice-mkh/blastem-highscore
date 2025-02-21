@@ -45,6 +45,10 @@ class Block:
 			o = If(self, cond)
 			self.addOp(o)
 			return o
+		elif parts[0] == 'loop':
+			o = Loop(self, None if len(parts) == 1 else parts[1])
+			self.addOp(o)
+			return o
 		elif parts[0] == 'end':
 			raise Exception('end is only allowed inside a switch or if block')
 		else:
@@ -1284,7 +1288,8 @@ _opMap = {
 	'xchg': Op().addImplementation('c', (0,1), _xchgCImpl),
 	'dispatch': Op().addImplementation('c', None, _dispatchCImpl),
 	'update_flags': Op().addImplementation('c', None, _updateFlagsCImpl),
-	'update_sync': Op().addImplementation('c', None, _updateSyncCImpl)
+	'update_sync': Op().addImplementation('c', None, _updateSyncCImpl),
+	'break': Op().addImplementation('c', None, lambda prog, params: '\n\tbreak;')
 }
 
 #represents a simple DSL instruction
@@ -1683,6 +1688,56 @@ class If(ChildBlock):
 	
 	def __str__(self):
 		lines = ['\n\tif']
+		for op in self.body:
+			lines.append(str(op))
+		lines.append('\n\tend')
+		return ''.join(lines)
+
+class Loop(ChildBlock):
+	def __init__(self, parent, count):
+		self.op = 'loop'
+		self.parent = parent
+		self.count = count
+		self.body = []
+		self.locals = {}
+		self.regValues = None
+	
+	def addOp(self, op):
+		if op.op in ('case', 'arg', 'else'):
+			raise Exception(op + ' is not allows inside an loop block')
+		if op.op == 'local':
+			name = op.params[0]
+			size = op.params[1]
+			self.locals[name] = size
+		else:
+			self.body.append(op)
+	
+	def localSize(self, name):
+		return self.locals.get(name)
+	
+	def resolveLocal(self, name):
+		if name in self.locals:
+			return name
+		return self.parent.resolveLocal(name)
+	
+	def processDispatch(self, prog):
+		for op in self.body:
+			op.processDispatch(prog)
+	
+	def generate(self, prog, parent, fieldVals, output, otype, flagUpdates):
+		self.regValues = parent.regValues
+		if self.count:
+			count = prog.resolveParam(self.count, self, fieldVals)
+			output.append('\n\tfor (uint32_t loop_counter__ = 0; loop_counter__ < {count}; loop_counter__++) {')
+		else:
+			output.append('\n\tfor (;;) {')
+		self.processOps(prog, fieldVals, output, otype, self.body)
+		output.append('\n\t}')
+	
+	def __str__(self):
+		lines = ['\n\tloop']
+		if self.count:
+			lines[0] += f' {self.count}'
 		for op in self.body:
 			lines.append(str(op))
 		lines.append('\n\tend')
