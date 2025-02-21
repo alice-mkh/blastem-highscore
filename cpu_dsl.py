@@ -45,6 +45,10 @@ class Block:
 			o = If(self, cond)
 			self.addOp(o)
 			return o
+		elif parts[0] == 'loop':
+			o = Loop(self, None if len(parts) == 1 else parts[1])
+			self.addOp(o)
+			return o
 		elif parts[0] == 'end':
 			raise Exception('end is only allowed inside a switch or if block')
 		else:
@@ -1284,7 +1288,8 @@ _opMap = {
 	'xchg': Op().addImplementation('c', (0,1), _xchgCImpl),
 	'dispatch': Op().addImplementation('c', None, _dispatchCImpl),
 	'update_flags': Op().addImplementation('c', None, _updateFlagsCImpl),
-	'update_sync': Op().addImplementation('c', None, _updateSyncCImpl)
+	'update_sync': Op().addImplementation('c', None, _updateSyncCImpl),
+	'break': Op().addImplementation('c', None, lambda prog, params: '\n\tbreak;')
 }
 
 #represents a simple DSL instruction
@@ -1297,18 +1302,53 @@ class NormalOp:
 		procParams = []
 		allParamsConst = flagUpdates is None and not prog.conditional
 		opDef = _opMap.get(self.op)
-		for param in self.params:
-			isDst = (not opDef is None) and len(procParams) in opDef.outOp
-			allowConst = (self.op in prog.subroutines or not isDst) and param in parent.regValues
-			if isDst and self.op == 'xchg':
-				#xchg uses its regs as both source and destination
-				#we need to resolve as both so that disperse/coalesce flag stuff gets done
-				prog.resolveParam(param, parent, fieldVals, allowConst, False)
-			param = prog.resolveParam(param, parent, fieldVals, allowConst, isDst)
-			
-			if (not type(param) is int) and len(procParams) != len(self.params) - 1:
+		if self.op == 'xchg':
+			#xchg uses its regs as both source and destination
+			#we need to resolve as both so that disperse/coalesce flag stuff gets done
+			#it also interacts weirdly with constant folding
+			a = prog.resolveParam(self.params[0], parent, fieldVals, True, False)
+			b = prog.resolveParam(self.params[1], parent, fieldVals, True, False)
+			dsta = prog.resolveParam(self.params[0], parent, fieldVals, False, True)
+			dstb = prog.resolveParam(self.params[1], parent, fieldVals, False, True)
+			dsta_nocontext = dsta[len("context->"):] if dsta.startswith('context->') else dsta
+			dstb_nocontext = dstb[len("context->"):] if dstb.startswith('context->') else dstb
+			if type(a) is int:
+				if type(b) is int:
+					#both params are constant, fold
+					parent.regValues[dsta_nocontext] = b
+					parent.regValues[dstb_nocontext] = a
+					if prog.isReg(dsta_nocontext):
+						output.append(_opMap['mov'].generate(otype, prog, (b, dsta), (self.params[1], self.params[0]), None))
+					if prog.isReg(dstb_nocontext):
+						output.append(_opMap['mov'].generate(otype, prog, (a, dstb), (self.params[0], self.params[1]), None))
+				else:
+					parent.regValues[dstb_nocontext] = a
+					del parent.regValues[dsta_nocontext]
+					output.append(_opMap['mov'].generate(otype, prog, (b, dsta), (self.params[1], self.params[0]), None))
+					if prog.isReg(dstb_nocontext):
+						output.append(_opMap['mov'].generate(otype, prog, (a, dstb), (self.params[0], self.params[1]), None))
+				prog.lastOp = self
+				return
+			elif type(b) is int:
+				parent.regValues[dsta_nocontext] = b
+				del parent.regValues[dstb_nocontext]
+				output.append(_opMap['mov'].generate(otype, prog, (a, dstb), (self.params[0], self.params[1]), None))
+				if prog.isReg(dsta_nocontext):
+					output.append(_opMap['mov'].generate(otype, prog, (b, dsta), (self.params[1], self.params[0]), None))
+				prog.lastOp = self
+				return
+			else:
+				procParams = [dsta, dstb]
 				allParamsConst = False
-			procParams.append(param)
+		else:			
+			for param in self.params:
+				isDst = (not opDef is None) and len(procParams) in opDef.outOp
+				allowConst = (self.op in prog.subroutines or not isDst) and param in parent.regValues
+				param = prog.resolveParam(param, parent, fieldVals, allowConst, isDst)
+				
+				if (not type(param) is int) and len(procParams) != len(self.params) - 1:
+					allParamsConst = False
+				procParams.append(param)
 		if prog.needFlagCoalesce:
 			output.append(prog.flags.coalesceFlags(prog, otype))
 			prog.needFlagCoalesce = False
@@ -1355,7 +1395,14 @@ class NormalOp:
 						dst = prog.meta[dst]
 					if dst in parent.regValues:
 						del parent.regValues[dst]
-					
+				if self.op in ('ocall', 'ccall', 'pcall'):
+					#we called in to arbitrary C code, assume any reg could have changed
+					to_clear = []
+					for name in parent.regValues:
+						if prog.isReg(name):
+							to_clear.append(name)
+					for name in to_clear:
+						del parent.regValues[name]
 		elif self.op in prog.subroutines:
 			procParams = []
 			for param in self.params:
@@ -1641,6 +1688,56 @@ class If(ChildBlock):
 	
 	def __str__(self):
 		lines = ['\n\tif']
+		for op in self.body:
+			lines.append(str(op))
+		lines.append('\n\tend')
+		return ''.join(lines)
+
+class Loop(ChildBlock):
+	def __init__(self, parent, count):
+		self.op = 'loop'
+		self.parent = parent
+		self.count = count
+		self.body = []
+		self.locals = {}
+		self.regValues = None
+	
+	def addOp(self, op):
+		if op.op in ('case', 'arg', 'else'):
+			raise Exception(op + ' is not allows inside an loop block')
+		if op.op == 'local':
+			name = op.params[0]
+			size = op.params[1]
+			self.locals[name] = size
+		else:
+			self.body.append(op)
+	
+	def localSize(self, name):
+		return self.locals.get(name)
+	
+	def resolveLocal(self, name):
+		if name in self.locals:
+			return name
+		return self.parent.resolveLocal(name)
+	
+	def processDispatch(self, prog):
+		for op in self.body:
+			op.processDispatch(prog)
+	
+	def generate(self, prog, parent, fieldVals, output, otype, flagUpdates):
+		self.regValues = parent.regValues
+		if self.count:
+			count = prog.resolveParam(self.count, self, fieldVals)
+			output.append('\n\tfor (uint32_t loop_counter__ = 0; loop_counter__ < {count}; loop_counter__++) {')
+		else:
+			output.append('\n\tfor (;;) {')
+		self.processOps(prog, fieldVals, output, otype, self.body)
+		output.append('\n\t}')
+	
+	def __str__(self):
+		lines = ['\n\tloop']
+		if self.count:
+			lines[0] += f' {self.count}'
 		for op in self.body:
 			lines.append(str(op))
 		lines.append('\n\tend')
@@ -2138,6 +2235,8 @@ class Program:
 						if isdst:
 							self.lastDst = param
 							self.lastSize = None
+						if allowConstant and maybeLocal in parent.regValues:
+							return parent.regValues[maybeLocal]
 						return maybeLocal
 				if param in fieldVals:
 					param = fieldVals[param]

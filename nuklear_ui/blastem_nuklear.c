@@ -105,9 +105,88 @@ static const char *browser_setting_path;
 static const char **browser_ext_list;
 static uint32_t browser_num_exts;
 static uint8_t use_native_filechooser;
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+static uint8_t chooser_open;
 
-static void handle_chooser_result(uint8_t normal_open, char *full_path)
+EM_JS(void, show_html_chooser, (const char *title, const char *extensions, int normal_open, int is_settings), {
+	let container = document.getElementById('chooser');
+	let canvas = document.getElementById('canvas');
+	let fileIn = null;
+	let titleEl = null;
+	if (!container) {
+		container = document.createElement('div');
+		container.id = 'chooser';
+		container.style.position = 'absolute';
+		container.style.display = 'none';
+		container.style.borderWidth = '2px';
+		container.style.borderColor = 'black';
+		container.style.borderStyle = 'solid';
+		titleEl = document.createElement('h3');
+		titleEl.id = 'chooser_title';
+		container.appendChild(titleEl);
+		fileIn = document.createElement('input');
+		fileIn.type = 'file';
+		fileIn.id = 'file';
+		container.appendChild(fileIn);
+		canvas.parentNode.appendChild(container);
+	} else {
+		fileIn = document.getElementById('file');
+		titleEl = document.getElementById('chooser_title');
+	}
+	titleEl.innerText = UTF8ToString(title);
+	fileIn.onchange = (event) => {
+		let f = event.target;
+		if (f.files.length) {
+			let reader = new FileReader();
+			let name = f.files[0].name;
+			reader.onload = (event) => {
+				let prefix = '/roms';
+				let prevPath = null;
+				if (normal_open) {
+					prevPath = 'previousRomPath';
+				} else if (is_settings) {
+					prefix = '/firmware';
+				} else {
+					prevPath = 'previousSpecialPath';
+				}
+				if (prevPath && window[prevPath]) {
+					FS.unlink(window[prevPath]);
+				} else {
+					FS.mkdir(prefix);
+				}
+				
+				let buffer = new Uint8Array(event.target.result);
+				FS.createDataFile(prefix, name, buffer, true, false, false);
+				let fullPath = prefix + "/" + name;
+				if (prevPath) {
+					window[prevPath] = fullPath;
+				}
+				console.log(fullPath, normal_open, is_settings);
+				document.getElementById('chooser').style.display = 'none';
+				Module.ccall('handle_chooser_result', 'void', ['number', 'string'], [normal_open, fullPath]);
+			};
+			reader.readAsArrayBuffer(f.files[0]);
+		}
+	};
+	fileIn.accept = UTF8ToString(extensions);
+	let cRect = canvas.getBoundingClientRect();
+	let pRect = canvas.parentNode.parentNode.getBoundingClientRect();
+	container.style.top = '' + (cRect.top - pRect.top) + 'px';
+	container.style.left = '' + (cRect.left - pRect.left) + 'px';
+	container.style.width = '' + cRect.width + 'px';
+	container.style.height = '' + cRect.height + 'px';
+	container.style.display = 'block';
+	container.style.backgroundColor = 'white';
+});
+#endif
+
+void handle_chooser_result(uint8_t normal_open, char *full_path)
 {
+#ifdef __EMSCRIPTEN__
+	chooser_open = 0;
+	full_path = strdup(full_path);
+#endif
 	if(normal_open) {
 		lockon_media(NULL);
 		if (current_system) {
@@ -134,12 +213,49 @@ static void handle_chooser_result(uint8_t normal_open, char *full_path)
 
 void view_file_browser(struct nk_context *context, uint8_t normal_open)
 {
-	static dir_entry *entries;
-	static size_t num_entries;
-	static int32_t selected_entry = -1;
 	static const char **ext_list;
 	static uint32_t num_exts;
 	static uint8_t got_ext_list;
+	if (!browser_ext_list) {
+		if (!got_ext_list) {
+			ext_list = (const char **)get_extension_list(config, &num_exts);
+			got_ext_list = 1;
+		}
+		browser_ext_list = ext_list;
+		browser_num_exts = num_exts;
+	}
+#ifdef __EMSCRIPTEN__
+	uint8_t just_opened = !chooser_open;
+	chooser_open = 1;
+	if (just_opened) {
+		size_t total_length = 0;
+		for (uint32_t i = 0; i < browser_num_exts; i++)
+		{
+			total_length += 1 + strlen(browser_ext_list[i]);
+			if (i) {
+				total_length++;
+			}
+		}
+		char *list = calloc(total_length + 1, 1);
+		char *cur = list;
+		for (uint32_t i = 0; i < browser_num_exts; i++)
+		{
+			if (i) {
+				*(cur++) = ',';
+			}
+			*(cur++) = '.';
+			size_t len = strlen(browser_ext_list[i]);
+			memcpy(cur, browser_ext_list[i], len);
+			cur += len;
+		}
+		*(cur) = 0;
+		show_html_chooser(browser_label, list, normal_open, browser_setting_path != NULL);
+		free(list);
+	}
+#else
+	static dir_entry *entries;
+	static size_t num_entries;
+	static int32_t selected_entry = -1;
 	if (!browser_cur_path) {
 		get_initial_browse_path(&browser_cur_path);
 	}
@@ -169,14 +285,6 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 			entries[0].is_dir = 1;
 			num_entries = 1;
 		}
-	}
-	if (!browser_ext_list) {
-		if (!got_ext_list) {
-			ext_list = (const char **)get_extension_list(config, &num_exts);
-			got_ext_list = 1;
-		}
-		browser_ext_list = ext_list;
-		browser_num_exts = num_exts;
 	}
 	uint32_t width = render_width();
 	uint32_t height = render_height();
@@ -228,6 +336,8 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 		}
 		nk_end(context);
 	}
+#endif
+	
 }
 
 void view_load(struct nk_context *context)
