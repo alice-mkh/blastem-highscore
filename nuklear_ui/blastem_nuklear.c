@@ -121,6 +121,7 @@ EM_JS(void, show_html_chooser, (const char *title, const char *extensions, int n
 		container.style.display = 'none';
 		container.style.borderWidth = '2px';
 		container.style.borderColor = 'black';
+		container.style.borderStyle = 'solid';
 		titleEl = document.createElement('h3');
 		titleEl.id = 'chooser_title';
 		container.appendChild(titleEl);
