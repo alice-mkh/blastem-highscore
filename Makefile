@@ -119,7 +119,7 @@ endif
 
 ifeq ($(CPU),wasm)
 CFLAGS+= --use-port=sdl2
-LDFLAGS+= --use-port=sdl2 --embed-file rom.db --embed-file default.cfg --embed-file systems.cfg --embed-file shaders/ --embed-file images/ --embed-file DroidSans.ttf --embed-file roms/
+LDFLAGS+= --use-port=sdl2 --embed-file rom.db --embed-file default.cfg --embed-file systems.cfg --embed-file shaders/ --embed-file images/ --embed-file DroidSans.ttf -sEXPORTED_FUNCTIONS=_main,_handle_chooser_result -sEXPORTED_RUNTIME_METHODS=ccall,cwrap
 EXE:=.html
 else #CPU=wasm
 
