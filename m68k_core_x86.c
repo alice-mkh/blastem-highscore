@@ -1471,6 +1471,11 @@ void translate_m68k_unary(m68k_options *opts, m68kinst *inst, uint32_t flag_mask
 void translate_m68k_abcd_sbcd(m68k_options *opts, m68kinst *inst, host_ea *src_op, host_ea *dst_op)
 {
 	code_info *code = &opts->gen.code;
+	if (inst->dst.addr_mode != MODE_REG && inst->dst.addr_mode != MODE_AREG && inst->dst.addr_mode != MODE_AREG_PREDEC) {
+		//destination is in memory so we need to preserve scratch2 for the write at the end
+		push_r(code, opts->gen.scratch2);
+	}
+
 	if (inst->op == M68K_NBCD) {
 		if (dst_op->base != opts->gen.scratch2) {
 			if (dst_op->mode == MODE_REG_DIRECT) {
@@ -1495,10 +1500,6 @@ void translate_m68k_abcd_sbcd(m68k_options *opts, m68kinst *inst, host_ea *src_o
 				mov_rdispr(code, dst_op->base, dst_op->disp, opts->gen.scratch1, SZ_B);
 			}
 		}
-	}
-	if (inst->dst.addr_mode != MODE_REG && inst->dst.addr_mode != MODE_AREG && inst->dst.addr_mode != MODE_AREG_PREDEC) {
-		//destination is in memory so we need to preserve scratch2 for the write at the end
-		push_r(code, opts->gen.scratch2);
 	}
 
 	//reg to reg takes 6 cycles, mem to mem is 4 cycles + all the operand fetch/writing (including 2 cycle predec penalty for first operand)
