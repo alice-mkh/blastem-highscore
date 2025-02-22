@@ -1732,14 +1732,25 @@ m68k_save_dst
 
 1110CCC1ZZ000RRR asli
 	invalid Z 3
+	local vtmp 8
+	local shift 8
+	vtmp = 0
 	switch C
 	case 0
-		meta shift 8
+		shift = 8
 	default
-		meta shift C
+		shift = C
 	end
-	lsl dregs.R shift dregs.R Z
-	update_flags XNZV0C
+	shift -= 1
+	loop shift
+		lsl dregs.R 1 dregs.R Z
+		update_flags V
+		vtmp |= vflag
+	end
+	shift += 1
+	lsl dregs.R 1 dregs.R Z
+	update_flags XNZVC
+	vflag |= vtmp
 	local cyc 32
 	cyc = shift + shift
 	switch Z
@@ -1755,67 +1766,30 @@ m68k_save_dst
 1110CCC1ZZ100RRR asl_dn
 	invalid Z 3
 	local shift 8
+	local vtmp 8
 	and dregs.C 63 shift
-	#TODO: implement loops and do this a bit at a time to implement V flag
-	switch Z
-	case 2
-		if shift >=U 32
-			if shift = 32
-				lsl dregs.R 31 dregs.R Z
-				lsl dregs.R 1 dregs.R Z
-				update_flags XNZ1V0C
-			else
-				dregs.R:Z = 0
-				update_flags X0N0Z1V0C0
-			end
-		else
-			lsl dregs.R shift dregs.R Z
-			update_flags NZV0C
-			if shift
-				xflag = cflag
-			end
+	vtmp = 0
+	if shift
+		shift -= 1
+		loop shift
+			lsl dregs.R 1 dregs.R Z
+			update_flags V
+			vtmp |= vflag
 		end
-	case 1
-		if shift >=U 16
-			if shift = 16
-				lsl dregs.R 15 dregs.R Z
-				lsl dregs.R 1 dregs.R Z
-				update_flags XN0Z1V0C
-			else
-				dregs.R:Z = 0
-				update_flags X0N0Z1V0C0
-			end
-		else
-			lsl dregs.R shift dregs.R Z
-			update_flags NZV0C
-			if shift
-				xflag = cflag
-			end
-		end
-	case 0
-		if shift >=U 8
-			if shift = 8
-				lsl dregs.R 7 dregs.R Z
-				lsl dregs.R 1 dregs.R Z
-				update_flags XN0Z1V0C
-			else
-				dregs.R:Z = 0
-				update_flags X0N0Z1V0C0
-			end
-		else
-			lsl dregs.R shift dregs.R Z
-			update_flags NZV0C
-			if shift
-				xflag = cflag
-			end
-		end
+		shift += 1
+		lsl dregs.R 1 dregs.R Z
+		update_flags XNZVC
+		vflag |= vtmp
+	else
+		cmp 0 dregs.R Z
+		update_flags NZV0C
 	end
-	add shift shift shift
+	shift += shift
 	switch Z
 	case 2
-		add 4 shift shift
+		shift += 4
 	default
-		add 2 shift shift
+		shift += 2
 	end
 	cycles shift
 	#TODO: should this happen before or after the majority of the shift?
