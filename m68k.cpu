@@ -2630,6 +2630,48 @@ m68k_calc_ea
 	
 	m68k_prefetch
 
+0100DDDZZ0MMMRRR chk
+	invalid M 1
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	invalid Z 0
+	invalid Z 1
+	local tmp 8
+	local src_alt 32
+	switch Z
+	case 2
+		meta size 2
+	case 3
+		meta size 1
+	end
+	m68k_fetch_src_ea M R size
+	if src_is_mem
+		src_alt = src
+		meta src src_alt
+	end
+	m68k_prefetch
+	cmp dregs.D src size
+	update_flags NZVC
+	tmp = vflag
+	tmp |= nflag
+	cmp 0 dregs.D size
+	update_flags NZV0C0
+	if tmp
+		# D > src (signed)
+		pc -= 2
+		m68k_trap 6
+	else
+		cycles 2
+		if nflag
+			# D < 0
+			pc -= 2
+			m68k_trap 6
+		else
+			cycles 2
+		end
+	end
+
 0100DDD111MMMRRR lea
 	invalid M 0
 	invalid M 1
@@ -2715,6 +2757,13 @@ m68k_calc_ea
 	
 	cycles 4
 	m68k_prefetch
+
+0100111001110110 trapv
+	if vflag
+		m68k_trap 7
+	else
+		m68k_prefetch
+	end
 
 0100111001110111 rtr
 	#Read saved CCR
