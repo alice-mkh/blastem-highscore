@@ -1920,7 +1920,9 @@ void set_region(genesis_context *gen, rom_info *info, uint8_t region)
 {
 	if (!region) {
 		char * def_region = tern_find_path_default(config, "system\0default_region\0", (tern_val){.ptrval = "U"}, TVAL_PTR).ptrval;
-		if (!info->regions || (info->regions & translate_region_char(toupper(*def_region)))) {
+		char * force_region = tern_find_path_default(config, "system\0force_region\0", (tern_val){.ptrval = "off"}, TVAL_PTR).ptrval;
+		
+		if (!info->regions || (info->regions & translate_region_char(toupper(*def_region))) || !strcmp(force_region, "on")) {
 			region = translate_region_char(toupper(*def_region));
 		} else {
 			region = info->regions;

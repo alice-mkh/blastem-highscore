@@ -2458,6 +2458,7 @@ void view_system_settings(struct nk_context *context)
 			config = tern_insert_path(config, config_path1, (tern_val){.ptrval = strdup(io_opts_1[selected_io_1])}, TVAL_PTR);
 		}
 		selected_region = settings_dropdown_ex(context, "Default Region", region_codes, regions, num_regions, selected_region, "system\0default_region\0");
+		settings_toggle(context, "Force Selected Region", "system\0force_region\0", 0);
 		selected_sync = settings_dropdown(context, "Sync Source", sync_opts, num_sync_opts, selected_sync, "system\0sync_source\0");
 		if (!show_sms) {
 			settings_int_property(context, "68000 Clock Divider", "", "clocks\0m68k_divider\0", 7, 1, 53);
