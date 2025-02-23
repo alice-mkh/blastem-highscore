@@ -2013,10 +2013,28 @@ m68k_save_dst
 	invalid M 7 R 7
 	m68k_fetch_dst_ea M R Z
 	sbc dst 0 dst Z
-	update_flags XNZVC
-	if Z = 2
+	update_flags XNVC
+	switch Z
+	case 0
+		local tmp8 8
+		tmp8 = dst
+		if tmp8
+			update_flags Z0
+		end
+	case 1
+		local tmp16 16
+		tmp16 = dst
+		if tmp16
+			update_flags Z0
+		end
+	case 2
+		local tmp32 32
 		if M = 0
 			cycles 2
+		end
+		tmp32 = dst
+		if dst
+			update_flags Z0
 		end
 	end
 	m68k_save_dst Z
