@@ -295,13 +295,13 @@ void delete_controller_info(void)
 }
 
 char const *labels_xbox[] = {
-	"A", "B", "X", "Y", "Back", NULL, "Start", "Click", "Click", "White", "Black", "LT", "RT"
+	"A", "B", "X", "Y", "Back", NULL, "Start", "LS Click", "RS Click", "White", "Black", "LT", "RT"
 };
 char const *labels_360[] = {
-	"A", "B", "X", "Y", "Back", "Xbox", "Start", "Click", "Click", "LB", "RB", "LT", "RT"
+	"A", "B", "X", "Y", "Back", "Xbox", "Start", "LS Click", "RS Click", "LB", "RB", "LT", "RT"
 };
 static char const *labels_xbone[] = {
-	"A", "B", "X", "Y", "View", "Xbox", "Menu", "Click", "Click", "LB", "RB", "LT", "RT"
+	"A", "B", "X", "Y", "View", "Xbox", "Menu", "LS Click", "RS Click", "LB", "RB", "LT", "RT"
 };
 static char const *labels_ps3[] = {
 	"cross", "circle", "square", "triangle", "Select", "PS", "Start", "L3", "R3", "L1", "R1", "L2", "R2"
