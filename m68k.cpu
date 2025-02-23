@@ -3329,19 +3329,29 @@ m68k_check_cond
 	cycle_shift = dregs.C & 63
 	switch Z
 	case 2
-		if cycle_shift = 32
-			rrc dregs.R 31 dregs.R Z
-			rrc dregs.R 1 dregs.R Z
-			update_flags NZV0C
-		else
-			shift = dregs.C & 31
-			rrc dregs.R shift dregs.R Z
-			update_flags NZV0C
+		meta max_shift 31
+	case 1
+		meta max_shift 15
+	case 0
+		meta max_shift 7
+	end
+	shift = cycle_shift
+	if shift
+		loop
+			if max_shift >=U shift
+				rrc dregs.R shift dregs.R Z
+				update_flags XNZV0C
+				break
+			else
+				rrc dregs.R max_shift dregs.R Z
+				update_flags X
+				shift -= max_shift
+			end
 		end
-	default
-		shift = dregs.C & 31
-		rrc dregs.R shift dregs.R Z
-		update_flags XNZV0C
+	else
+		cflag = xflag
+		cmp 0 dregs.R Z
+		update_flags NZV0
 	end
 	cycle_shift += cycle_shift
 	switch Z
@@ -3399,19 +3409,29 @@ m68k_check_cond
 	cycle_shift = dregs.C & 63
 	switch Z
 	case 2
-		if cycle_shift = 32
-			rrc dregs.R 31 dregs.R Z
-			rlc dregs.R 1 dregs.R Z
-			update_flags NZV0C
-		else
-			shift = dregs.C & 31
-			rlc dregs.R shift dregs.R Z
-			update_flags NZV0C
+		meta max_shift 31
+	case 1
+		meta max_shift 15
+	case 0
+		meta max_shift 7
+	end
+	shift = cycle_shift
+	if shift
+		loop
+			if max_shift >=U shift
+				rlc dregs.R shift dregs.R Z
+				update_flags XNZV0C
+				break
+			else
+				rlc dregs.R max_shift dregs.R Z
+				update_flags X
+				shift -= max_shift
+			end
 		end
-	default
-		shift = dregs.C & 31
-		rlc dregs.R shift dregs.R Z
-		update_flags XNZV0C
+	else
+		cflag = xflag
+		cmp 0 dregs.R Z
+		update_flags NZV0
 	end
 	cycle_shift += cycle_shift
 	switch Z
