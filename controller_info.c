@@ -30,7 +30,9 @@ static heuristic heuristics[] = {
 	{"Wii U", {.type = TYPE_NINTENDO, .subtype = SUBTYPE_WIIU}},
 	{"Nintendo Switch", {.type = TYPE_NINTENDO, .subtype = SUBTYPE_SWITCH}},
 	{"Saturn", {.type = TYPE_SEGA, .subtype = SUBTYPE_SATURN}},
-	{"8BitDo M30", {.type = TYPE_SEGA, .subtype = SUBTYPE_GENESIS, .variant = VARIANT_8BUTTON}}
+	{"8BitDo M30", {.type = TYPE_SEGA, .subtype = SUBTYPE_GENESIS, .variant = VARIANT_8BUTTON}},
+	{"Mini 3B Controller", {.type = TYPE_SEGA, .subtype = SUBTYPE_GENESIS, .variant = VARIANT_3BUTTON}},
+	{"Mini 6B Controller", {.type = TYPE_SEGA, .subtype = SUBTYPE_GENESIS, .variant = VARIANT_6B_BUMPERS}}
 };
 const uint32_t num_heuristics = sizeof(heuristics)/sizeof(*heuristics);
 
@@ -71,7 +73,6 @@ static const char *variant_names[] = {
 	"6b bumpers",
 	"6b right",
 	"3button",
-	"6button",
 	"8button"
 };
 
@@ -140,12 +141,17 @@ controller_info get_controller_info(int joystick)
 		char *variant = tern_find_ptr(info, "variant");
 		res.variant = VARIANT_NORMAL;
 		if (variant) {
-			for (int i = 0; i < VARIANT_NUM; i++)
+			int i;
+			for (i = 0; i < VARIANT_NUM; i++)
 			{
 				if (!strcmp(variant_names[i], variant)) {
 					res.variant = i;
 					break;
 				}
+			}
+			if (i == VARIANT_NUM && !strcmp("6button", variant)) {
+				//workaround for some bad saved configs caused by a silly bug
+				res.variant = VARIANT_8BUTTON;
 			}
 		}
 		res.name = control ? SDL_GameControllerName(control) : SDL_JoystickName(stick);
