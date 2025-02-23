@@ -1514,6 +1514,7 @@ static void view_controller_mappings(struct nk_context *context)
 					save_controller_mapping(selected_controller, mapping_string);
 					free(mapping_string);
 					pop_view();
+					bindings_set_joy_state(selected_controller, 1);
 					if (initial_controller_config) {
 						push_view(view_controller_bindings);
 						controller_binding_changed = 0;
@@ -1554,6 +1555,8 @@ static void show_mapping_view(void)
 	}
 
 	push_view(view_controller_mappings);
+	bindings_set_joy_state(selected_controller, 0);
+	
 }
 
 static void view_controller_variant(struct nk_context *context)
