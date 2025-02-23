@@ -1885,6 +1885,10 @@ void view_controllers(struct nk_context *context)
 		if (!found_controller) {
 			nk_layout_row_static(context, context->style.font->height, render_width() - 2 * context->style.font->height, 1);
 			nk_label(context, "No controllers detected", NK_TEXT_CENTERED);
+#ifdef __EMSCRIPTEN__
+			nk_label(context, "You must press a button on the controller", NK_TEXT_CENTERED);
+			nk_label(context, "before it will be shown here", NK_TEXT_CENTERED);
+#endif
 		}
 		nk_layout_row_static(context, context->style.font->height, (render_width() - 2 * context->style.font->height) / 2, 2);
 		nk_label(context, "", NK_TEXT_LEFT);
