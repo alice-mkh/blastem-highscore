@@ -30,5 +30,6 @@ uint8_t bind_down(const char *target);
 void bindings_release_capture(void);
 void bindings_reacquire_capture(void);
 void set_content_binding_state(uint8_t enabled);
+void bindings_set_joy_state(int joystick, uint8_t enabled);
 
 #endif //BINDINGS_H_

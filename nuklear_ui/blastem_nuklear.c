@@ -1514,6 +1514,7 @@ static void view_controller_mappings(struct nk_context *context)
 					save_controller_mapping(selected_controller, mapping_string);
 					free(mapping_string);
 					pop_view();
+					bindings_set_joy_state(selected_controller, 1);
 					if (initial_controller_config) {
 						push_view(view_controller_bindings);
 						controller_binding_changed = 0;
@@ -1554,6 +1555,8 @@ static void show_mapping_view(void)
 	}
 
 	push_view(view_controller_mappings);
+	bindings_set_joy_state(selected_controller, 0);
+	
 }
 
 static void view_controller_variant(struct nk_context *context)
@@ -1882,6 +1885,10 @@ void view_controllers(struct nk_context *context)
 		if (!found_controller) {
 			nk_layout_row_static(context, context->style.font->height, render_width() - 2 * context->style.font->height, 1);
 			nk_label(context, "No controllers detected", NK_TEXT_CENTERED);
+#ifdef __EMSCRIPTEN__
+			nk_label(context, "You must press a button on the controller", NK_TEXT_CENTERED);
+			nk_label(context, "before it will be shown here", NK_TEXT_CENTERED);
+#endif
 		}
 		nk_layout_row_static(context, context->style.font->height, (render_width() - 2 * context->style.font->height) / 2, 2);
 		nk_label(context, "", NK_TEXT_LEFT);
@@ -2458,6 +2465,7 @@ void view_system_settings(struct nk_context *context)
 			config = tern_insert_path(config, config_path1, (tern_val){.ptrval = strdup(io_opts_1[selected_io_1])}, TVAL_PTR);
 		}
 		selected_region = settings_dropdown_ex(context, "Default Region", region_codes, regions, num_regions, selected_region, "system\0default_region\0");
+		settings_toggle(context, "Force Selected Region", "system\0force_region\0", 0);
 		selected_sync = settings_dropdown(context, "Sync Source", sync_opts, num_sync_opts, selected_sync, "system\0sync_source\0");
 		if (!show_sms) {
 			settings_int_property(context, "68000 Clock Divider", "", "clocks\0m68k_divider\0", 7, 1, 53);

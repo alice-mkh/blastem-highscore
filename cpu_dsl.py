@@ -613,7 +613,10 @@ def _updateFlagsCImpl(prog, params, rawParams):
 				myRes = '({a} ^ {b} ^ {res})'.format(a = prog.lastA, b = prog.lastB, res = lastDst)
 			elif calc == 'overflow':
 				resultBit = prog.getLastSize() - 1
-				myRes = '((({a} ^ {b})) & ({a} ^ {res}))'.format(a = prog.lastA, b = prog.lastBFlow, res = lastDst)
+				if prog.lastOp.op == 'lsl':
+					myRes = f'({prog.lastA} ^ {lastDst})'
+				else:
+					myRes = '((({a} ^ {b})) & ({a} ^ {res}))'.format(a = prog.lastA, b = prog.lastBFlow, res = lastDst)
 			else:
 				#Note: offsetting this by the operation size - 8 makes sense for the Z80
 				#but might not for other CPUs with this kind of fixed bit flag behavior
@@ -1726,11 +1729,32 @@ class Loop(ChildBlock):
 	
 	def generate(self, prog, parent, fieldVals, output, otype, flagUpdates):
 		self.regValues = parent.regValues
+		for op in self.body:
+			if op.op in _opMap:
+				opDef = _opMap[op.op]
+				if len(opDef.outOp):
+					for index in opDef.outOp:
+						dst = op.params[index]
+						while dst in prog.meta:
+							dst = prog.meta[dst]
+						if dst in self.regValues:
+							#value changes in loop body
+							#so we need to prevent constant folding
+							maybeLocal = self.resolveLocal(dst)
+							if maybeLocal:
+								#for locals, we also need to persist
+								#the current constant fold value to the actual variable
+								output.append(f'\n\t{maybeLocal} = {self.regValues[dst]};')
+							del self.regValues[dst]
+			else:
+				#TODO: handle block types here
+				pass
 		if self.count:
 			count = prog.resolveParam(self.count, self, fieldVals)
-			output.append('\n\tfor (uint32_t loop_counter__ = 0; loop_counter__ < {count}; loop_counter__++) {')
+			output.append(f'\n\tfor (uint32_t loop_counter__ = 0; loop_counter__ < {count}; loop_counter__++) {{')
 		else:
 			output.append('\n\tfor (;;) {')
+					
 		self.processOps(prog, fieldVals, output, otype, self.body)
 		output.append('\n\t}')
 	

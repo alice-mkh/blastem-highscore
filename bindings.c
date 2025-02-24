@@ -86,6 +86,7 @@ typedef struct {
 #define DEFAULT_JOYBUTTON_ALLOC 12
 static keybinding *bindings[0x10000];
 static joystick joysticks[MAX_JOYSTICKS];
+static uint8_t joystick_enabled[MAX_JOYSTICKS] = {1,1,1,1,1,1,1,1};
 static mousebinding mice[MAX_MICE];
 const uint8_t dpadbits[] = {RENDER_DPAD_UP, RENDER_DPAD_DOWN, RENDER_DPAD_LEFT, RENDER_DPAD_RIGHT};
 
@@ -205,6 +206,14 @@ void set_content_binding_state(uint8_t enabled)
 	content_binds_enabled = enabled;
 }
 
+void bindings_set_joy_state(int joystick, uint8_t enabled)
+{
+	if (joystick >= MAX_JOYSTICKS || joystick < 0) {
+		return;
+	}
+	joystick_enabled[joystick] = enabled;
+}
+
 void handle_binding_down(keybinding * binding)
 {
 	if (!current_system || !content_binds_enabled) {
@@ -235,7 +244,7 @@ void handle_keydown(int keycode, uint8_t scancode)
 
 void handle_joydown(int joystick, int button)
 {
-	if (joystick >= MAX_JOYSTICKS || button >= joysticks[joystick].num_buttons) {
+	if (joystick >= MAX_JOYSTICKS || button >= joysticks[joystick].num_buttons || !joystick_enabled[joystick]) {
 		return;
 	}
 	keybinding * binding = joysticks[joystick].buttons + button;
@@ -515,7 +524,7 @@ void handle_keyup(int keycode, uint8_t scancode)
 
 void handle_joyup(int joystick, int button)
 {
-	if (joystick >= MAX_JOYSTICKS  || button >= joysticks[joystick].num_buttons) {
+	if (joystick >= MAX_JOYSTICKS  || button >= joysticks[joystick].num_buttons || !joystick_enabled[joystick]) {
 		return;
 	}
 	keybinding * binding = joysticks[joystick].buttons + button;
@@ -524,7 +533,7 @@ void handle_joyup(int joystick, int button)
 
 void handle_joy_dpad(int joystick, int dpadnum, uint8_t value)
 {
-	if (joystick >= MAX_JOYSTICKS  || dpadnum >= joysticks[joystick].num_dpads) {
+	if (joystick >= MAX_JOYSTICKS  || dpadnum >= joysticks[joystick].num_dpads || !joystick_enabled[joystick]) {
 		return;
 	}
 	joydpad * dpad = joysticks[joystick].dpads + dpadnum;
@@ -542,7 +551,7 @@ void handle_joy_dpad(int joystick, int dpadnum, uint8_t value)
 
 void handle_joy_axis(int joystick, int axis, int16_t value)
 {
-	if (joystick >= MAX_JOYSTICKS  || axis >= joysticks[joystick].num_axes) {
+	if (joystick >= MAX_JOYSTICKS  || axis >= joysticks[joystick].num_axes || !joystick_enabled[joystick]) {
 		return;
 	}
 	joyaxis *jaxis = joysticks[joystick].axes + axis;
