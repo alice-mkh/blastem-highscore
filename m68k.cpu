@@ -3477,3 +3477,15 @@ m68k_check_cond
 	update_flags XNZV0C
 	m68k_save_dst 1
 	m68k_prefetch
+
+1010XXXXXXXXXXXX line_a
+	nospecialize X
+	#TODO cycle counts
+	pc -= 2
+	m68k_trap 10
+
+1111XXXXXXXXXXXX line_f
+	nospecialize X
+	#TODO cycle counts
+	pc -= 2
+	m68k_trap 11
