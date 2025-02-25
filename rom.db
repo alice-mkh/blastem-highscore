@@ -1449,7 +1449,9 @@ T-122016 {
 		2 gamepad3.2
 	}
 }
-T-50086 {
+c9c18b389a9afc5f30ab5d457f8f72e1966ff1e6 {
+	#Heart Beat Personal Trainer version
+	#Header has the product ID for PGA Tour Golf (not II)
 	name PGA Tour Golf II
 	HeartbeatTrainer {
 		size 512
