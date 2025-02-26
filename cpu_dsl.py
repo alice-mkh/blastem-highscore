@@ -853,9 +853,9 @@ def _mulsCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	if p0Size >= size:
 		p0Size = size // 2
 	if p1Size >= size:
@@ -875,9 +875,9 @@ def _muluCImpl(prog, params, rawParams, flagUpdates):
 			size = 16
 		else:
 			size = 32
-		prog.lastSize = size
 	else:
 		size = destSize
+	prog.lastSize = size
 	if p0Size >= size:
 		p0Size = size // 2
 	if p1Size >= size:

@@ -2013,10 +2013,28 @@ m68k_save_dst
 	invalid M 7 R 7
 	m68k_fetch_dst_ea M R Z
 	sbc dst 0 dst Z
-	update_flags XNZVC
-	if Z = 2
+	update_flags XNVC
+	switch Z
+	case 0
+		local tmp8 8
+		tmp8 = dst
+		if tmp8
+			update_flags Z0
+		end
+	case 1
+		local tmp16 16
+		tmp16 = dst
+		if tmp16
+			update_flags Z0
+		end
+	case 2
+		local tmp32 32
 		if M = 0
 			cycles 2
+		end
+		tmp32 = dst
+		if dst
+			update_flags Z0
 		end
 	end
 	m68k_save_dst Z
@@ -3329,19 +3347,29 @@ m68k_check_cond
 	cycle_shift = dregs.C & 63
 	switch Z
 	case 2
-		if cycle_shift = 32
-			rrc dregs.R 31 dregs.R Z
-			rrc dregs.R 1 dregs.R Z
-			update_flags NZV0C
-		else
-			shift = dregs.C & 31
-			rrc dregs.R shift dregs.R Z
-			update_flags NZV0C
+		meta max_shift 31
+	case 1
+		meta max_shift 15
+	case 0
+		meta max_shift 7
+	end
+	shift = cycle_shift
+	if shift
+		loop
+			if max_shift >=U shift
+				rrc dregs.R shift dregs.R Z
+				update_flags XNZV0C
+				break
+			else
+				rrc dregs.R max_shift dregs.R Z
+				update_flags X
+				shift -= max_shift
+			end
 		end
-	default
-		shift = dregs.C & 31
-		rrc dregs.R shift dregs.R Z
-		update_flags XNZV0C
+	else
+		cflag = xflag
+		cmp 0 dregs.R Z
+		update_flags NZV0
 	end
 	cycle_shift += cycle_shift
 	switch Z
@@ -3399,19 +3427,29 @@ m68k_check_cond
 	cycle_shift = dregs.C & 63
 	switch Z
 	case 2
-		if cycle_shift = 32
-			rrc dregs.R 31 dregs.R Z
-			rlc dregs.R 1 dregs.R Z
-			update_flags NZV0C
-		else
-			shift = dregs.C & 31
-			rlc dregs.R shift dregs.R Z
-			update_flags NZV0C
+		meta max_shift 31
+	case 1
+		meta max_shift 15
+	case 0
+		meta max_shift 7
+	end
+	shift = cycle_shift
+	if shift
+		loop
+			if max_shift >=U shift
+				rlc dregs.R shift dregs.R Z
+				update_flags XNZV0C
+				break
+			else
+				rlc dregs.R max_shift dregs.R Z
+				update_flags X
+				shift -= max_shift
+			end
 		end
-	default
-		shift = dregs.C & 31
-		rlc dregs.R shift dregs.R Z
-		update_flags XNZV0C
+	else
+		cflag = xflag
+		cmp 0 dregs.R Z
+		update_flags NZV0
 	end
 	cycle_shift += cycle_shift
 	switch Z
@@ -3439,3 +3477,15 @@ m68k_check_cond
 	update_flags XNZV0C
 	m68k_save_dst 1
 	m68k_prefetch
+
+1010XXXXXXXXXXXX line_a
+	nospecialize X
+	#TODO cycle counts
+	pc -= 2
+	m68k_trap 10
+
+1111XXXXXXXXXXXX line_f
+	nospecialize X
+	#TODO cycle counts
+	pc -= 2
+	m68k_trap 11

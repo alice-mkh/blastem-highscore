@@ -176,6 +176,23 @@ controller_info get_controller_info(int joystick)
 	SDL_GameControllerClose(control);
 	for (uint32_t i = 0; i < num_heuristics; i++)
 	{
+		if (strstr(name, "Hori Fighting Commander")) {
+			uint8_t is_xbox = strstr(name, "Xbox") || strstr(name, "ONE");
+			controller_info res = {
+				.variant = VARIANT_6B_RIGHT,
+				.name = name,
+				.stick_deadzone = DEFAULT_DEADZONE,
+				.trigger_deadzone = DEFAULT_DEADZONE
+			};
+			if (is_xbox) {
+				res.type = TYPE_XBOX;
+				res.subtype = strstr(name, "ONE") ? SUBTYPE_XBONE : SUBTYPE_X360;
+			} else {
+				res.type = TYPE_PSX;
+				res.subtype = strstr(name, "PS3") ? SUBTYPE_PS3 : SUBTYPE_PS4;
+			}
+			return res;
+		}
 		if (strstr(name, heuristics[i].name)) {
 			controller_info res = heuristics[i].info;
 			res.name = name;
