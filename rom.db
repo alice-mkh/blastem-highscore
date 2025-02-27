@@ -1666,6 +1666,12 @@ b620c2bebd5bab39bc9258a925169b4c93614599 {
 		400000 {
 			device RAM
 			size 2
+			last 400003
+			bus both
+		}
+		400004 {
+			device RAM
+			size 2
 			last 400007
 			bus both
 		}
