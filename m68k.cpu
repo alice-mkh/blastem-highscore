@@ -2453,6 +2453,7 @@ m68k_save_dst
 0000DDD10Z001AAA movep_ay_dx
 	local address 32
 	m68k_prefetch
+	sext 32 scratch1 scratch1
 	scratch1 += aregs.A
 	address = scratch1 + 2
 	ocall read_8
@@ -2474,6 +2475,7 @@ m68k_save_dst
 
 0000DDD11Z001AAA movep_dx_ay
 	m68k_prefetch
+	sext 32 scratch1 scratch1
 	scratch2 = scratch1 + aregs.A
 	if Z
 		scratch1 = dregs.D >> 24
