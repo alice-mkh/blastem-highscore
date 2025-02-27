@@ -1517,7 +1517,7 @@ void render_save_video(char *path)
 	free(path);
 }
 
-#ifndef __EMSCRIPTEN__
+#ifdef GL_DEBUG_OUTPUT
 void GLAPIENTRY gl_message_callback(GLenum source, GLenum type, GLenum id, GLenum severity, GLsizei length, const GLchar *message, const void *user)
 {
 	fprintf(stderr, "GL Message: %d, %d, %d - %s\n", source, type, severity, message);
@@ -1563,7 +1563,7 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 	if (render_gl) {
 		extras[win_idx].gl_context = SDL_GL_CreateContext(extras[win_idx].win);
 		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
-#ifndef __EMSCRIPTEN__
+#ifdef GL_DEBUG_OUTPUT
 		glEnable(GL_DEBUG_OUTPUT);
 		if (glDebugMessageCallback) {
 			glDebugMessageCallback(gl_message_callback, NULL);
