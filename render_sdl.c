@@ -26,6 +26,9 @@
 #include <GL/glew.h>
 #endif
 #endif
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #define MAX_EVENT_POLL_PER_FRAME 2
 
@@ -123,12 +126,20 @@ static void audio_callback(void * userdata, uint8_t *byte_stream, int len)
 {
 	SDL_LockMutex(audio_mutex);
 		uint8_t all_ready;
+#ifdef __EMSCRIPTEN__
+		if (!all_sources_ready()) {
+			memset(byte_stream, 0, len);
+			SDL_UnlockMutex(audio_mutex);
+			return;
+		}
+#else
 		do {
 			all_ready = all_sources_ready();
 			if (!quitting && !all_ready) {
 				SDL_CondWait(audio_ready, audio_mutex);
 			}
 		} while(!quitting && !all_ready);
+#endif
 		if (!quitting) {
 			mix_and_convert(byte_stream, len, NULL);
 		}
@@ -255,6 +266,12 @@ void render_source_resumed(audio_source *src)
 
 uint8_t audio_deadlock_hack(void);
 
+static ui_render_fun audio_full_cb;
+void render_set_audio_full_fun(ui_render_fun cb)
+{
+	audio_full_cb = cb;
+}
+
 void render_do_audio_ready(audio_source *src)
 {
 	if (sync_src == SYNC_AUDIO_THREAD) {
@@ -268,7 +285,9 @@ void render_do_audio_ready(audio_source *src)
 			system_request_exit(current_system, 0);
 		}
 	} else if (sync_src == SYNC_AUDIO) {
+		uint8_t all_ready = 0;
 		SDL_LockMutex(audio_mutex);
+#ifndef __EMSCRIPTEN__
 			if (src->front_populated) {
 				if (audio_deadlock_hack()) {
 					SDL_CondSignal(audio_ready);
@@ -277,13 +296,18 @@ void render_do_audio_ready(audio_source *src)
 			while (src->front_populated) {
 				SDL_CondWait(src->opaque, audio_mutex);
 			}
+#endif
 			int16_t *tmp = src->front;
 			src->front = src->back;
 			src->back = tmp;
 			src->front_populated = 1;
 			src->buffer_pos = 0;
+			all_ready = all_sources_ready();
 			SDL_CondSignal(audio_ready);
 		SDL_UnlockMutex(audio_mutex);
+		if (all_ready && audio_full_cb) {
+			audio_full_cb();
+		}
 	} else {
 		uint32_t num_buffered;
 		SDL_LockAudio();
@@ -1070,6 +1094,12 @@ static void init_audio()
 		debug_message("unsupported format %X\n", actual.format);
 		warning("Unsupported audio sample format: %X\n", actual.format);
 	}
+#ifdef __EMSCRIPTEN__
+	if (sync_src == SYNC_AUDIO) {
+		printf("emscripten_set_main_loop_timing %d\n", actual.samples * 500 / actual.freq);
+		emscripten_set_main_loop_timing(EM_TIMING_SETTIMEOUT, actual.samples * 500 / actual.freq);
+	}
+#endif
 	render_audio_initialized(format, actual.freq, actual.channels, actual.samples, SDL_AUDIO_BITSIZE(actual.format) / 8);
 }
 
