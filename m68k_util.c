@@ -3,7 +3,7 @@
 void m68k_read_8(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
-	context->scratch1 = read_byte(context->scratch1, context->mem_pointers, &context->opts->gen, context);
+	context->scratch1 = read_byte(context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
 }
 
 #ifdef DEBUG_DISASM
@@ -11,7 +11,7 @@ void m68k_read_8(m68k_context *context)
 static uint16_t debug_disasm_fetch(uint32_t address, void *vcontext)
 {
 	m68k_context *context = vcontext;
-	return read_word(address, context->mem_pointers, &context->opts->gen, context);
+	return read_word(address, (void**)context->mem_pointers, &context->opts->gen, context);
 }
 #endif
 void m68k_read_16(m68k_context *context)
@@ -20,7 +20,7 @@ void m68k_read_16(m68k_context *context)
 #ifdef DEBUG_DISASM
 	uint32_t tmp = context->scratch1;
 #endif
-	context->scratch1 = read_word(context->scratch1, context->mem_pointers, &context->opts->gen, context);
+	context->scratch1 = read_word(context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
 #ifdef DEBUG_DISASM
 	if (tmp == context->pc) {
 		m68kinst inst;
@@ -37,13 +37,13 @@ void m68k_read_16(m68k_context *context)
 void m68k_write_8(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
-	write_byte(context->scratch2, context->scratch1, context->mem_pointers, &context->opts->gen, context);
+	write_byte(context->scratch2, context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
 }
 
 void m68k_write_16(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
-	write_word(context->scratch2, context->scratch1, context->mem_pointers, &context->opts->gen, context);
+	write_word(context->scratch2, context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
 }
 
 void m68k_sync_cycle(m68k_context *context, uint32_t target_cycle)
