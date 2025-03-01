@@ -3491,3 +3491,9 @@ m68k_check_cond
 	#TODO cycle counts
 	pc -= 2
 	m68k_trap 11
+
+XXXXXXXXXXXXXXXX illegal
+	nospecialize X
+	#TODO cycle counts
+	pc -= 2
+	m68k_trap 4
