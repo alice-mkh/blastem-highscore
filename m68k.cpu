@@ -566,7 +566,7 @@ m68k_save_dst
 	switch M
 	case 1
 		cycles 4
-		add src dst dst Z
+		add src dst dst 2
 	default
 		add src dst dst Z
 		update_flags XNZVC
@@ -1304,6 +1304,7 @@ m68k_save_dst
 	
 0101III1ZZMMMRRR subq
 	invalid Z 3
+	invalid M 1 Z 0
 	invalid M 7 R 2
 	invalid M 7 R 3
 	invalid M 7 R 4
@@ -1321,7 +1322,7 @@ m68k_save_dst
 	m68k_fetch_dst_ea M R Z
 	switch M
 	case 1
-		sub src dst dst Z
+		sub src dst dst 2
 	default
 		sub src dst dst Z
 		update_flags XNZVC
@@ -3492,8 +3493,8 @@ m68k_check_cond
 	pc -= 2
 	m68k_trap 11
 
-XXXXXXXXXXXXXXXX illegal
-	nospecialize X
-	#TODO cycle counts
-	pc -= 2
-	m68k_trap 4
+#XXXXXXXXXXXXXXXX illegal
+#	nospecialize X
+#	#TODO cycle counts
+#	pc -= 2
+#	m68k_trap 4
