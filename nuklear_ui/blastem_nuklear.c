@@ -2186,6 +2186,7 @@ void view_video_settings(struct nk_context *context)
 		settings_toggle(context, "Fullscreen", "video\0fullscreen\0", 0);
 		settings_toggle(context, "Open GL", "video\0gl\0", 1);
 		settings_toggle(context, "Scanlines", "video\0scanlines\0", 0);
+		settings_toggle(context, "Integer Scaling", "video\0integer_scaling\0", 0);
 		selected_vsync = settings_dropdown_ex(context, "VSync", vsync_opts, vsync_opt_names, num_vsync_opts, selected_vsync, "video\0vsync\0");
 		settings_int_input(context, "Windowed Width", "video\0width\0", "640");
 		nk_label(context, "Shader", NK_TEXT_LEFT);

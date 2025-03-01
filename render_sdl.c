@@ -620,25 +620,52 @@ static void update_aspect()
 	main_clip.h = main_height;
 	main_clip.x = main_clip.y = 0;
 	if (config_aspect() > 0.0f) {
+		char *integer_scaling_str = tern_find_path_default(config, "video\0integer_scaling\0", (tern_val){.ptrval = "off"}, TVAL_PTR).ptrval;
+		uint8_t integer_scaling = !strcmp(integer_scaling_str, "on");
 		float aspect = (float)main_width / main_height;
-		if (fabs(aspect - config_aspect()) < 0.01f) {
+		if (!integer_scaling && fabs(aspect - config_aspect()) < 0.01f) {
 			//close enough for government work
 			return;
 		}
+		uint32_t height, scale;
+		if (integer_scaling) {
+			height = render_emulated_height();
+			if (aspect >= config_aspect()) {
+				scale = main_height / height;
+			} else {
+				uint32_t aspect_height = 0.5f + (float)main_width / config_aspect();
+				scale = aspect_height / height;
+			}
+		}
 #ifndef DISABLE_OPENGL
 		if (render_gl) {
-			for (int i = 0; i < 4; i++)
-			{
-				if (aspect > config_aspect()) {
-					vertex_data[i*2] *= config_aspect()/aspect;
-				} else {
-					vertex_data[i*2+1] *= aspect/config_aspect();
+			if (integer_scaling) {
+				float vscale = ((float)(scale * height)) / (float)main_height;
+				float hscale = (config_aspect() * (float)(scale * height)) / (float)main_width;
+				for (int i = 0; i < 4; i++)
+				{
+					vertex_data[i*2] *= hscale;
+					vertex_data[i*2+1] *= vscale;
+				}
+			} else {
+				for (int i = 0; i < 4; i++)
+				{
+					if (aspect > config_aspect()) {
+						vertex_data[i*2] *= config_aspect()/aspect;
+					} else {
+						vertex_data[i*2+1] *= aspect/config_aspect();
+					}
 				}
 			}
 		} else {
 #endif
-			main_clip.w = aspect > config_aspect() ? config_aspect() * (float)main_height : main_width;
-			main_clip.h = aspect > config_aspect() ? main_height : main_width / config_aspect();
+			if (integer_scaling) {
+				main_clip.h = height * scale;
+				main_clip.w = main_clip.h * config_aspect();
+			} else {
+				main_clip.w = aspect > config_aspect() ? config_aspect() * (float)main_height : main_width;
+				main_clip.h = aspect > config_aspect() ? main_height : main_width / config_aspect();
+			}
 			main_clip.x = (main_width  - main_clip.w) / 2;
 			main_clip.y = (main_height - main_clip.h) / 2;
 #ifndef DISABLE_OPENGL
