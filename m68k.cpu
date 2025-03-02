@@ -1522,10 +1522,10 @@ m68k_save_dst
 	invalid M 7 R 6
 	invalid M 7 R 7
 	
-	m68k_fetch_dst_ea M R 0
-	lsr dst 1 dst
+	m68k_fetch_dst_ea M R 1
+	lsr dst 1 dst 1
 	update_flags XNZV0C
-	m68k_save_dst 0
+	m68k_save_dst 1
 	m68k_prefetch
 
 1110CCC0ZZ000RRR asri
@@ -1619,10 +1619,10 @@ m68k_save_dst
 	invalid M 7 R 6
 	invalid M 7 R 7
 	
-	m68k_fetch_dst_ea M R 0
-	asr dst 1 dst
+	m68k_fetch_dst_ea M R 1
+	asr dst 1 dst 1
 	update_flags XNZV0C
-	m68k_save_dst 0
+	m68k_save_dst 1
 	m68k_prefetch
 	
 1110CCC1ZZ001RRR lsli
@@ -1725,10 +1725,10 @@ m68k_save_dst
 	invalid M 7 R 6
 	invalid M 7 R 7
 	
-	m68k_fetch_dst_ea M R 0
-	lsl dst 1 dst
+	m68k_fetch_dst_ea M R 1
+	lsl dst 1 dst 1
 	update_flags XNZV0C
-	m68k_save_dst 0
+	m68k_save_dst 1
 	m68k_prefetch
 
 1110CCC1ZZ000RRR asli
@@ -1806,10 +1806,10 @@ m68k_save_dst
 	invalid M 7 R 6
 	invalid M 7 R 7
 	
-	m68k_fetch_dst_ea M R 0
-	lsl dst 1 dst
+	m68k_fetch_dst_ea M R 1
+	lsl dst 1 dst 1
 	update_flags XNZV0C
-	m68k_save_dst 0
+	m68k_save_dst 1
 	m68k_prefetch
 
 00ZZRRRMMMEEESSS move
