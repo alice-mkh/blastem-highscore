@@ -1419,6 +1419,31 @@ cda73e4caf53cbc8f0750b69e5e7f394ad3735d1 {
 
 	}
 }
+37024d0088fab1d76c082014663c58921cdf33df {
+	name Rockman X3
+	map {
+		0 {
+			device ROM
+			last 3FFFFF
+		}
+		400004 {
+			device fixed
+			value C9C9
+			last 400005
+		}
+		400006 {
+			device fixed
+			value F0F0
+			last 400007
+		}
+		A13000 {
+			device fixed
+			value 0C0C
+			last A130FF
+		}
+	}
+}
+
 T-122026 {
 	name Outback Joey
 	HeartbeatTrainer {
@@ -1664,6 +1689,12 @@ b620c2bebd5bab39bc9258a925169b4c93614599 {
 			last 3FFFFF
 		}
 		400000 {
+			device RAM
+			size 2
+			last 400003
+			bus both
+		}
+		400004 {
 			device RAM
 			size 2
 			last 400007

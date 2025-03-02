@@ -32,6 +32,7 @@
 #endif
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#include "render_audio.h"
 #endif
 
 #include "version.inc"
@@ -142,8 +143,90 @@ void setup_saves(system_media *media, system_header *context)
 	}
 }
 
+static uint8_t menu;
+static uint8_t use_nuklear;
+#ifdef __EMSCRIPTEN__
+void handle_frame_presented(void)
+{
+	if (current_system) {
+		current_system->request_exit(current_system);
+	}
+}
+
+void browser_main_loop(void)
+{
+	static uint8_t system_started;
+#ifndef DISABLE_NUKLEAR
+	static uint8_t was_menu;
+	if (use_nuklear) {
+		if (menu && !was_menu) {
+			ui_enter();
+		} else if (!menu && was_menu) {
+			ui_exit();
+		}
+		if (menu) {
+			render_update_display();
+		}
+	}
+#endif
+	if (!current_system && game_system) {
+		current_system = game_system;
+		menu = 0;
+#ifndef DISABLE_NUKLEAR
+		was_menu = 0;
+		ui_exit();
+#endif
+	}
+	if (current_system) {
+		if (system_started && render_is_audio_sync()) {
+			if (all_sources_ready()) {
+				return;
+			}
+		}
+		if (current_system->next_rom) {
+			char *next_rom = current_system->next_rom;
+			current_system->next_rom = NULL;
+			init_system_with_media(next_rom, 0);
+			system_started = 0;
+			menu = 0;
+			current_system = game_system;
+		} else if (!menu) {
+			if (system_started) {
+				current_system->resume_context(current_system);
+			} else {
+				system_started = 1;
+				current_system->start_context(current_system, NULL);
+			}
+			if (current_system->force_release) {
+				menu = 1;
+			}
+		}
+	}
+	
+}
+
+void setup_main_loop(void)
+{
+	//can't use render_is_audio_sync since we haven't called render_init/render_config_updated yet
+	char *sync = tern_find_path_default(config, "system\0sync_source\0", (tern_val){.ptrval = "audio"}, TVAL_PTR).ptrval;
+	emscripten_cancel_main_loop();
+	if (!strcmp("video", sync)) {
+		render_set_audio_full_fun(NULL);
+		render_set_frame_presented_fun(handle_frame_presented);
+		emscripten_set_main_loop(browser_main_loop, 0, 0);
+	} else {
+		render_set_frame_presented_fun(NULL);
+		render_set_audio_full_fun(handle_frame_presented);
+		emscripten_set_main_loop(browser_main_loop, 1, 0); //dummy fps value, will be overridden by a call to emscripten_set_main_loop_timing
+	}
+}
+#endif
+
 void apply_updated_config(void)
 {
+#ifdef __EMSCRIPTEN__
+	setup_main_loop();
+#endif
 	render_config_updated();
 	set_bindings();
 	update_pad_bindings();
@@ -273,64 +356,6 @@ void init_system_with_media(char *path, system_type force_stype)
 	setup_saves(&cart, game_system);
 	update_title(game_system->info.name);
 }
-
-static uint8_t menu;
-static uint8_t use_nuklear;
-#ifdef __EMSCRIPTEN__
-void handle_frame_presented(void)
-{
-	if (current_system) {
-		current_system->request_exit(current_system);
-	}
-}
-
-void browser_main_loop(void)
-{
-	static uint8_t system_started;
-#ifndef DISABLE_NUKLEAR
-	static uint8_t was_menu;
-	if (use_nuklear) {
-		if (menu && !was_menu) {
-			ui_enter();
-		} else if (!menu && was_menu) {
-			ui_exit();
-		}
-		if (menu) {
-			render_update_display();
-		}
-	}
-#endif
-	if (!current_system && game_system) {
-		current_system = game_system;
-		menu = 0;
-#ifndef DISABLE_NUKLEAR
-		was_menu = 0;
-		ui_exit();
-#endif
-	}
-	if (current_system) {
-		if (current_system->next_rom) {
-			char *next_rom = current_system->next_rom;
-			current_system->next_rom = NULL;
-			init_system_with_media(next_rom, 0);
-			system_started = 0;
-			menu = 0;
-			current_system = game_system;
-		} else if (!menu) {
-			if (system_started) {
-				current_system->resume_context(current_system);
-			} else {
-				system_started = 1;
-				current_system->start_context(current_system, NULL);
-			}
-			if (current_system->force_release) {
-				menu = 1;
-			}
-		}
-	}
-	
-}
-#endif
 
 char *parse_addr_port(char *arg)
 {
@@ -550,10 +575,8 @@ int main(int argc, char ** argv)
 		fullscreen = !fullscreen;
 	}
 #ifdef __EMSCRIPTEN__
-	config = tern_insert_path(config, "system\0sync_source\0", (tern_val){.ptrval = strdup("video")}, TVAL_PTR);
 	config = tern_insert_path(config, "ui\0initial_path\0", (tern_val){.ptrval = strdup("/roms")}, TVAL_PTR);
-	render_set_frame_presented_fun(handle_frame_presented);
-	emscripten_set_main_loop(browser_main_loop, 0, 0);
+	setup_main_loop();
 #endif
 	if (!headless) {
 		if (reader_addr) {

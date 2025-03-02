@@ -26,6 +26,9 @@
 #include <GL/glew.h>
 #endif
 #endif
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #define MAX_EVENT_POLL_PER_FRAME 2
 
@@ -123,12 +126,20 @@ static void audio_callback(void * userdata, uint8_t *byte_stream, int len)
 {
 	SDL_LockMutex(audio_mutex);
 		uint8_t all_ready;
+#ifdef __EMSCRIPTEN__
+		if (!all_sources_ready()) {
+			memset(byte_stream, 0, len);
+			SDL_UnlockMutex(audio_mutex);
+			return;
+		}
+#else
 		do {
 			all_ready = all_sources_ready();
 			if (!quitting && !all_ready) {
 				SDL_CondWait(audio_ready, audio_mutex);
 			}
 		} while(!quitting && !all_ready);
+#endif
 		if (!quitting) {
 			mix_and_convert(byte_stream, len, NULL);
 		}
@@ -255,6 +266,12 @@ void render_source_resumed(audio_source *src)
 
 uint8_t audio_deadlock_hack(void);
 
+static ui_render_fun audio_full_cb;
+void render_set_audio_full_fun(ui_render_fun cb)
+{
+	audio_full_cb = cb;
+}
+
 void render_do_audio_ready(audio_source *src)
 {
 	if (sync_src == SYNC_AUDIO_THREAD) {
@@ -268,7 +285,9 @@ void render_do_audio_ready(audio_source *src)
 			system_request_exit(current_system, 0);
 		}
 	} else if (sync_src == SYNC_AUDIO) {
+		uint8_t all_ready = 0;
 		SDL_LockMutex(audio_mutex);
+#ifndef __EMSCRIPTEN__
 			if (src->front_populated) {
 				if (audio_deadlock_hack()) {
 					SDL_CondSignal(audio_ready);
@@ -277,13 +296,18 @@ void render_do_audio_ready(audio_source *src)
 			while (src->front_populated) {
 				SDL_CondWait(src->opaque, audio_mutex);
 			}
+#endif
 			int16_t *tmp = src->front;
 			src->front = src->back;
 			src->back = tmp;
 			src->front_populated = 1;
 			src->buffer_pos = 0;
+			all_ready = all_sources_ready();
 			SDL_CondSignal(audio_ready);
 		SDL_UnlockMutex(audio_mutex);
+		if (all_ready && audio_full_cb) {
+			audio_full_cb();
+		}
 	} else {
 		uint32_t num_buffered;
 		SDL_LockAudio();
@@ -596,25 +620,52 @@ static void update_aspect()
 	main_clip.h = main_height;
 	main_clip.x = main_clip.y = 0;
 	if (config_aspect() > 0.0f) {
+		char *integer_scaling_str = tern_find_path_default(config, "video\0integer_scaling\0", (tern_val){.ptrval = "off"}, TVAL_PTR).ptrval;
+		uint8_t integer_scaling = !strcmp(integer_scaling_str, "on");
 		float aspect = (float)main_width / main_height;
-		if (fabs(aspect - config_aspect()) < 0.01f) {
+		if (!integer_scaling && fabs(aspect - config_aspect()) < 0.01f) {
 			//close enough for government work
 			return;
 		}
+		uint32_t height, scale;
+		if (integer_scaling) {
+			height = render_emulated_height();
+			if (aspect >= config_aspect()) {
+				scale = main_height / height;
+			} else {
+				uint32_t aspect_height = 0.5f + (float)main_width / config_aspect();
+				scale = aspect_height / height;
+			}
+		}
 #ifndef DISABLE_OPENGL
 		if (render_gl) {
-			for (int i = 0; i < 4; i++)
-			{
-				if (aspect > config_aspect()) {
-					vertex_data[i*2] *= config_aspect()/aspect;
-				} else {
-					vertex_data[i*2+1] *= aspect/config_aspect();
+			if (integer_scaling) {
+				float vscale = ((float)(scale * height)) / (float)main_height;
+				float hscale = (config_aspect() * (float)(scale * height)) / (float)main_width;
+				for (int i = 0; i < 4; i++)
+				{
+					vertex_data[i*2] *= hscale;
+					vertex_data[i*2+1] *= vscale;
+				}
+			} else {
+				for (int i = 0; i < 4; i++)
+				{
+					if (aspect > config_aspect()) {
+						vertex_data[i*2] *= config_aspect()/aspect;
+					} else {
+						vertex_data[i*2+1] *= aspect/config_aspect();
+					}
 				}
 			}
 		} else {
 #endif
-			main_clip.w = aspect > config_aspect() ? config_aspect() * (float)main_height : main_width;
-			main_clip.h = aspect > config_aspect() ? main_height : main_width / config_aspect();
+			if (integer_scaling) {
+				main_clip.h = height * scale;
+				main_clip.w = main_clip.h * config_aspect();
+			} else {
+				main_clip.w = aspect > config_aspect() ? config_aspect() * (float)main_height : main_width;
+				main_clip.h = aspect > config_aspect() ? main_height : main_width / config_aspect();
+			}
 			main_clip.x = (main_width  - main_clip.w) / 2;
 			main_clip.y = (main_height - main_clip.h) / 2;
 #ifndef DISABLE_OPENGL
@@ -1070,6 +1121,12 @@ static void init_audio()
 		debug_message("unsupported format %X\n", actual.format);
 		warning("Unsupported audio sample format: %X\n", actual.format);
 	}
+#ifdef __EMSCRIPTEN__
+	if (sync_src == SYNC_AUDIO) {
+		printf("emscripten_set_main_loop_timing %d\n", actual.samples * 500 / actual.freq);
+		emscripten_set_main_loop_timing(EM_TIMING_SETTIMEOUT, actual.samples * 500 / actual.freq);
+	}
+#endif
 	render_audio_initialized(format, actual.freq, actual.channels, actual.samples, SDL_AUDIO_BITSIZE(actual.format) / 8);
 }
 
@@ -1517,7 +1574,7 @@ void render_save_video(char *path)
 	free(path);
 }
 
-#ifndef __EMSCRIPTEN__
+#ifdef GL_DEBUG_OUTPUT
 void GLAPIENTRY gl_message_callback(GLenum source, GLenum type, GLenum id, GLenum severity, GLsizei length, const GLchar *message, const void *user)
 {
 	fprintf(stderr, "GL Message: %d, %d, %d - %s\n", source, type, severity, message);
@@ -1563,7 +1620,7 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 	if (render_gl) {
 		extras[win_idx].gl_context = SDL_GL_CreateContext(extras[win_idx].win);
 		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
-#ifndef __EMSCRIPTEN__
+#ifdef GL_DEBUG_OUTPUT
 		glEnable(GL_DEBUG_OUTPUT);
 		if (glDebugMessageCallback) {
 			glDebugMessageCallback(gl_message_callback, NULL);

@@ -961,7 +961,7 @@ static void binding_box(struct nk_context *context, pad_bind_config *bindings, c
 	nk_layout_space_push(context, nk_rect(x, y, width, (num_binds - skipped) * (row_height + 4) + 4));
 	nk_group_begin(context, name, NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR);
 
-	float widths[] = {max_width + 3, width - (max_width + 6)};
+	float widths[] = {max_width + 3, width - (max_width + 22)};
 	nk_layout_row(context, NK_STATIC, row_height, 2, widths);
 	for (int i = 0; i < num_binds; i++)
 	{
@@ -2182,10 +2182,11 @@ void view_video_settings(struct nk_context *context)
 		desired_width = width;
 	}
 	if (nk_begin(context, "Video Settings", nk_rect(0, 0, width, height), 0)) {
-		nk_layout_row_static(context, context->style.font->height, desired_width, 2);
+		nk_layout_row_static(context, context->style.font->height * 1.25f, desired_width, 2);
 		settings_toggle(context, "Fullscreen", "video\0fullscreen\0", 0);
 		settings_toggle(context, "Open GL", "video\0gl\0", 1);
 		settings_toggle(context, "Scanlines", "video\0scanlines\0", 0);
+		settings_toggle(context, "Integer Scaling", "video\0integer_scaling\0", 0);
 		selected_vsync = settings_dropdown_ex(context, "VSync", vsync_opts, vsync_opt_names, num_vsync_opts, selected_vsync, "video\0vsync\0");
 		settings_int_input(context, "Windowed Width", "video\0width\0", "640");
 		nk_label(context, "Shader", NK_TEXT_LEFT);
@@ -2256,7 +2257,7 @@ void view_audio_settings(struct nk_context *context)
 		desired_width = width;
 	}
 	if (nk_begin(context, "Audio Settings", nk_rect(0, 0, width, height), 0)) {
-		nk_layout_row_static(context, context->style.font->height , desired_width, 2);
+		nk_layout_row_static(context, context->style.font->height * 1.25f, desired_width, 2);
 		selected_rate = settings_dropdown(context, "Rate in Hz", rates, num_rates, selected_rate, "audio\0rate\0");
 		selected_size = settings_dropdown(context, "Buffer Samples", sizes, num_sizes, selected_size, "audio\0buffer\0");
 		settings_int_input(context, "Lowpass Cutoff Hz", "audio\0lowpass_cutoff\0", "3390");
@@ -2437,7 +2438,7 @@ void view_system_settings(struct nk_context *context)
 	uint32_t height = render_height();
 	uint32_t desired_width = context->style.font->height * 10;
 	if (nk_begin(context, "System Settings", nk_rect(0, 0, width, height), 0)) {
-		nk_layout_row_static(context, context->style.font->height, desired_width, 2);
+		nk_layout_row_static(context, context->style.font->height * 1.25f, desired_width, 2);
 
 		if (show_sms) {
 			selected_model = settings_dropdown_ex(context, "Model", sms_model_opts, sms_model_names, num_sms_models, selected_model, "sms\0system\0model\0");
