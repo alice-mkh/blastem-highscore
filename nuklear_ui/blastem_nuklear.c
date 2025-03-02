@@ -961,7 +961,7 @@ static void binding_box(struct nk_context *context, pad_bind_config *bindings, c
 	nk_layout_space_push(context, nk_rect(x, y, width, (num_binds - skipped) * (row_height + 4) + 4));
 	nk_group_begin(context, name, NK_WINDOW_BORDER | NK_WINDOW_NO_SCROLLBAR);
 
-	float widths[] = {max_width + 3, width - (max_width + 6)};
+	float widths[] = {max_width + 3, width - (max_width + 22)};
 	nk_layout_row(context, NK_STATIC, row_height, 2, widths);
 	for (int i = 0; i < num_binds; i++)
 	{
