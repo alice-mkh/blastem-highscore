@@ -3,7 +3,15 @@
 void m68k_read_8(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
+#ifdef DEBUG_DISASM
+	uint32_t tmp = context->scratch1;
+#endif
 	context->scratch1 = read_byte(context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
+#ifdef DEBUG_DISASM
+	if (context->pc >= 0x3F48 && context->pc < 0x3FCE) {
+		printf("Read.b %05X: %02X\n", tmp, context->scratch1);
+	}
+#endif
 }
 
 #ifdef DEBUG_DISASM
@@ -22,14 +30,19 @@ void m68k_read_16(m68k_context *context)
 #endif
 	context->scratch1 = read_word(context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
 #ifdef DEBUG_DISASM
+	if (context->pc >= 0x3F48 && context->pc < 0x3FCE) {
 	if (tmp == context->pc) {
 		m68kinst inst;
 		m68k_decode(debug_disasm_fetch, context, &inst, tmp);
 		static char disasm_buf[256];
 		m68k_disasm(&inst, disasm_buf);
-		printf("Fetch %05X: %04X - %s, d0=%X, d1=%X, d2=%X, d3=%X, d4=%X, d6=%X, a7=%X, xflag=%d\n", tmp, context->scratch1, disasm_buf, context->dregs[0], context->dregs[1], context->dregs[2], context->dregs[3], context->dregs[4], context->dregs[6], context->aregs[7], context->xflag);
+		printf("Fetch %05X: %04X - %s, d0=%X, d1=%X, d2=%X, d3=%X, d4=%X, d6=%X, d7=%X, a3=%X, a7=%X, xflag=%d\n", 
+			tmp, context->scratch1, disasm_buf, context->dregs[0], context->dregs[1], context->dregs[2], context->dregs[3], 
+			context->dregs[4], context->dregs[6], context->dregs[7], context->aregs[3], context->aregs[7], context->xflag
+		);
 	} else {
 		printf("Read %05X: %04X\n", tmp, context->scratch1);
+	}
 	}
 #endif
 }
@@ -38,12 +51,31 @@ void m68k_write_8(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
 	write_byte(context->scratch2, context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
+#ifdef DEBUG_DISASM
+	if (context->pc >= 0x3F48 && context->pc < 0x3FCE) {
+	printf("Write.b %05X: %02X\n", context->scratch2, context->scratch1);
+	}
+#endif
+}
+
+void m68k_rmw_writeback(m68k_context *context)
+{
+	if (context->opts->gen.flags & M68K_OPT_BROKEN_READ_MODIFY) {
+		context->cycles += 4 * context->opts->gen.clock_divider;
+	} else {
+		write_byte(context->scratch2, context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
+	}
 }
 
 void m68k_write_16(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
 	write_word(context->scratch2, context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
+#ifdef DEBUG_DISASM
+	if (context->pc >= 0x3F48 && context->pc < 0x3FCE) {
+	printf("Write %05X: %04X\n", context->scratch2, context->scratch1);
+	}
+#endif
 }
 
 void m68k_sync_cycle(m68k_context *context, uint32_t target_cycle)

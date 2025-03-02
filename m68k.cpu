@@ -2547,6 +2547,25 @@ m68k_save_dst
 	update_flags NZV0C0
 	m68k_prefetch
 
+0100101011MMMRRR tas
+	invalid M 1
+	invalid M 7 R 2
+	invalid M 7 R 3
+	invalid M 7 R 4
+	invalid M 7 R 5
+	invalid M 7 R 6
+	invalid M 7 R 7
+	
+	m68k_fetch_dst_ea M R 0
+	cmp 0 dst 0
+	update_flags NZV0C0
+	dst |= 0x80
+	if M
+		cycles 2
+		ocall rmw_writeback
+	end
+	m68k_prefetch
+
 010011100100VVVV trap
 	local vector 32
 	scratch1 = pc
