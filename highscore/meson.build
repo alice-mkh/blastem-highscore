@@ -7,8 +7,6 @@ version = meson.project_version()
 
 cc = meson.get_compiler('c')
 
-new_core = get_option('new_core')
-
 rom_db = custom_target('rom.db.c',
   output: 'rom.db.c',
   input: meson.project_source_root() / '../rom.db',
@@ -103,6 +101,18 @@ blastem_c_args = [
   '-Wno-unused-variable',
 ]
 
+cpu = target_machine.cpu()
+
+new_core = get_option('new_core')
+
+if cpu == 'x86_64'
+  blastem_c_args += '-DX86_64'
+elif cpu == 'i686'
+  blastem_c_args += '-DX86_32'
+else
+  new_core = true
+endif
+
 if new_core
   m68k_source = custom_target('m68k',
     output: ['m68k.c', 'm68k.h'],
@@ -143,14 +153,6 @@ else
     '../z80inst.c',
     '../z80_to_x86.c',
   ]
-endif
-
-cpu = target_machine.cpu()
-
-if cpu == 'x86_64'
-  blastem_c_args += '-DX86_64'
-elif cpu == 'i686'
-  blastem_c_args += '-DX86_32'
 endif
 
 blastem_include_dirs = [
