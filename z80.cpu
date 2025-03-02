@@ -2497,3 +2497,4 @@ ed 01100111 rrd
 	update_flags SZYH0XPN0
 	z80_store_hl
 	
+ed XXXXXXXX ed_nop
