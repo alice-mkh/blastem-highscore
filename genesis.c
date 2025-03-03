@@ -2076,7 +2076,7 @@ static void start_genesis(system_header *system, char *statefile)
 	}
 #ifdef NEW_CORE
 	while (!gen->m68k->should_return) {
-		sync_components(gen->m68k, 0);
+		sync_components(gen->m68k, gen->m68k->pc);
 		m68k_execute(gen->m68k, gen->m68k->target_cycle);
 	}
 	gen->m68k->should_return = 0;
@@ -2104,7 +2104,7 @@ static void resume_genesis(system_header *system)
 	}
 #ifdef NEW_CORE
 	while (!gen->m68k->should_return) {
-		sync_components(gen->m68k, 0);
+		sync_components(gen->m68k, gen->m68k->pc);
 		m68k_execute(gen->m68k, gen->m68k->target_cycle);
 	}
 	gen->m68k->should_return = 0;

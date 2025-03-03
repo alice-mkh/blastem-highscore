@@ -287,12 +287,74 @@ void m68k_print_regs(m68k_context *context)
 
 void m68k_serialize(m68k_context *context, uint32_t pc, serialize_buffer *buf)
 {
-	//TODO: implement me
+	for (int i = 0; i < 8; i++)
+	{
+		save_int32(buf, context->dregs[i]);
+	}
+	for (int i = 0; i < 8; i++)
+	{
+		save_int32(buf, context->aregs[i]);
+	}
+	save_int32(buf, context->other_sp);
+	//old core saves the address of hte instruction that will execute upon resume
+	//in this field so we need to adjust PC here for compatibility
+	save_int32(buf, context->pc - 2);
+	uint16_t sr = context->status << 8;
+	if (context->xflag) { sr |= 0x10; }
+	if (context->nflag) { sr |= 0x08; }
+	if (context->zflag) { sr |= 0x04; }
+	if (context->vflag) { sr |= 0x02; }
+	if (context->cflag) { sr |= 0x1; }
+	save_int16(buf, sr);
+	save_int32(buf, context->cycles);
+	save_int32(buf, context->int_cycle);
+	save_int8(buf, context->int_priority); //int_num on old core, but it's the priority level
+	save_int8(buf, context->int_pending);
+	save_int8(buf, context->trace_pending);
+	//remaining fields have no equivalent in old core
+	save_int16(buf, context->prefetch);
+	save_int8(buf, context->stopped);
+	save_int8(buf, context->int_num);
+	save_int8(buf, context->int_pending_num);
 }
 
 void m68k_deserialize(deserialize_buffer *buf, void *vcontext)
 {
-	//TODO: implement me
+	m68k_context *context = vcontext;
+	for (int i = 0; i < 8; i++)
+	{
+		context->dregs[i] = load_int32(buf);
+	}
+	for (int i = 0; i < 8; i++)
+	{
+		context->aregs[i] = load_int32(buf);
+	}
+	context->other_sp = load_int32(buf);
+	context->pc = load_int32(buf);
+	uint16_t sr = load_int16(buf);
+	context->status = sr >> 8;
+	context->xflag = sr & 0x10;
+	context->nflag = sr & 0x08;
+	context->zflag = sr & 0x04;
+	context->vflag = sr & 0x02;
+	context->cflag = sr & 0x01;
+	context->cycles = load_int32(buf);
+	context->int_cycle = load_int32(buf);
+	context->int_priority = load_int8(buf); //int_num on old core, but it's the priority level
+	context->int_pending = load_int8(buf);
+	context->trace_pending = load_int8(buf);
+	if (buf->cur_pos < buf->size) {
+		context->prefetch = load_int16(buf);
+		context->stopped = load_int8(buf);
+		context->int_num = load_int8(buf);
+		context->int_pending_num = load_int8(buf);
+	} else {
+		context->prefetch = read_word(context->pc, (void**)context->mem_pointers, &context->opts->gen, context);
+		context->stopped = 0;
+		context->int_num = context->int_pending_num = 0;
+	}
+	//adjust for compatibility with old core
+	context->pc += 2;
 }
 
 void start_68k_context(m68k_context *context, uint32_t pc)
