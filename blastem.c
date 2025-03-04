@@ -159,26 +159,27 @@ void browser_main_loop(void)
 #ifndef DISABLE_NUKLEAR
 	static uint8_t was_menu;
 	if (use_nuklear) {
-		if (menu && !was_menu) {
-			ui_enter();
-		} else if (!menu && was_menu) {
-			ui_exit();
-		}
 		if (menu) {
+			if (!was_menu) {
+				ui_enter();
+			}
+			was_menu = menu;
 			render_update_display();
+			menu = !get_content_binding_state();
+			if (!menu) {
+				ui_exit();
+				return;
+			}
+		} else {
+			was_menu = menu;
 		}
 	}
 #endif
 	if (!current_system && game_system) {
 		current_system = game_system;
-		menu = 0;
-#ifndef DISABLE_NUKLEAR
-		was_menu = 0;
-		ui_exit();
-#endif
 	}
 	if (current_system) {
-		if (system_started && render_is_audio_sync()) {
+		if (system_started && !current_system->force_release && render_is_audio_sync()) {
 			if (all_sources_ready()) {
 				return;
 			}

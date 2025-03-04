@@ -170,7 +170,7 @@ T-81576 {
 		200002 {
 			device ROM
 			offset 200000
-			last 2FFFFF
+			last 3FFFFF
 		}
 	}
 }

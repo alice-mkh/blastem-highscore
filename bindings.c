@@ -206,6 +206,11 @@ void set_content_binding_state(uint8_t enabled)
 	content_binds_enabled = enabled;
 }
 
+uint8_t get_content_binding_state(void)
+{
+	return content_binds_enabled;
+}
+
 void bindings_set_joy_state(int joystick, uint8_t enabled)
 {
 	if (joystick >= MAX_JOYSTICKS || joystick < 0) {
