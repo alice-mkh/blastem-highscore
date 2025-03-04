@@ -83,22 +83,38 @@ uint32_t m68k_load_gst(m68k_context * context, FILE * gstfile)
 		context->aregs[i] = read_le_32(curpos);
 		curpos += sizeof(uint32_t);
 	}
+	context->trace_pending = 0;
 	uint32_t pc = read_le_32(buffer + GST_68K_PC_OFFSET);
 	uint16_t sr = read_le_16(buffer + GST_68K_SR_OFFSET);
 	context->status = sr >> 8;
 #ifdef NEW_CORE
-	//TODO: implement me
+	context->pc = pc + 2;
+	context->xflag = sr & 0x10;
+	context->nflag = sr & 0x08;
+	context->zflag = sr & 0x04;
+	context->vflag = sr & 0x02;
+	context->cflag = sr & 0x01;
+	if (context->status & (1 << 5)) {
+		context->other_sp = read_le_32(buffer + GST_68K_USP_OFFSET);
+	} else {
+		context->other_sp = read_le_32(buffer + GST_68K_SSP_OFFSET);
+	}
+	context->prefetch = read_word(pc, (void**)context->mem_pointers, &context->opts->gen, context);
+	context->stopped = 0;
+	context->int_priority = context->int_num = context->int_pending_num = 0;
+	context->int_pending = 255;
+	printf("m68k_load_gst pc: %X, prefetch: %X\n", context->pc, context->prefetch);
 #else
 	for (int flag = 4; flag >= 0; flag--) {
 		context->flags[flag] = sr & 1;
 		sr >>= 1;
 	}
-#endif
 	if (context->status & (1 << 5)) {
 		context->aregs[8] = read_le_32(buffer + GST_68K_USP_OFFSET);
 	} else {
 		context->aregs[8] = read_le_32(buffer + GST_68K_SSP_OFFSET);
 	}
+#endif
 
 	return pc;
 }
@@ -115,17 +131,28 @@ uint8_t m68k_save_gst(m68k_context * context, uint32_t pc, FILE * gstfile)
 		write_le_32(curpos, context->aregs[i]);
 		curpos += sizeof(uint32_t);
 	}
-	write_le_32(buffer + GST_68K_PC_OFFSET, pc);
-	uint16_t sr = context->status << 3;
+	
 #ifdef NEW_CORE
-	//TODO: implement me
+	uint16_t sr = context->status << 8;
+	pc = context->pc - 2;
+	if (context->xflag) { sr |= 0x10; }
+	if (context->nflag) { sr |= 0x08; }
+	if (context->zflag) { sr |= 0x04; }
+	if (context->vflag) { sr |= 0x02; }
+	if (context->cflag) { sr |= 0x1; }
+	if (context->status & (1 << 5)) {
+		write_le_32(buffer + GST_68K_USP_OFFSET, context->other_sp);
+		write_le_32(buffer + GST_68K_SSP_OFFSET, context->aregs[7]);
+	} else {
+		write_le_32(buffer + GST_68K_USP_OFFSET, context->aregs[7]);
+		write_le_32(buffer + GST_68K_SSP_OFFSET, context->other_sp);
+	}
 #else
+	uint16_t sr = context->status << 3;
 	for (int flag = 4; flag >= 0; flag--) {
 		sr <<= 1;
 		sr |= context->flags[flag];
 	}
-#endif
-	write_le_16(buffer + GST_68K_SR_OFFSET, sr);
 	if (context->status & (1 << 5)) {
 		write_le_32(buffer + GST_68K_USP_OFFSET, context->aregs[8]);
 		write_le_32(buffer + GST_68K_SSP_OFFSET, context->aregs[7]);
@@ -133,6 +160,9 @@ uint8_t m68k_save_gst(m68k_context * context, uint32_t pc, FILE * gstfile)
 		write_le_32(buffer + GST_68K_USP_OFFSET, context->aregs[7]);
 		write_le_32(buffer + GST_68K_SSP_OFFSET, context->aregs[8]);
 	}
+#endif
+	write_le_32(buffer + GST_68K_PC_OFFSET, pc);
+	write_le_16(buffer + GST_68K_SR_OFFSET, sr);
 	fseek(gstfile, GST_68K_REGS, SEEK_SET);
 	if (fwrite(buffer, 1, GST_68K_REG_SIZE, gstfile) != GST_68K_REG_SIZE) {
 		fputs("Failed to write 68K registers to savestate\n", stderr);
@@ -152,7 +182,24 @@ uint8_t z80_load_gst(z80_context * context, FILE * gstfile)
 	}
 	uint8_t * curpos = regdata;
 	uint8_t f = *(curpos++);
-#ifndef NEW_CORE
+#ifdef NEW_CORE
+	context->main[6] = context->last_flag_result = f;
+	context->chflags = ((f & 1) ? 0x80 : 0) | ((f & 0x10) ? 8 : 0);
+	context->nflag = f & 2;
+	context->pvflag = f & 4;
+	context->zflag = f & 0x40;
+	context->main[7] = *curpos;
+	curpos += 3;
+	for (int reg = 0; reg < 6; reg+=2) {
+		context->main[reg ^ 1] = *(curpos++);
+		context->main[reg] = *curpos;
+		curpos += 3;
+	}
+	context->ix = read_le_16(curpos);
+	curpos += 4;
+	context->iy = read_le_16(curpos);
+	curpos += 4;
+#else
 	context->flags[ZF_C] = f & 1;
 	f >>= 1;
 	context->flags[ZF_N] = f & 1;
@@ -172,11 +219,23 @@ uint8_t z80_load_gst(z80_context * context, FILE * gstfile)
 		context->regs[reg] = *curpos;
 		curpos += 3;
 	}
+#endif
 	context->pc = read_le_16(curpos);
 	curpos += 4;
 	context->sp = read_le_16(curpos);
 	curpos += 4;
 	f = *(curpos++);
+#ifdef NEW_CORE
+	context->alt[6] = f;
+	context->alt[7] = *curpos;
+	curpos += 3;
+	for (int reg = 0; reg < 6; reg+=2) {
+		context->alt[reg ^ 1] = *(curpos++);
+		context->alt[reg] = *curpos;
+		curpos += 3;
+	}
+	context->i = *curpos;
+#else
 	context->alt_flags[ZF_C] = f & 1;
 	f >>= 1;
 	context->alt_flags[ZF_N] = f & 1;
@@ -196,6 +255,7 @@ uint8_t z80_load_gst(z80_context * context, FILE * gstfile)
 		curpos += 3;
 	}
 	context->regs[Z80_I] = *curpos;
+#endif
 	curpos += 2;
 	context->iff1 = context->iff2 = *curpos;
 	curpos += 2;
@@ -208,8 +268,8 @@ uint8_t z80_load_gst(z80_context * context, FILE * gstfile)
 	} else {
 		context->mem_pointers[1] = NULL;
 	}
-	context->bank_reg = bank >> 15;
-#endif
+	genesis_context *gen = context->system;
+	gen->z80_bank_reg = bank >> 15;
 	uint8_t buffer[Z80_RAM_BYTES];
 	fseek(gstfile, GST_Z80_RAM, SEEK_SET);
 	if(fread(buffer, 1, sizeof(buffer), gstfile) != (8*1024)) {
@@ -310,7 +370,27 @@ uint8_t z80_save_gst(z80_context * context, FILE * gstfile)
 	uint8_t regdata[GST_Z80_REG_SIZE];
 	uint8_t * curpos = regdata;
 	memset(regdata, 0, sizeof(regdata));
-#ifndef NEW_CORE
+#ifdef NEW_CORE
+	uint8_t f = context->last_flag_result;
+	if (context->zflag) { f |= 0x40; }
+	if (context->chflags & 8) { f |= 0x10; }
+	if (context->pvflag) { f |= 0x04; }
+	if (context->nflag) { f |= 0x02; }
+	if (context->chflags & 0x80) { f |= 0x01; }
+	*(curpos++) = f;
+	*curpos = context->main[7];
+
+	curpos += 3;
+	for (int reg = 0; reg < 6; reg+=2) {
+		*(curpos++) = context->main[reg^1];
+		*curpos = context->main[reg];
+		curpos += 3;
+	}
+	write_le_16(curpos, context->ix);
+	curpos += 4;
+	write_le_16(curpos, context->iy);
+	curpos += 4;
+#else
 	uint8_t f = context->flags[ZF_S];
 	f <<= 1;
 	f |= context->flags[ZF_Z] ;
@@ -331,10 +411,23 @@ uint8_t z80_save_gst(z80_context * context, FILE * gstfile)
 		*curpos = context->regs[reg];
 		curpos += 3;
 	}
+#endif
 	write_le_16(curpos, context->pc);
 	curpos += 4;
 	write_le_16(curpos, context->sp);
 	curpos += 4;
+#ifdef NEW_CORE
+	*(curpos++) = context->alt[6];
+	*curpos = context->alt[7];
+	
+	curpos += 3;
+	for (int reg = 0; reg < 6; reg+=2) {
+		*(curpos++) = context->alt[reg^1];
+		*curpos = context->alt[reg];
+		curpos += 3;
+	}
+	*curpos = context->i;
+#else
 	f = context->alt_flags[ZF_S];
 	f <<= 1;
 	f |= context->alt_flags[ZF_Z] ;
@@ -355,15 +448,16 @@ uint8_t z80_save_gst(z80_context * context, FILE * gstfile)
 		curpos += 3;
 	}
 	*curpos = context->regs[Z80_I];
+#endif
 	curpos += 2;
 	*curpos = context->iff1;
 	curpos += 2;
 	*(curpos++) = !context->reset;
 	*curpos = context->busreq;
 	curpos += 3;
-	uint32_t bank = context->bank_reg << 15;
+	genesis_context *gen = context->system;
+	uint32_t bank = gen->z80_bank_reg << 15;
 	write_le_32(curpos, bank);
-#endif
 	fseek(gstfile, GST_Z80_REGS, SEEK_SET);
 	if (fwrite(regdata, 1, sizeof(regdata), gstfile) != sizeof(regdata)) {
 		return 0;
@@ -472,9 +566,7 @@ uint32_t load_gst(genesis_context * gen, char * fname)
 			i++;
 		}
 	}
-#ifdef NEW_CORE
-	gen->m68k->pc = pc;
-#else
+#ifndef NEW_CORE
 	gen->m68k->resume_pc = get_native_address_trans(gen->m68k, pc);
 #endif
 	fclose(gstfile);
