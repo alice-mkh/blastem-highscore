@@ -45,7 +45,7 @@ uniform int curfield;               // Even or odd field?
 uniform int scanlines;              // Enable scanlines?
 
 // Converts from RGB to YIQ
-mediump vec3 rgba2yiq(vec4 rgba)
+mediump vec3 rgba2yiq(mediump vec4 rgba)
 {
 	return vec3(
 		rgba[0] * 0.3 + rgba[1] * 0.59 + rgba[2] * 0.11,
@@ -55,13 +55,13 @@ mediump vec3 rgba2yiq(vec4 rgba)
 }
 
 // Encodes YIQ into composite
-mediump float yiq2raw(vec3 yiq, float phase)
+mediump float yiq2raw(mediump vec3 yiq, mediump float phase)
 {
 	return yiq[0] + yiq[1] * sin(phase) + yiq[2] * cos(phase);
 }
 
 // Converts from YIQ to RGB
-mediump vec4 yiq2rgba(vec3 yiq)
+mediump vec4 yiq2rgba(mediump vec3 yiq)
 {
 	return vec4(
 		yiq[0] + yiq[1] * 0.9469 + yiq[2] * 0.6236,
@@ -100,7 +100,7 @@ void main()
 	mediump float raw_iq[7];   // Chroma isolated from raw composite signal
 	
 	// Sample all the pixels we're going to use
-	for (int n = 0; n < 7; n++, x -= factorX * 0.5) {
+	for (int n = 0; n < 7; n++) {
 		// Compute colorburst phase at this point
 		phase[n] = x / factorX * 3.1415926;
 		
@@ -110,16 +110,21 @@ void main()
 		// below a bit easier to read I guess?)
 		mediump float y_above = y - texcoord.y / texsize.y;
 		
+		mediump vec4 pixel, pixel_above;
+		if (curfield == 0) {
+			pixel = texture2D(textures[0], vec2(x, y));
+			pixel_above = texture2D(textures[0], vec2(x, y_above));
+		} else {
+			pixel = texture2D(textures[1], vec2(x, y));
+			pixel_above = texture2D(textures[1], vec2(x, y_above));
+		}
 		// Get the raw composite data for this scanline
-		mediump float raw1 = yiq2raw(rgba2yiq(
-		                     texture2D(textures[curfield], vec2(x, y))
-		                     ), phase[n]);
+		mediump float raw1 = yiq2raw(rgba2yiq(pixel), phase[n]);
 		
 		// Get the raw composite data for scanline above
 		// Note that the colorburst phase is shifted 180°
-		mediump float raw2 = yiq2raw(rgba2yiq(
-		                     texture2D(textures[curfield], vec2(x, y_above))
-		                     ), phase[n] + 3.1415926);
+		mediump float raw2 = yiq2raw(rgba2yiq(pixel_above), phase[n] + 3.1415926);
+							 
 		
 		// Comb filter: isolate Y and IQ using the above two.
 		// Luma is obtained by adding the two scanlines, chroma will cancel out
@@ -129,6 +134,7 @@ void main()
 		// filtering isn't perfect (which is why the rainbow leaks a bit).
 		raw_y[n] = (raw1 + raw2) * 0.5;
 		raw_iq[n] = raw1 - (raw1 + raw2) * (comb_strength * 0.5);
+		x -= factorX * 0.5;
 	}
 	
 	// Decode Y by averaging over the last whole sampled cycle (effectively
