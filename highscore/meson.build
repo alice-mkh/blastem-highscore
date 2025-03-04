@@ -176,7 +176,7 @@ descriptor = configuration_data()
 descriptor.set('version', version)
 descriptor.set('commit', commit)
 if new_core
-  descriptor.set('states', '1')
+  descriptor.set('states', '2')
 else
   descriptor.set('states', '0')
 endif
