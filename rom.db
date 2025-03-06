@@ -1764,3 +1764,20 @@ f1e1e7e9687cf4f9f498779a44134c2d70bb8d4b {
 		}
 	}
 }
+00001122 {
+	name Golden Axe II
+	#Doesn't work with 6-button controllers due to
+	#extra TH transitions from changing pin direction
+	device_overrides {
+		1 gamepad3.1
+		2 gamepad3.2
+	}
+}
+T-83056 {
+	name American Gladiators
+	#Doesn't work with 6-button controllers
+	device_overrides {
+		1 gamepad3.1
+		2 gamepad3.2
+	}
+}
