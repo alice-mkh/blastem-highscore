@@ -1403,6 +1403,23 @@ void render_reset_mappings(void)
 }
 static int in_toggle;
 
+#ifdef __EMSCRIPTEN__
+void resume_config_update(void *arg)
+{
+	uint8_t was_paused = arg != NULL;
+	quitting = 0;
+	init_audio();
+	render_set_video_standard(video_standard);
+
+	drain_events();
+	in_toggle = 0;
+	if (!was_paused) {
+		SDL_PauseAudio(0);
+	}
+	emscripten_resume_main_loop();
+}
+#endif __EMSCRIPTEN__
+
 void render_config_updated(void)
 {
 	for (int i = 0; i <= FRAMEBUFFER_UI; i++)
@@ -1479,8 +1496,13 @@ void render_config_updated(void)
 	if (do_audio_reinit) {
 		was_paused = SDL_GetAudioStatus() == SDL_AUDIO_PAUSED;
 		render_close_audio();
+#ifdef __EMSCRIPTEN__
+		emscripten_pause_main_loop();
+		emscripten_async_call(resume_config_update, was_paused ? config : NULL, 1000);
+#else
 		quitting = 0;
 		init_audio();
+#endif
 	}
 	render_set_video_standard(video_standard);
 
