@@ -1073,25 +1073,39 @@ static int source_frame_count;
 static int frame_repeat[60];
 
 static uint32_t sample_rate;
-static void init_audio()
+typedef struct {
+	int      rate;
+	int      samples;
+	uint16_t format;
+} audio_config;
+
+static audio_config get_audio_config(void)
+{
+	audio_config ret;
+	char * rate_str = tern_find_path(config, "audio\0rate\0", TVAL_PTR).ptrval;
+   	ret.rate = rate_str ? atoi(rate_str) : 0;
+   	if (!ret.rate) {
+   		ret.rate = 48000;
+   	}
+	char *config_format = tern_find_path_default(config, "audio\0format\0", (tern_val){.ptrval="f32"}, TVAL_PTR).ptrval;
+	ret.format = !strcmp(config_format, "s16") ? AUDIO_S16SYS : AUDIO_F32SYS;
+    char * samples_str = tern_find_path(config, "audio\0buffer\0", TVAL_PTR).ptrval;
+   	ret.samples = samples_str ? atoi(samples_str) : 0;
+   	if (!ret.samples) {
+   		ret.samples = 512;
+   	}
+	return ret;
+}
+
+static audio_config current_audio_config;
+static void init_audio(void)
 {
 	SDL_AudioSpec desired, actual;
-    char * rate_str = tern_find_path(config, "audio\0rate\0", TVAL_PTR).ptrval;
-   	int rate = rate_str ? atoi(rate_str) : 0;
-   	if (!rate) {
-   		rate = 48000;
-   	}
-    desired.freq = rate;
-	char *config_format = tern_find_path_default(config, "audio\0format\0", (tern_val){.ptrval="f32"}, TVAL_PTR).ptrval;
-	desired.format = !strcmp(config_format, "s16") ? AUDIO_S16SYS : AUDIO_F32SYS;
+	audio_config ac = get_audio_config();
+	desired.freq = ac.rate;
+	desired.format = ac.format;
 	desired.channels = 2;
-    char * samples_str = tern_find_path(config, "audio\0buffer\0", TVAL_PTR).ptrval;
-   	int samples = samples_str ? atoi(samples_str) : 0;
-   	if (!samples) {
-   		samples = 512;
-   	}
-    debug_message("config says: %d\n", samples);
-    desired.samples = samples*2;
+	desired.samples = ac.samples * 2;
 	switch (sync_src)
 	{
 	case SYNC_AUDIO:
@@ -1108,8 +1122,9 @@ static void init_audio()
 	if (SDL_OpenAudio(&desired, &actual) < 0) {
 		fatal_error("Unable to open SDL audio: %s\n", SDL_GetError());
 	}
+	current_audio_config = ac;
 	sample_rate = actual.freq;
-	debug_message("Initialized audio at frequency %d with a %d sample buffer, ", actual.freq, actual.samples);
+	debug_message("Initialized %d channel audio at frequency %d with a %d sample buffer, ", actual.channels, actual.freq, actual.samples);
 	render_audio_format format = RENDER_AUDIO_UNKNOWN;
 	if (actual.format == AUDIO_S16SYS) {
 		debug_message("signed 16-bit int format\n");
@@ -1442,6 +1457,7 @@ void render_config_updated(void)
 	if (on_ui_fb_resized) {
 		on_ui_fb_resized();
 	}
+	uint8_t old_sync_src = sync_src;
 
 	window_setup();
 	update_aspect();
@@ -1452,10 +1468,20 @@ void render_config_updated(void)
 	}
 #endif
 
-	uint8_t was_paused = SDL_GetAudioStatus() == SDL_AUDIO_PAUSED;
-	render_close_audio();
-	quitting = 0;
-	init_audio();
+	
+	uint8_t was_paused = 1;
+	uint8_t do_audio_reinit = sync_src != old_sync_src;
+	if (!do_audio_reinit) {
+		audio_config ac = get_audio_config();
+		do_audio_reinit = ac.rate != current_audio_config.rate || 
+			ac.samples != current_audio_config.samples || ac.format != current_audio_config.format;
+	}
+	if (do_audio_reinit) {
+		was_paused = SDL_GetAudioStatus() == SDL_AUDIO_PAUSED;
+		render_close_audio();
+		quitting = 0;
+		init_audio();
+	}
 	render_set_video_standard(video_standard);
 
 	drain_events();
@@ -1756,6 +1782,8 @@ static void extra_draw_quad(extra_window *extra, GLuint texture, float width, fl
 	
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, extra->gl_buffers[1]);
 	glDrawElements(GL_TRIANGLE_STRIP, 4, GL_UNSIGNED_SHORT, (void *)0);
+	glDisableVertexAttribArray(extra->at_pos);
+	glDisableVertexAttribArray(extra->at_uv);
 }
 #endif
 

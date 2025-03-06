@@ -296,6 +296,9 @@ nk_sdl_render(enum nk_anti_aliasing AA, int max_vertex_buffer, int max_element_b
             offset += cmd->elem_count;
         }
         nk_clear(&sdl.ctx);
+        glDisableVertexAttribArray((GLuint)dev->attrib_pos);
+        glDisableVertexAttribArray((GLuint)dev->attrib_uv);
+        glDisableVertexAttribArray((GLuint)dev->attrib_col);
     }
 
     glUseProgram(0);
