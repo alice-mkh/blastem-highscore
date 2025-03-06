@@ -559,6 +559,7 @@ static uint8_t get_output_value(io_port *port, uint32_t current_cycle, uint32_t 
 		if (!(port->control & 1 << i)) {
 			if (port->slow_rise_start[i] != CYCLE_NEVER) {
 				if (current_cycle - port->slow_rise_start[i] >= slow_rise_delay) {
+					port->slow_rise_start[i] = CYCLE_NEVER;
 					output |= 1 << i;
 				}
 			} else {
@@ -1260,6 +1261,20 @@ void io_control_write(io_port *port, uint8_t value, uint32_t current_cycle)
 {
 	uint8_t changes = value ^ port->control;
 	if (changes) {
+		uint8_t old_output;
+		if (port->device_type == IO_GAMEPAD6) {
+			//slow IO rise could have caused a TH transition
+			if (port->slow_rise_start[6] != CYCLE_NEVER && current_cycle - port->slow_rise_start[6] >= SLOW_RISE_DEVICE) {
+				uint32_t rise_cycle = port->slow_rise_start[6] + SLOW_RISE_DEVICE;
+				if (rise_cycle >= port->device.pad.timeout_cycle) {
+					port->device.pad.th_counter = 0;
+				}
+				
+				port->device.pad.th_counter++;
+				port->device.pad.timeout_cycle = rise_cycle + TH_TIMEOUT;
+			}
+			old_output = get_output_value(port, current_cycle, SLOW_RISE_DEVICE);
+		}
 		for (int i = 0; i < 8; i++)
 		{
 			if (!(value & 1 << i) && !(port->output & 1 << i)) {
@@ -1272,11 +1287,35 @@ void io_control_write(io_port *port, uint8_t value, uint32_t current_cycle)
 			}
 		}
 		port->control = value;
+		if (port->device_type == IO_GAMEPAD6) {
+			uint8_t output = get_output_value(port, current_cycle, SLOW_RISE_DEVICE);
+			if (TH & (old_output ^ output)) {
+				if (current_cycle >= port->device.pad.timeout_cycle) {
+					port->device.pad.th_counter = 0;
+				}
+				if ((output & TH)) {
+					port->device.pad.th_counter++;
+				}
+				port->device.pad.timeout_cycle = current_cycle + TH_TIMEOUT;
+			}
+		}
 	}
 }
 
 void io_data_write(io_port * port, uint8_t value, uint32_t current_cycle)
 {
+	if (port->device_type == IO_GAMEPAD6) {
+		//slow IO rise could have caused a TH transition
+		if (port->slow_rise_start[6] != CYCLE_NEVER && current_cycle - port->slow_rise_start[6] >= SLOW_RISE_DEVICE) {
+			uint32_t rise_cycle = port->slow_rise_start[6] + SLOW_RISE_DEVICE;
+			if (rise_cycle >= port->device.pad.timeout_cycle) {
+				port->device.pad.th_counter = 0;
+			}
+			
+			port->device.pad.th_counter++;
+			port->device.pad.timeout_cycle = rise_cycle + TH_TIMEOUT;
+		}
+	}
 	uint8_t old_output = get_output_value(port, current_cycle, SLOW_RISE_DEVICE);
 	port->output = value;
 	uint8_t output = get_output_value(port, current_cycle, SLOW_RISE_DEVICE);
