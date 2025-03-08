@@ -1418,7 +1418,7 @@ void resume_config_update(void *arg)
 	}
 	emscripten_resume_main_loop();
 }
-#endif __EMSCRIPTEN__
+#endif //__EMSCRIPTEN__
 
 void render_config_updated(void)
 {
