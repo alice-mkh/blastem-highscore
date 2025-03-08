@@ -86,6 +86,11 @@ typedef struct {
 
 typedef uint8_t * (*native_addr_func)(void * context, uint32_t address);
 
+typedef uint16_t (*interp_read_16)(uint32_t address, void *context, void *data);
+typedef uint8_t (*interp_read_8)(uint32_t address, void *context, void *data);
+typedef void (*interp_write_16)(uint32_t address, void *context, uint16_t value, void *data);
+typedef void (*interp_write_8)(uint32_t address, void *context, uint8_t value, void *data);
+
 deferred_addr * defer_address(deferred_addr * old_head, uint32_t address, uint8_t *dest);
 void remove_deferred_until(deferred_addr **head_ptr, deferred_addr * remove_to);
 void process_deferred(deferred_addr ** head_ptr, void * context, native_addr_func get_native);
@@ -110,6 +115,10 @@ void write_byte(uint32_t address, uint8_t value, void **mem_pointers, cpu_option
 memmap_chunk const *find_map_chunk(uint32_t address, cpu_options *opts, uint16_t flags, uint32_t *size_sum);
 uint32_t chunk_size(cpu_options *opts, memmap_chunk const *chunk);
 uint32_t ram_size(cpu_options *opts);
+interp_read_16 get_interp_read_16(void *context, cpu_options *opts, uint32_t start, uint32_t end, void **data_out);
+interp_read_8 get_interp_read_8(void *context, cpu_options *opts, uint32_t start, uint32_t end, void **data_out);
+interp_write_16 get_interp_write_16(void *context, cpu_options *opts, uint32_t start, uint32_t end, void **data_out);
+interp_write_8 get_interp_write_8(void *context, cpu_options *opts, uint32_t start, uint32_t end, void **data_out);
 
 #endif //BACKEND_H_
 

@@ -66,6 +66,14 @@ regs
 	int_ack_handler ptrvoid
 	sync_components ptrsync_fun
 	mem_pointers ptr16 10
+	read16 interp_read_16 256
+	read8 interp_read_8 256
+	write16 interp_write_16 256
+	write8 interp_write_8 256
+	read16_data ptrvoid 256
+	read8_data ptrvoid 256
+	write16_data ptrvoid 256
+	write8_data ptrvoid 256
 	
 flags
 	register ccr

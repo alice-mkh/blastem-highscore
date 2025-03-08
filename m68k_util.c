@@ -6,7 +6,9 @@ void m68k_read_8(m68k_context *context)
 #ifdef DEBUG_DISASM
 	uint32_t tmp = context->scratch1;
 #endif
-	context->scratch1 = read_byte(context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
+	uint32_t address = context->scratch1 & context->opts->gen.address_mask;
+	uint32_t index = address >> 16;
+	context->scratch1 = context->read8[index](address, context, context->read8_data[index]);
 #ifdef DEBUG_DISASM
 	printf("Read.b %05X: %02X\n", tmp, context->scratch1);
 #endif
@@ -26,7 +28,9 @@ void m68k_read_16(m68k_context *context)
 #ifdef DEBUG_DISASM
 	uint32_t tmp = context->scratch1;
 #endif
-	context->scratch1 = read_word(context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
+	uint32_t address = context->scratch1 & context->opts->gen.address_mask;
+	uint32_t index = address >> 16;
+	context->scratch1 = context->read16[index](address, context, context->read16_data[index]);
 #ifdef DEBUG_DISASM
 	if (tmp == context->pc) {
 		m68kinst inst;
@@ -46,7 +50,9 @@ void m68k_read_16(m68k_context *context)
 void m68k_write_8(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
-	write_byte(context->scratch2, context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
+	uint32_t address = context->scratch2 & context->opts->gen.address_mask;
+	uint32_t index = address >> 16;
+	context->write8[index](address, context, context->scratch1, context->write8_data[index]);
 #ifdef DEBUG_DISASM
 	printf("Write.b %05X: %02X\n", context->scratch2, context->scratch1);
 #endif
@@ -57,14 +63,16 @@ void m68k_rmw_writeback(m68k_context *context)
 	if (context->opts->gen.flags & M68K_OPT_BROKEN_READ_MODIFY) {
 		context->cycles += 4 * context->opts->gen.clock_divider;
 	} else {
-		write_byte(context->scratch2, context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
+		m68k_write_8(context);
 	}
 }
 
 void m68k_write_16(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
-	write_word(context->scratch2, context->scratch1, (void**)context->mem_pointers, &context->opts->gen, context);
+	int32_t address = context->scratch2 & context->opts->gen.address_mask;
+	uint32_t index = address >> 16;
+	context->write16[index](address, context, context->scratch1, context->write16_data[index]);
 #ifdef DEBUG_DISASM
 	printf("Write %05X: %04X\n", context->scratch2, context->scratch1);
 #endif
@@ -222,6 +230,7 @@ void init_m68k_opts(m68k_options *opts, memmap_chunk * memmap, uint32_t num_chun
 	opts->gen.max_address = 0x1000000;
 	opts->gen.bus_cycles = 4;
 	opts->gen.clock_divider = clock_divider;
+	opts->gen.mem_ptr_off = offsetof(m68k_context, mem_pointers);
 	sync_comp_tmp = sync_components;
 	int_ack_tmp = int_ack;
 }
@@ -234,6 +243,13 @@ m68k_context *init_68k_context(m68k_options * opts, m68k_reset_handler *reset_ha
 	context->int_cycle = 0xFFFFFFFFU;
 	context->int_pending = 255;
 	context->sync_components = sync_comp_tmp;
+	for (uint32_t i = 0; i < 256; i++)
+	{
+		context->read16[i] = get_interp_read_16(context, &opts->gen, i << 16, (i + 1) << 16, context->read16_data + i);
+		context->read8[i] = get_interp_read_8(context, &opts->gen, i << 16, (i + 1) << 16, context->read8_data + i);
+		context->write16[i] = get_interp_write_16(context, &opts->gen, i << 16, (i + 1) << 16, context->write16_data + i);
+		context->write8[i] = get_interp_write_8(context, &opts->gen, i << 16, (i + 1) << 16, context->write8_data + i);
+	}
 	sync_comp_tmp = NULL;
 	context->int_ack_handler = int_ack_tmp;
 	int_ack_tmp = NULL;
