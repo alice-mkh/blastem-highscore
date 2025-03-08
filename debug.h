@@ -111,8 +111,21 @@ typedef struct {
 	int            num_commands;
 } command_block;
 
+typedef debug_val (*debug_native_func)(debug_val *args, int num_args);
+typedef struct {
+	union {
+		debug_native_func native;
+		command_block     block;
+	} impl;
+	char     **arg_names;
+	int      max_args;
+	int      min_args;
+	uint8_t  is_native;
+} debug_func;
+
 struct parsed_command {
 	command_def   *def;
+	uint32_t      func;
 	char          *format;
 	char          *raw;
 	command_arg   *args;
@@ -153,18 +166,6 @@ struct debug_array{
 	uint32_t           size;
 	uint32_t           storage;
 };
-
-typedef debug_val (*debug_native_func)(debug_val *args, int num_args);
-typedef struct {
-	union {
-		debug_native_func native;
-		command_block     block;
-	} impl;
-	char     **arg_names;
-	int      max_args;
-	int      min_args;
-	uint8_t  is_native;
-} debug_func;
 
 typedef struct {
 	char     *buffer;
