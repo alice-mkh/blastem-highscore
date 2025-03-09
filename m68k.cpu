@@ -1897,6 +1897,7 @@ m68k_save_dst
 		
 		case 6
 		m68k_index_word
+		cycles 2
 		add aregs.R scratch1 scratch2
 		mov src scratch1
 		m68k_write_size size 0
