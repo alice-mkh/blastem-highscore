@@ -883,7 +883,9 @@ def _muluCImpl(prog, params, rawParams, flagUpdates):
 	if p1Size >= size:
 		p1Size = size // 2
 	#TODO: Handle case in which destSize > size
-	return f'\n\t{params[2]} = ((uint{p0Size}_t){params[0]}) * ((uint{p1Size}_t){params[1]});'
+	p0Mask = (1 << p0Size) - 1
+	p1Mask = (1 << p1Size) - 1
+	return f'\n\t{params[2]} = ((uint{size}_t)({params[0]} & {p0Mask})) * ((uint{size}_t)({params[1]} & {p1Mask}));'
 	
 def _getCarryCheck(prog):
 	carryFlag = None
