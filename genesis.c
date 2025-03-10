@@ -397,7 +397,7 @@ static void adjust_int_cycle(m68k_context * context, vdp_context * v_context)
 	}*/
 
 	if (context->status & M68K_STATUS_TRACE || context->trace_pending) {
-		context->target_cycle = context->cycles;
+		context->target_cycle = context->cycles + 1;
 		return;
 	}
 
@@ -795,7 +795,7 @@ static void adjust_int_cycle_pico(m68k_context *context, vdp_context *v_context)
 	}*/
 
 	if (context->status & M68K_STATUS_TRACE || context->trace_pending) {
-		context->target_cycle = context->cycles;
+		context->target_cycle = context->cycles + 1;
 		return;
 	}
 
@@ -820,6 +820,11 @@ static void adjust_int_cycle_pico(m68k_context *context, vdp_context *v_context)
 		}
 
 	}
+#ifdef NEW_CORE
+	if (context->target_cycle == context->cycles) {
+		context->target_cycle++;
+	}
+#endif
 }
 
 static m68k_context* sync_components_pico(m68k_context * context, uint32_t address)
@@ -2076,7 +2081,11 @@ static void start_genesis(system_header *system, char *statefile)
 	}
 #ifdef NEW_CORE
 	while (!gen->m68k->should_return) {
-		sync_components(gen->m68k, gen->m68k->pc);
+		if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
+			sync_components_pico(gen->m68k, gen->m68k->pc);
+		} else {
+			sync_components(gen->m68k, gen->m68k->pc);
+		}
 		m68k_execute(gen->m68k, gen->m68k->target_cycle);
 	}
 	gen->m68k->should_return = 0;
@@ -2104,7 +2113,11 @@ static void resume_genesis(system_header *system)
 	}
 #ifdef NEW_CORE
 	while (!gen->m68k->should_return) {
-		sync_components(gen->m68k, gen->m68k->pc);
+		if (gen->header.type == SYSTEM_PICO || gen->header.type == SYSTEM_COPERA) {
+			sync_components_pico(gen->m68k, gen->m68k->pc);
+		} else {
+			sync_components(gen->m68k, gen->m68k->pc);
+		}
 		m68k_execute(gen->m68k, gen->m68k->target_cycle);
 	}
 	gen->m68k->should_return = 0;

@@ -883,7 +883,9 @@ def _muluCImpl(prog, params, rawParams, flagUpdates):
 	if p1Size >= size:
 		p1Size = size // 2
 	#TODO: Handle case in which destSize > size
-	return f'\n\t{params[2]} = ((uint{p0Size}_t){params[0]}) * ((uint{p1Size}_t){params[1]});'
+	p0Mask = (1 << p0Size) - 1
+	p1Mask = (1 << p1Size) - 1
+	return f'\n\t{params[2]} = ((uint{size}_t)({params[0]} & {p0Mask})) * ((uint{size}_t)({params[1]} & {p1Mask}));'
 	
 def _getCarryCheck(prog):
 	carryFlag = None
@@ -1819,15 +1821,21 @@ class Registers:
 		if len(parts) == 3:
 			if parts[1].startswith('ptr'):
 				self.addPointer(parts[0], parts[1][3:], int(parts[2]))
-			else:
+			elif parts[1].isdigit():
 				self.addRegArray(parts[0], int(parts[1]), int(parts[2]))
+			else:
+				#assume some other C type
+				self.addRegArray(parts[0], parts[1], int(parts[2]))
 		elif len(parts) > 2:
 			self.addRegArray(parts[0], int(parts[1]), parts[2:])
 		else:
 			if parts[1].startswith('ptr'):
 				self.addPointer(parts[0], parts[1][3:], 1)
-			else:
+			elif parts[1].isdigit():
 				self.addReg(parts[0], int(parts[1]))
+			else:
+				#assume some other C type
+				self.addReg(parts[0], parts[1])
 		return self
 
 	def writeHeader(self, otype, hFile):
@@ -1847,11 +1855,17 @@ class Registers:
 			hFile.write('\n\t{ptype} {stars}{nm}{arr};'.format(nm=pointer, ptype=ptype, stars=stars, arr=arr))
 		for reg in self.regs:
 			if not self.isRegArrayMember(reg):
-				fieldList.append((self.regs[reg], 1, reg))
+				if type(self.regs[reg]) is int:
+					fieldList.append((self.regs[reg], 1, reg))
+				else:
+					hFile.write(f'\n\t{self.regs[reg]} {reg};')
 		for arr in self.regArrays:
 			size,regs = self.regArrays[arr]
 			if not type(regs) is int:
 				regs = len(regs)
+			if not type(size) is int:
+				hFile.write(f'\n\t{size} {arr}[{regs}];')
+				continue
 			fieldList.append((size, regs, arr))
 		fieldList.sort()
 		fieldList.reverse()

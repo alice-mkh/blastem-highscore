@@ -17,6 +17,10 @@
 #define REFRESH_INTERVAL 259
 #define REFRESH_DELAY 2
 
+#ifdef NEW_CORE
+#define int_num int_priority
+#endif
+
 enum {
 	GA_SUB_CPU_CTRL,
 	GA_MEM_MODE,
@@ -592,6 +596,12 @@ static void calculate_target_cycle(m68k_context * context)
 		if (mask < 5) {
 			if (cd->gate_array[GA_INT_MASK] & BIT_MASK_IEN5) {
 				cdc_cycle = lc8951_next_interrupt(&cd->cdc);
+#ifdef NEW_CORE
+				//should this maybe happen with the old core too?
+				if (cdc_cycle == cd->cdc.cycle) {
+					cdc_cycle = context->cycles;
+				}
+#endif
 				//CDC interrupts only generated on falling edge of !INT signal
 				if (cd->cdc_int_ack) {
 					if (cdc_cycle > cd->cdc.cycle) {
@@ -643,11 +653,11 @@ static void calculate_target_cycle(m68k_context * context)
 	}
 	if (context->cycles >= context->sync_cycle) {
 		context->should_return = 1;
-		context->target_cycle = context->cycles;
+		context->target_cycle = context->cycles + 1;
 		return;
 	}
 	if (context->status & M68K_STATUS_TRACE || context->trace_pending) {
-		context->target_cycle = context->cycles;
+		context->target_cycle = context->cycles + 1;
 		return;
 	}
 	context->target_cycle = context->sync_cycle < context->int_cycle ? context->sync_cycle : context->int_cycle;
@@ -661,6 +671,9 @@ static void calculate_target_cycle(m68k_context * context)
 				context->target_cycle = context->sync_cycle = before;
 			}
 		}
+	}
+	if (context->target_cycle <= context->cycles) {
+		context->target_cycle = context->cycles + 1;
 	}
 }
 

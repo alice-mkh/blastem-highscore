@@ -1489,7 +1489,6 @@ uint8_t eval_expr(debug_root *root, expr *e, debug_val *out)
 			free(args);
 			return 1;
 		} else {
-			//TODO: Implement me
 			debug_root *func_root = calloc(1, sizeof(debug_root));
 			for (int i = 0; i < num_args; i++)
 			{
@@ -2098,59 +2097,97 @@ void ambiguous_iter(char *key, tern_val val, uint8_t valtype, void *data)
 uint8_t parse_command(debug_root *root, char *text, parsed_command *out)
 {
 	char *cur = text;
+	uint8_t is_func = 0;
 	while (*cur && *cur != '/' && !isspace(*cur))
 	{
+		if (*cur == '(') {
+			is_func = 1;
+			break;
+		}
 		++cur;
 	}
 	char *name = malloc(cur - text + 1);
 	memcpy(name, text, cur - text);
 	name[cur-text] = 0;
 	uint8_t ret = 0;
-	tern_node *prefix_res = tern_find_prefix(root->commands, name);
-	command_def *def = tern_find_ptr(prefix_res, "");
-	if (!def) {
-		tern_node *node = prefix_res;
-		while (node)
+	char *format = NULL;
+	debug_func *func = NULL;
+	command_def *def = NULL;
+	if (is_func) {
+		char *start = name;
+		for (char *ncur = name; *ncur; ncur++)
 		{
-			if (node->left || node->right) {
-				break;
-			}
-			if (node->el) {
-				node = node->straight.next;
-			} else {
-				def = node->straight.value.ptrval;
-				break;
+			if (*ncur == ':') {
+				char *nspace = malloc(ncur - start + 1);
+				memcpy(nspace, start, ncur - start);
+				nspace[ncur - start] = 0;
+				root = tern_find_ptr(root->other_roots, nspace);
+				if (!root) {
+					fprintf(stderr, "%s is not a valid namespace\n", nspace);
+					free(nspace);
+					goto cleanup_name;
+				}
+				start = ncur + 1;
 			}
 		}
-		if (!def && prefix_res) {
-			fprintf(stderr, "%s is ambiguous. Matching commands:\n", name);
-			tern_foreach(prefix_res, ambiguous_iter, name);
+		debug_var *var = tern_find_ptr(root->variables, start);
+		if (!var) {
+			fprintf(stderr, "%s is not defined\n", name);
 			goto cleanup_name;
 		}
-	}
-	if (!def) {
-		fprintf(stderr, "%s is not a recognized command\n", name);
-		goto cleanup_name;
-	}
-	char *format = NULL;
-	if (*cur == '/') {
-		++cur;
-		text = cur;
-		while (*cur && !isspace(*cur))
-		{
-			++cur;
+		debug_val val = var->get(var);
+		if (val.type != DBG_VAL_FUNC) {
+			fprintf(stderr, "%s is not a function\n", name);
+			goto cleanup_name;
 		}
-		format = malloc(cur - text + 1);
-		memcpy(format, text, cur - text);
-		format[cur - text] = 0;
+		func = funcs + val.v.u32;
+	} else {
+		tern_node *prefix_res = tern_find_prefix(root->commands, name);
+		def = tern_find_ptr(prefix_res, "");
+		if (!def) {
+			tern_node *node = prefix_res;
+			while (node)
+			{
+				if (node->left || node->right) {
+					break;
+				}
+				if (node->el) {
+					node = node->straight.next;
+				} else {
+					def = node->straight.value.ptrval;
+					break;
+				}
+			}
+			if (!def && prefix_res) {
+				fprintf(stderr, "%s is ambiguous. Matching commands:\n", name);
+				tern_foreach(prefix_res, ambiguous_iter, name);
+				goto cleanup_name;
+			}
+		}
+		if (!def) {
+			fprintf(stderr, "%s is not a recognized command\n", name);
+			goto cleanup_name;
+		}
+		if (*cur == '/') {
+			++cur;
+			text = cur;
+			while (*cur && !isspace(*cur))
+			{
+				++cur;
+			}
+			format = malloc(cur - text + 1);
+			memcpy(format, text, cur - text);
+			format[cur - text] = 0;
+		}
 	}
+	
 	int num_args = 0;
 	command_arg *args = NULL;
 	if (*cur && *cur != '\n') {
 		++cur;
 	}
 	text = cur;
-	if (def->raw_args) {
+	if (def && def->raw_args) {
 		while (*cur && *cur != '\n')
 		{
 			++cur;
@@ -2166,23 +2203,25 @@ uint8_t parse_command(debug_root *root, char *text, parsed_command *out)
 		out->num_args = 0;
 	} else {
 		int arg_storage = 0;
-		if (def->max_args > 0) {
-			arg_storage = def->max_args;
-		} else if (def->max_args) {
-			arg_storage = def->min_args > 0 ? 2 * def->min_args : 2;
+		int32_t max_args = def ? def->max_args : func->max_args;
+		int32_t min_args = def ? def->min_args : func->min_args;
+		if (max_args > 0) {
+			arg_storage = max_args;
+		} else if (max_args) {
+			arg_storage = min_args > 0 ? 2 * min_args : 2;
 		}
 		if (arg_storage) {
 			args = calloc(arg_storage, sizeof(command_arg));
 		}
-		while (*text && *text != '\n')
+		while (*text && *text != '\n' && (!is_func || *text != ')'))
 		{
 			char *after;
 			expr *e = parse_expression(text, &after);
 			if (e) {
 				if (num_args == arg_storage) {
-					if (def->max_args >= 0) {
+					if (max_args >= 0) {
 						free_expr(e);
-						fprintf(stderr, "Command %s takes a max of %d arguments, but at least %d provided\n", name, def->max_args, def->max_args+1);
+						fprintf(stderr, "Command %s takes a max of %d arguments, but at least %d provided\n", name, max_args, max_args+1);
 						goto cleanup_args;
 					} else {
 						arg_storage *= 2;
@@ -2198,8 +2237,8 @@ uint8_t parse_command(debug_root *root, char *text, parsed_command *out)
 				goto cleanup_args;
 			}
 		}
-		if (num_args < def->min_args) {
-			fprintf(stderr, "Command %s requires at least %d arguments, but only %d provided\n", name, def->min_args, num_args);
+		if (num_args < min_args) {
+			fprintf(stderr, "Command %s requires at least %d arguments, but only %d provided\n", name, min_args, num_args);
 			goto cleanup_args;
 		}
 		out->raw = NULL;
@@ -2207,6 +2246,7 @@ uint8_t parse_command(debug_root *root, char *text, parsed_command *out)
 		out->num_args = num_args;
 	}
 	out->def = def;
+	out->func = func ? func - funcs : 0;
 	out->format = format;
 
 	ret = 1;
@@ -2306,7 +2346,7 @@ static uint8_t read_parse_command(debug_root *root, parsed_command *out, int ind
 		}
 	}
 	if (parse_command(root, input_buf, out)) {
-		if (!out->def->has_block) {
+		if (!out->def || !out->def->has_block) {
 			return NORMAL;
 		}
 		int command_storage = 4;
@@ -2349,7 +2389,7 @@ static uint8_t read_parse_command(debug_root *root, parsed_command *out, int ind
 
 static uint8_t run_command(debug_root *root, parsed_command *cmd)
 {
-	if (!cmd->def->raw_args && !cmd->def->skip_eval) {
+	if (!cmd->def || (!cmd->def->raw_args && !cmd->def->skip_eval)) {
 		for (int i = 0; i < cmd->num_args; i++)
 		{
 			if (!eval_expr(root, cmd->args[i].parsed, &cmd->args[i].value)) {
@@ -2358,7 +2398,33 @@ static uint8_t run_command(debug_root *root, parsed_command *cmd)
 			}
 		}
 	}
-	return cmd->def->impl(root, cmd);
+	if (cmd->def) {
+		return cmd->def->impl(root, cmd);
+	} else {
+		debug_func *func = funcs + cmd->func;
+		if (func->is_native) {
+			debug_val *args = calloc(cmd->num_args, sizeof(debug_val));
+			for (int i = 0; i < cmd->num_args; i++)
+			{
+				args[i] = cmd->args[i].value;
+			}
+			func->impl.native(args, cmd->num_args);
+			free(args);
+		} else {
+			debug_root *func_root = calloc(1, sizeof(debug_root));
+			for (int i = 0; i < cmd->num_args; i++)
+			{
+				new_user_variable(func_root, func->arg_names[i], cmd->args[i].value);
+			}
+			func_root->other_roots = tern_insert_ptr(func_root->other_roots, "parent", root);
+			execute_block(func_root, &func->impl.block);
+			//FIXME: properly free root
+			tern_free(func_root->variables);
+			tern_free(func_root->other_roots);
+			free(func_root);
+		}
+		return 1;
+	}
 }
 
 static void debugger_repl(debug_root *root)

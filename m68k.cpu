@@ -66,6 +66,14 @@ regs
 	int_ack_handler ptrvoid
 	sync_components ptrsync_fun
 	mem_pointers ptr16 10
+	read16 interp_read_16 256
+	read8 interp_read_8 256
+	write16 interp_write_16 256
+	write8 interp_write_8 256
+	read16_data ptrvoid 256
+	read8_data ptrvoid 256
+	write16_data ptrvoid 256
+	write8_data ptrvoid 256
 	
 flags
 	register ccr
@@ -453,6 +461,25 @@ m68k_save_dst
 	invalid M 7 R 7
 	invalid Z 3
 	m68k_fetch_src_ea M R Z
+	if Z = 2
+		switch M
+		case 0
+			#dreg src
+			cycles 4
+		case 1
+			#areg src
+			cycles 4
+		case 7
+			if R = 4
+				#immediate
+				cycles 4
+			else
+				cycles 2
+			end
+		default
+			cycles 2
+		end
+	end
 	
 	add src dregs.D dregs.D Z
 	update_flags XNZVC
@@ -564,6 +591,12 @@ m68k_save_dst
 	
 	m68k_fetch_dst_ea M R Z
 	switch M
+	case 0
+		if Z = 2
+			cycles 4
+		end
+		add src dst dst Z
+		update_flags XNZVC
 	case 1
 		cycles 4
 		add src dst dst 2
@@ -673,6 +706,25 @@ m68k_save_dst
 	invalid M 7 R 7
 	invalid Z 3
 	m68k_fetch_src_ea M R Z
+	if Z = 2
+		switch M
+		case 0
+			#dreg src
+			cycles 4
+		case 1
+			#areg src
+			cycles 4
+		case 7
+			if R = 4
+				#immediate
+				cycles 4
+			else
+				cycles 2
+			end
+		default
+			cycles 2
+		end
+	end
 	
 	and src dregs.D dregs.D Z
 	update_flags NZV0C0
@@ -1210,6 +1262,25 @@ m68k_save_dst
 	invalid M 7 R 7
 	invalid Z 3
 	m68k_fetch_src_ea M R Z
+	if Z = 2
+		switch M
+		case 0
+			#dreg src
+			cycles 4
+		case 1
+			#areg src
+			cycles 4
+		case 7
+			if R = 4
+				#immediate
+				cycles 4
+			else
+				cycles 2
+			end
+		default
+			cycles 2
+		end
+	end
 	
 	sub src dregs.D dregs.D Z
 	update_flags XNZVC
@@ -1321,7 +1392,14 @@ m68k_save_dst
 	
 	m68k_fetch_dst_ea M R Z
 	switch M
+	case 0
+		if Z = 2
+			cycles 4
+		end
+		sub src dst dst Z
+		update_flags XNZVC
 	case 1
+		cycles 4
 		sub src dst dst 2
 	default
 		sub src dst dst Z
@@ -1889,6 +1967,7 @@ m68k_save_dst
 		
 		case 6
 		m68k_index_word
+		cycles 2
 		add aregs.R scratch1 scratch2
 		mov src scratch1
 		m68k_write_size size 0
