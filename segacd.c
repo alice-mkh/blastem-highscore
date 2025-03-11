@@ -568,7 +568,7 @@ static void timers_run(segacd_context *cd, uint32_t cycle)
 static uint32_t next_timer_int(segacd_context *cd)
 {
 	if (cd->timer_pending) {
-		return cd->stopwatch_cycle;
+		return cd->m68k->cycles;
 	}
 	if (cd->timer_value) {
 		return cd->stopwatch_cycle + TIMER_TICK_CLKS * cd->timer_value;
