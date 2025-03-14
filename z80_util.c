@@ -339,3 +339,7 @@ void zinsert_breakpoint(z80_context * context, uint16_t address, uint8_t * bp_ha
 void zremove_breakpoint(z80_context * context, uint16_t address)
 {
 }
+
+void z80_clock_divider_updated(z80_options *options)
+{
+}

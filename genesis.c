@@ -254,6 +254,7 @@ void genesis_deserialize(deserialize_buffer *buf, genesis_context *gen)
 		segacd_register_section_handlers(cd, buf);
 	}
 	uint8_t tmss_old = gen->tmss;
+	uint8_t old_z80_clock_bit = gen->vdp->test_regs[1] & 1;
 	gen->tmss = 0xFF;
 	while (buf->cur_pos < buf->size)
 	{
@@ -286,6 +287,14 @@ void genesis_deserialize(deserialize_buffer *buf, genesis_context *gen)
 #endif
 	free(buf->handlers);
 	buf->handlers = NULL;
+	uint8_t new_z80_clock_bit = gen->vdp->test_regs[1] & 1;
+	if (old_z80_clock_bit != new_z80_clock_bit) {
+		gen->z80->Z80_OPTS->gen.clock_divider = new_z80_clock_bit ? MCLKS_PER_YM : MCLKS_PER_Z80;
+		gen->psg->clock_inc = new_z80_clock_bit ? MCLKS_PER_YM * 16 : MCLKS_PER_PSG;
+		psg_adjust_master_clock(gen->psg, gen->master_clock);
+		z80_invalidate_code_range(gen->z80, 0, 0x4000);
+		z80_clock_divider_updated(gen->z80->Z80_OPTS);
+	}
 }
 
 static void deserialize(system_header *sys, uint8_t *data, size_t size)
@@ -1067,8 +1076,19 @@ static m68k_context * vdp_port_write(uint32_t vdp_port, m68k_context * context, 
 		}
 	} else if (vdp_port < 0x18) {
 		psg_write(gen->psg, value);
+	} else if (vdp_port < 0x1C) {
+		vdp_test_port_select(gen->vdp, value);
 	} else {
+		uint8_t old_z80_clock_bit = gen->vdp->test_regs[1] & 1;
 		vdp_test_port_write(gen->vdp, value);
+		uint8_t new_z80_clock_bit = gen->vdp->test_regs[1] & 1;
+		if (old_z80_clock_bit != new_z80_clock_bit) {
+			gen->z80->Z80_OPTS->gen.clock_divider = new_z80_clock_bit ? MCLKS_PER_YM : MCLKS_PER_Z80;
+			gen->psg->clock_inc = new_z80_clock_bit ? MCLKS_PER_YM * 16 : MCLKS_PER_PSG;
+			psg_adjust_master_clock(gen->psg, gen->master_clock);
+			z80_invalidate_code_range(gen->z80, 0, 0x4000);
+			z80_clock_divider_updated(gen->z80->Z80_OPTS);
+		}
 	}
 
 	if (did_dma) {
