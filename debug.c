@@ -5559,11 +5559,12 @@ z80_context * zdebugger(z80_context * context, uint16_t address)
 
 #endif
 
-void debugger(m68k_context * context, uint32_t address)
+void debugger(void *vcontext, uint32_t address)
 {
 	static char last_cmd[1024];
 	char input_buf[1024];
 	m68kinst inst;
+	m68k_context *context = vcontext;
 
 	init_terminal();
 
@@ -5656,11 +5657,9 @@ void debugger(m68k_context * context, uint32_t address)
 		genesis_context *gen = context->system;
 		vdp_force_update_framebuffer(gen->vdp);
 	}
-#ifndef NEW_CORE
 	uint32_t after = m68k_decode(m68k_instruction_fetch, context, &inst, address);
 	root->after = after;
 	root->inst = &inst;
-#endif
 	for (disp_def * cur = root->displays; cur; cur = cur->next) {
 		char format_str[8];
 		make_format_str(format_str, cur->format);

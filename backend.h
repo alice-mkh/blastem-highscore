@@ -84,6 +84,12 @@ typedef struct {
 	uint8_t            align_error_mask;
 } cpu_options;
 
+typedef void (*debug_handler)(void *context, uint32_t pc);
+typedef struct {
+	debug_handler handler;
+	uint32_t      address;
+} breakpoint;
+
 typedef uint8_t * (*native_addr_func)(void * context, uint32_t address);
 
 typedef uint16_t (*interp_read_16)(uint32_t address, void *context, void *data);

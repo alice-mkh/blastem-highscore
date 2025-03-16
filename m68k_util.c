@@ -1,4 +1,7 @@
 #include <string.h>
+#ifdef DEBUG_DISASM
+#include "68kinst.h"
+#endif
 
 void m68k_read_8(m68k_context *context)
 {
@@ -14,14 +17,12 @@ void m68k_read_8(m68k_context *context)
 #endif
 }
 
-#ifdef DEBUG_DISASM
-#include "68kinst.h"
-static uint16_t debug_disasm_fetch(uint32_t address, void *vcontext)
+uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext)
 {
 	m68k_context *context = vcontext;
-	return read_word(address, (void**)context->mem_pointers, &context->opts->gen, context);
+	return read_word(address, (void **)context->mem_pointers, &context->opts->gen, context);
 }
-#endif
+
 void m68k_read_16(m68k_context *context)
 {
 	context->cycles += 4 * context->opts->gen.clock_divider;
@@ -371,4 +372,18 @@ void start_68k_context(m68k_context *context, uint32_t pc)
 	m68k_read_16(context);
 	context->prefetch = context->scratch1;
 	context->pc += 2;
+}
+
+void insert_breakpoint(m68k_context *context, uint32_t address, debug_handler handler)
+{
+	char buf[6];
+	address &= context->opts->gen.address_mask;
+	context->breakpoints = tern_insert_ptr(context->breakpoints, tern_int_key(address, buf), handler);
+}
+
+void remove_breakpoint(m68k_context *context, uint32_t address)
+{
+	char buf[6];
+	address &= context->opts->gen.address_mask;
+	tern_delete(&context->breakpoints, tern_int_key(address, buf), NULL);
 }
