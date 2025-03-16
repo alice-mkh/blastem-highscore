@@ -2056,6 +2056,8 @@ class Program:
 		self.interrupt = info.get('interrupt', [None])[0]
 		self.sync_cycle = info.get('sync_cycle', [None])[0]
 		self.includes = info.get('include', [])
+		self.pc_reg = info.get('pc_reg', [None])[0]
+		self.pc_offset = info.get('pc_offset', [0])[0]
 		self.flags = flags
 		self.lastDst = None
 		self.scopes = []
@@ -2088,6 +2090,8 @@ class Program:
 		hFile.write('\n#define {0}_'.format(macro))
 		hFile.write('\n#include <stdio.h>')
 		hFile.write('\n#include "backend.h"')
+		if self.pc_reg:
+			hFile.write('\n#include "tern.h"')
 		hFile.write(f'\n\ntypedef struct {self.prefix}options {self.prefix}options;')
 		hFile.write(f'\n\ntypedef struct {self.prefix}context {self.prefix}context;')
 		for decl in self.declares:
@@ -2100,6 +2104,8 @@ class Program:
 		hFile.write('\n};')
 		hFile.write(f'\n\nstruct {self.prefix}context {{')
 		hFile.write(f'\n\t{self.prefix}options *opts;')
+		if self.pc_reg:
+			hFile.write('\n\ttern_node *breakpoints;');
 		self.regs.writeHeader(otype, hFile)
 		hFile.write('\n};')
 		hFile.write('\n')
@@ -2201,6 +2207,36 @@ class Program:
 				pieces.append('\nvoid {pre}execute({type} *context, uint32_t target_cycle)'.format(pre = self.prefix, type = self.context_type))
 				pieces.append('\n{')
 				pieces.append('\n\t{sync}(context, target_cycle);'.format(sync=self.sync_cycle))
+				if self.pc_reg:
+					pieces.append('\n\tif (context->breakpoints) {')
+					pieces.append('\n\t\twhile (context->cycles < target_cycle)')
+					pieces.append('\n\t\t{')
+					if self.interrupt in self.subroutines:
+						pieces.append('\n\t\t\tif (context->cycles >= context->sync_cycle) {')
+						pieces.append(f'\n\t\t\t\t{self.sync_cycle}(context, target_cycle);')
+						pieces.append('\n\t\t\t}')
+						self.meta = {}
+						self.temp = {}
+						intpieces = []
+						self.subroutines[self.interrupt].inline(self, [], intpieces, otype, None)
+						for size in self.temp:
+							pieces.append('\n\t\t\tuint{sz}_t gen_tmp{sz}__;'.format(sz=size))
+						pieces += intpieces
+					if self.pc_offset:
+						pieces.append(f'\n\t\t\tuint32_t debug_pc = context->{self.pc_reg} - {self.pc_offset};')
+						pc_reg = 'debug_pc'
+					else:
+						pc_reg = 'context->' + self.pc_reg
+					pieces.append('\n\t\t\tchar key_buf[6];')
+					pieces.append(f'\n\t\t\tdebug_handler handler = tern_find_ptr(context->breakpoints, tern_int_key({pc_reg}, key_buf));')
+					pieces.append('\n\t\t\tif (handler) {')
+					pieces.append(f'\n\t\t\t\thandler(context, {pc_reg});')
+					pieces.append('\n\t\t\t}')
+					self.meta = {}
+					self.temp = {}
+					self.subroutines[self.body].inline(self, [], pieces, otype, None)
+					pieces.append('\n\t}')
+					pieces.append('\n\t} else {')
 				pieces.append('\n\twhile (context->cycles < target_cycle)')
 				pieces.append('\n\t{')
 				if self.interrupt in self.subroutines:
@@ -2218,6 +2254,8 @@ class Program:
 				self.temp = {}
 				self.subroutines[self.body].inline(self, [], pieces, otype, None)
 				pieces.append('\n\t}')
+				if self.pc_reg:
+					pieces.append('\n\t}')
 				pieces.append('\n}')
 			body.append('\nstatic void unimplemented({pre}context *context, uint32_t target_cycle)'.format(pre = self.prefix))
 			body.append('\n{')

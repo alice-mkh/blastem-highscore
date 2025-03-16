@@ -6,6 +6,8 @@ info
 	interrupt m68k_interrupt
 	include m68k_util.c
 	sync_cycle m68k_sync_cycle
+	pc_reg pc
+	pc_offset 2
 	
 declare
 	typedef m68k_context *(sync_fun)(m68k_context * context, uint32_t address);
@@ -18,6 +20,9 @@ declare
 	void m68k_serialize(m68k_context *context, uint32_t pc, serialize_buffer *buf);
 	void m68k_deserialize(deserialize_buffer *buf, void *vcontext);
 	void start_68k_context(m68k_context *context, uint32_t pc);
+	void insert_breakpoint(m68k_context *context, uint32_t address, debug_handler handler);
+	void remove_breakpoint(m68k_context *context, uint32_t address);
+	uint16_t m68k_instruction_fetch(uint32_t address, void *vcontext);
 	define NUM_MEM_AREAS 10
 	define M68K_OPT_BROKEN_READ_MODIFY 1
 	define INT_PENDING_SR_CHANGE 254
@@ -27,8 +32,6 @@ declare
 	define m68k_options_free free
 	define m68k_handle_code_write(address, context)
 	define resume_68k(context) m68k_execute(context, context->target_cycle)
-	define insert_breakpoint(context, address, handler)
-	define remove_breakpoint(context, address)
 	define m68k_add_watchpoint(context, address, size)
 	define m68k_remove_watchpoint(context, address, size)
 

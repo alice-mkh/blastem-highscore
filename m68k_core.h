@@ -73,13 +73,6 @@ typedef struct {
 	code_word       prologue_start;
 } m68k_options;
 
-typedef void (*m68k_debug_handler)(m68k_context *context, uint32_t pc);
-
-typedef struct {
-	m68k_debug_handler handler;
-	uint32_t           address;
-} m68k_breakpoint;
-
 typedef struct {
 	uint32_t start;
 	uint32_t end;
@@ -112,7 +105,7 @@ struct m68k_context {
 	void            *system;
 	void            *host_sp_entry;
 	void            *stack_storage[M68K_STACK_STORAGE];
-	m68k_breakpoint *breakpoints;
+	breakpoint      *breakpoints;
 	uint32_t        num_breakpoints;
 	uint32_t        bp_storage;
 	uint32_t        watchpoint_min;
@@ -141,7 +134,7 @@ void init_m68k_opts(m68k_options * opts, memmap_chunk * memmap, uint32_t num_chu
 m68k_context * init_68k_context(m68k_options * opts, m68k_reset_handler reset_handler);
 void m68k_reset(m68k_context * context);
 void m68k_options_free(m68k_options *opts);
-void insert_breakpoint(m68k_context * context, uint32_t address, m68k_debug_handler bp_handler);
+void insert_breakpoint(m68k_context * context, uint32_t address, debug_handler bp_handler);
 void remove_breakpoint(m68k_context * context, uint32_t address);
 void m68k_add_watchpoint(m68k_context *context, uint32_t address, uint32_t size);
 void m68k_remove_watchpoint(m68k_context *context, uint32_t address, uint32_t size);

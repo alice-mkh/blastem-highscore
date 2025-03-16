@@ -236,7 +236,7 @@ struct vdp_context {
 	uint16_t       col_2;
 	uint16_t       hv_latch;
 	uint16_t       prefetch;
-	uint16_t       test_port;
+	uint16_t       test_regs[8];
 	//stores 2-bit palette + 4-bit palette index + priority for current sprite line
 	uint8_t        linebuf[LINEBUF_SIZE];
 	uint8_t        compositebuf[LINEBUF_SIZE];
@@ -269,6 +269,7 @@ struct vdp_context {
 	uint8_t        cram_latch;
 	uint8_t        window_h_latch;
 	uint8_t        window_v_latch;
+	uint8_t        selected_test_reg;
 	int32_t        color_map[1 << 12];
 	uint8_t        vdpmem[];
 };
@@ -289,6 +290,7 @@ int vdp_control_port_write(vdp_context * context, uint16_t value, uint32_t cpu_c
 void vdp_control_port_write_pbc(vdp_context * context, uint8_t value);
 void vdp_data_port_write(vdp_context * context, uint16_t value);
 void vdp_data_port_write_pbc(vdp_context * context, uint8_t value);
+void vdp_test_port_select(vdp_context * context, uint16_t value);
 void vdp_test_port_write(vdp_context * context, uint16_t value);
 uint16_t vdp_control_port_read(vdp_context * context);
 uint16_t vdp_data_port_read(vdp_context * context, uint32_t *cpu_cycle, uint32_t cpu_divider);

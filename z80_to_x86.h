@@ -52,8 +52,11 @@ typedef struct {
 	code_ptr        write_16_lowfirst;
 	code_ptr		read_io;
 	code_ptr		write_io;
+	memmap_chunk const *io_memmap;
+	uint32_t        io_memmap_chunks;
 
 	uint32_t        flags;
+	uint16_t        io_address_mask;
 	int8_t          regs[Z80_UNUSED];
 	z80_ctx_fun     run;
 } z80_options;
@@ -115,6 +118,7 @@ code_ptr z80_get_native_address_trans(z80_context * context, uint32_t address);
 z80_context * z80_handle_code_write(uint32_t address, z80_context * context);
 void z80_invalidate_code_range(z80_context *context, uint32_t start, uint32_t end);
 void z80_reset(z80_context * context);
+void z80_clock_divider_updated(z80_options *options);
 void zinsert_breakpoint(z80_context * context, uint16_t address, uint8_t * bp_handler);
 void zremove_breakpoint(z80_context * context, uint16_t address);
 void z80_add_watchpoint(z80_context *context, uint16_t address, uint16_t size);

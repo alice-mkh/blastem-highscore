@@ -501,8 +501,9 @@ not_impl:
 	fatal_error("Command %s is not implemented, exiting...\n", command);
 }
 
-void  gdb_debug_enter(m68k_context * context, uint32_t pc)
+void  gdb_debug_enter(void *vcontext, uint32_t pc)
 {
+	m68k_context *context = vcontext;
 	dfprintf(stderr, "Entered debugger at address %X\n", pc);
 	if (expect_break_response) {
 		if (context->wp_hit) {

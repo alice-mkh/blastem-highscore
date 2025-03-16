@@ -792,7 +792,7 @@ uint16_t m68k_get_ir(m68k_context *context)
 	return 0xFFFF;
 }
 
-static m68k_debug_handler find_breakpoint(m68k_context *context, uint32_t address)
+static debug_handler find_breakpoint(m68k_context *context, uint32_t address)
 {
 	for (uint32_t i = 0; i < context->num_breakpoints; i++)
 	{
@@ -803,7 +803,7 @@ static m68k_debug_handler find_breakpoint(m68k_context *context, uint32_t addres
 	return NULL;
 }
 
-void insert_breakpoint(m68k_context * context, uint32_t address, m68k_debug_handler bp_handler)
+void insert_breakpoint(m68k_context * context, uint32_t address, debug_handler bp_handler)
 {
 	if (!find_breakpoint(context, address)) {
 		if (context->bp_storage == context->num_breakpoints) {
@@ -811,9 +811,9 @@ void insert_breakpoint(m68k_context * context, uint32_t address, m68k_debug_hand
 			if (context->bp_storage < 4) {
 				context->bp_storage = 4;
 			}
-			context->breakpoints = realloc(context->breakpoints, context->bp_storage * sizeof(m68k_breakpoint));
+			context->breakpoints = realloc(context->breakpoints, context->bp_storage * sizeof(breakpoint));
 		}
-		context->breakpoints[context->num_breakpoints++] = (m68k_breakpoint){
+		context->breakpoints[context->num_breakpoints++] = (breakpoint){
 			.handler = bp_handler,
 			.address = address
 		};
@@ -823,7 +823,7 @@ void insert_breakpoint(m68k_context * context, uint32_t address, m68k_debug_hand
 
 m68k_context *m68k_bp_dispatcher(m68k_context *context, uint32_t address)
 {
-	m68k_debug_handler handler = find_breakpoint(context, address);
+	debug_handler handler = find_breakpoint(context, address);
 	if (handler) {
 		handler(context, address);
 	} else {
@@ -1085,7 +1085,7 @@ static void translate_m68k(m68k_context *context, m68kinst * inst)
 	code_ptr start = opts->gen.code.cur;
 	check_cycles_int(&opts->gen, inst->address);
 
-	m68k_debug_handler bp;
+	debug_handler bp;
 	if ((bp = find_breakpoint(context, inst->address))) {
 		m68k_breakpoint_patch(context, inst->address, bp, start);
 	}

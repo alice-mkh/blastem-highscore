@@ -3211,6 +3211,9 @@ void init_z80_opts(z80_options * options, memmap_chunk const * chunks, uint32_t 
 	options->gen.mem_ptr_off = offsetof(z80_context, mem_pointers);
 	options->gen.ram_flags_off = offsetof(z80_context, ram_code_flags);
 	options->gen.ram_flags_shift = 7;
+	options->io_memmap = io_chunks;
+	options->io_memmap_chunks = num_io_chunks;
+	options->io_address_mask = io_address_mask;
 
 	options->flags = 0;
 #ifdef X86_64
@@ -3379,206 +3382,7 @@ void init_z80_opts(z80_options * options, memmap_chunk const * chunks, uint32_t 
 
 	options->gen.handle_code_write = (code_ptr)z80_handle_code_write;
 
-	options->read_8 = gen_mem_fun(&options->gen, chunks, num_chunks, READ_8, &options->read_8_noinc);
-	options->write_8 = gen_mem_fun(&options->gen, chunks, num_chunks, WRITE_8, &options->write_8_noinc);
-
-	code_ptr skip_int = code->cur;
-	//calculate adjust size
-	add_ir(code, 16-sizeof(void *), RSP, SZ_PTR);
-	uint32_t adjust_size = code->cur - skip_int;
-	code->cur = skip_int;
-
-	cmp_rdispr(code, options->gen.context_reg, offsetof(z80_context, sync_cycle), options->gen.cycles, SZ_D);
-	code_ptr skip_sync = code->cur + 1;
-	jcc(code, CC_B, skip_sync);
-	neg_r(code, options->gen.cycles, SZ_D);
-	add_rdispr(code, options->gen.context_reg, offsetof(z80_context, target_cycle), options->gen.cycles, SZ_D);
-	//save PC
-	mov_rrdisp(code, options->gen.scratch1, options->gen.context_reg, offsetof(z80_context, pc), SZ_D);
-	options->do_sync = code->cur;
-	call(code, options->gen.save_context);
-	tmp_stack_off = code->stack_off;
-	//pop return address off the stack and save for resume later
-	//pop_rind(code, options->gen.context_reg);
-	pop_r(code, RAX);
-	add_ir(code, adjust_size, RAX, SZ_PTR);
-	add_ir(code, 16-sizeof(void *), RSP, SZ_PTR);
-	mov_rrind(code, RAX, options->gen.context_reg, SZ_PTR);
-
-	//restore callee saved registers
-	restore_callee_save_regs(code);
-	//return to caller of z80_run
-	retn(code);
-	*skip_sync = code->cur - (skip_sync+1);
-	neg_r(code, options->gen.cycles, SZ_D);
-	add_rdispr(code, options->gen.context_reg, offsetof(z80_context, target_cycle), options->gen.cycles, SZ_D);
-	retn(code);
-	code->stack_off = tmp_stack_off;
-
-	options->gen.handle_cycle_limit_int = code->cur;
-	neg_r(code, options->gen.cycles, SZ_D);
-	add_rdispr(code, options->gen.context_reg, offsetof(z80_context, target_cycle), options->gen.cycles, SZ_D);
-	cmp_rdispr(code, options->gen.context_reg, offsetof(z80_context, int_cycle), options->gen.cycles, SZ_D);
-	jcc(code, CC_B, skip_int);
-	//check that we are not past the end of interrupt pulse
-	cmp_rrdisp(code, options->gen.cycles, options->gen.context_reg, offsetof(z80_context, int_pulse_end), SZ_D);
-	jcc(code, CC_B, skip_int);
-	//set limit to the cycle limit
-	mov_rdispr(code, options->gen.context_reg, offsetof(z80_context, sync_cycle), options->gen.scratch2, SZ_D);
-	mov_rrdisp(code, options->gen.scratch2, options->gen.context_reg, offsetof(z80_context, target_cycle), SZ_D);
-	neg_r(code, options->gen.cycles, SZ_D);
-	add_rr(code, options->gen.scratch2, options->gen.cycles, SZ_D);
-	//disable interrupts
-	cmp_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, int_is_nmi), SZ_B);
-	code_ptr is_nmi = code->cur + 1;
-	jcc(code, CC_NZ, is_nmi);
-	mov_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, iff1), SZ_B);
-	mov_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, iff2), SZ_B);
-	cycles(&options->gen, 6); //interupt ack cycle
-	code_ptr after_int_disable = code->cur + 1;
-	jmp(code, after_int_disable);
-	*is_nmi = code->cur - (is_nmi + 1);
-	mov_rdispr(code, options->gen.context_reg, offsetof(z80_context, iff1), options->gen.scratch2, SZ_B);
-	mov_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, iff1), SZ_B);
-	mov_rrdisp(code, options->gen.scratch2, options->gen.context_reg, offsetof(z80_context, iff2), SZ_B);
-	cycles(&options->gen, 5); //NMI processing cycles
-	*after_int_disable = code->cur - (after_int_disable + 1);
-	//save return address (in scratch1) to Z80 stack
-	sub_ir(code, 2, options->regs[Z80_SP], SZ_W);
-	mov_rr(code, options->regs[Z80_SP], options->gen.scratch2, SZ_W);
-	//we need to do check_cycles and cycles outside of the write_8 call
-	//so that the stack has the correct depth if we need to return to C
-	//for a synchronization
-	check_cycles(&options->gen);
-	cycles(&options->gen, 3);
-	//save word to write before call to write_8_noinc
-	push_r(code, options->gen.scratch1);
-	call(code, options->write_8_noinc);
-	//restore word to write
-	pop_r(code, options->gen.scratch1);
-	//write high byte to SP+1
-	mov_rr(code, options->regs[Z80_SP], options->gen.scratch2, SZ_W);
-	add_ir(code, 1, options->gen.scratch2, SZ_W);
-	shr_ir(code, 8, options->gen.scratch1, SZ_W);
-	check_cycles(&options->gen);
-	cycles(&options->gen, 3);
-	call(code, options->write_8_noinc);
-	//dispose of return address as we'll be jumping somewhere else
-	add_ir(code, 16, RSP, SZ_PTR);
-	cmp_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, int_is_nmi), SZ_B);
-	is_nmi = code->cur + 1;
-	jcc(code, CC_NZ, is_nmi);
-	//TODO: Support interrupt mode 0, not needed for Genesis sit it seems to read $FF during intack
-	//which is conveniently rst $38, i.e. the same thing that im 1 does
-	//check interrupt mode
-	cmp_irdisp(code, 2, options->gen.context_reg, offsetof(z80_context, im), SZ_B);
-	code_ptr im2 = code->cur + 1;
-	jcc(code, CC_Z, im2);
-	mov_ir(code, 0x38, options->gen.scratch1, SZ_W);
-	cycles(&options->gen, 1); //total time for mode 0/1 is 13 t-states
-	code_ptr after_int_dest = code->cur + 1;
-	jmp(code, after_int_dest);
-	*im2 = code->cur - (im2 + 1);
-	//read vector address from I << 8 | vector
-	mov_rdispr(code, options->gen.context_reg, offsetof(z80_context, regs) + Z80_I, options->gen.scratch1, SZ_B);
-	shl_ir(code, 8, options->gen.scratch1, SZ_W);
-	movzx_rdispr(code, options->gen.context_reg, offsetof(z80_context, im2_vector), options->gen.scratch2, SZ_B, SZ_W);
-	or_rr(code, options->gen.scratch2, options->gen.scratch1, SZ_W);
-	push_r(code, options->gen.scratch1);
-	cycles(&options->gen, 3);
-	call(code, options->read_8_noinc);
-	pop_r(code, options->gen.scratch2);
-	push_r(code, options->gen.scratch1);
-	mov_rr(code, options->gen.scratch2, options->gen.scratch1, SZ_W);
-	add_ir(code, 1, options->gen.scratch1, SZ_W);
-	cycles(&options->gen, 3);
-	call(code, options->read_8_noinc);
-	pop_r(code, options->gen.scratch2);
-	shl_ir(code, 8, options->gen.scratch1, SZ_W);
-	movzx_rr(code, options->gen.scratch2, options->gen.scratch2, SZ_B, SZ_W);
-	or_rr(code, options->gen.scratch2, options->gen.scratch1, SZ_W);
-	code_ptr after_int_dest2 = code->cur + 1;
-	jmp(code, after_int_dest2);
-	*is_nmi = code->cur - (is_nmi + 1);
-	mov_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, int_is_nmi), SZ_B);
-	mov_irdisp(code, CYCLE_NEVER, options->gen.context_reg, offsetof(z80_context, nmi_start), SZ_D);
-	mov_ir(code, 0x66, options->gen.scratch1, SZ_W);
-	*after_int_dest = code->cur - (after_int_dest + 1);
-	*after_int_dest2 = code->cur - (after_int_dest2 + 1);
-	call(code, options->native_addr);
-	mov_rrind(code, options->gen.scratch1, options->gen.context_reg, SZ_PTR);
-	tmp_stack_off = code->stack_off;
-	restore_callee_save_regs(code);
-	//return to caller of z80_run to sync
-	retn(code);
-	code->stack_off = tmp_stack_off;
-
-	//HACK
-	options->gen.address_size = SZ_D;
-	options->gen.address_mask = io_address_mask;
-	options->gen.bus_cycles = 4;
-	options->read_io = gen_mem_fun(&options->gen, io_chunks, num_io_chunks, READ_8, NULL);
-	options->write_io = gen_mem_fun(&options->gen, io_chunks, num_io_chunks, WRITE_8, NULL);
-	options->gen.address_size = SZ_W;
-	options->gen.address_mask = 0xFFFF;
-	options->gen.bus_cycles = 3;
-
-	options->read_16 = code->cur;
-	cycles(&options->gen, 3);
-	check_cycles(&options->gen);
-	//TODO: figure out how to handle the extra wait state for word reads to bank area
-	//may also need special handling to avoid too much stack depth when access is blocked
-	push_r(code, options->gen.scratch1);
-	call(code, options->read_8_noinc);
-	mov_rr(code, options->gen.scratch1, options->gen.scratch2, SZ_B);
-#ifndef X86_64
-	//scratch 2 is a caller save register in 32-bit builds and may be clobbered by something called from the read8 fun
-	mov_rrdisp(code, options->gen.scratch1, options->gen.context_reg, offsetof(z80_context, scratch2), SZ_B);
-#endif
-	pop_r(code, options->gen.scratch1);
-	add_ir(code, 1, options->gen.scratch1, SZ_W);
-	cycles(&options->gen, 3);
-	check_cycles(&options->gen);
-	call(code, options->read_8_noinc);
-	shl_ir(code, 8, options->gen.scratch1, SZ_W);
-#ifdef X86_64
-	mov_rr(code, options->gen.scratch2, options->gen.scratch1, SZ_B);
-#else
-	mov_rdispr(code, options->gen.context_reg, offsetof(z80_context, scratch2), options->gen.scratch1, SZ_B);
-#endif
-	retn(code);
-
-	options->write_16_highfirst = code->cur;
-	cycles(&options->gen, 3);
-	check_cycles(&options->gen);
-	push_r(code, options->gen.scratch2);
-	push_r(code, options->gen.scratch1);
-	add_ir(code, 1, options->gen.scratch2, SZ_W);
-	shr_ir(code, 8, options->gen.scratch1, SZ_W);
-	call(code, options->write_8_noinc);
-	pop_r(code, options->gen.scratch1);
-	pop_r(code, options->gen.scratch2);
-	cycles(&options->gen, 3);
-	check_cycles(&options->gen);
-	//TODO: Check if we can get away with TCO here
-	call(code, options->write_8_noinc);
-	retn(code);
-
-	options->write_16_lowfirst = code->cur;
-	cycles(&options->gen, 3);
-	check_cycles(&options->gen);
-	push_r(code, options->gen.scratch2);
-	push_r(code, options->gen.scratch1);
-	call(code, options->write_8_noinc);
-	pop_r(code, options->gen.scratch1);
-	pop_r(code, options->gen.scratch2);
-	add_ir(code, 1, options->gen.scratch2, SZ_W);
-	shr_ir(code, 8, options->gen.scratch1, SZ_W);
-	cycles(&options->gen, 3);
-	check_cycles(&options->gen);
-	//TODO: Check if we can get away with TCO here
-	call(code, options->write_8_noinc);
-	retn(code);
+	z80_clock_divider_updated(options);
 
 	options->retrans_stub = code->cur;
 	tmp_stack_off = code->stack_off;
@@ -3863,6 +3667,212 @@ void zcreate_stub(z80_context * context)
 	add_ir(code, check_int_size - patch_size, opts->gen.scratch1, SZ_PTR);
 	jmp_r(code, opts->gen.scratch1);
 	code->stack_off = start_stack_off;
+}
+
+void z80_clock_divider_updated(z80_options *options)
+{
+	//TODO: make this not leak memory whenever the clock changes
+	options->read_8 = gen_mem_fun(&options->gen, options->gen.memmap, options->gen.memmap_chunks, READ_8, &options->read_8_noinc);
+	options->write_8 = gen_mem_fun(&options->gen, options->gen.memmap, options->gen.memmap_chunks, WRITE_8, &options->write_8_noinc);
+	
+	code_info *code = &options->gen.code;
+	code_ptr skip_int = code->cur;
+	//calculate adjust size
+	add_ir(code, 16-sizeof(void *), RSP, SZ_PTR);
+	uint32_t adjust_size = code->cur - skip_int;
+	code->cur = skip_int;
+
+	cmp_rdispr(code, options->gen.context_reg, offsetof(z80_context, sync_cycle), options->gen.cycles, SZ_D);
+	code_ptr skip_sync = code->cur + 1;
+	jcc(code, CC_B, skip_sync);
+	neg_r(code, options->gen.cycles, SZ_D);
+	add_rdispr(code, options->gen.context_reg, offsetof(z80_context, target_cycle), options->gen.cycles, SZ_D);
+	//save PC
+	mov_rrdisp(code, options->gen.scratch1, options->gen.context_reg, offsetof(z80_context, pc), SZ_D);
+	options->do_sync = code->cur;
+	call(code, options->gen.save_context);
+	uint32_t tmp_stack_off = code->stack_off;
+	//pop return address off the stack and save for resume later
+	//pop_rind(code, options->gen.context_reg);
+	pop_r(code, RAX);
+	add_ir(code, adjust_size, RAX, SZ_PTR);
+	add_ir(code, 16-sizeof(void *), RSP, SZ_PTR);
+	mov_rrind(code, RAX, options->gen.context_reg, SZ_PTR);
+
+	//restore callee saved registers
+	restore_callee_save_regs(code);
+	//return to caller of z80_run
+	retn(code);
+	*skip_sync = code->cur - (skip_sync+1);
+	neg_r(code, options->gen.cycles, SZ_D);
+	add_rdispr(code, options->gen.context_reg, offsetof(z80_context, target_cycle), options->gen.cycles, SZ_D);
+	retn(code);
+	code->stack_off = tmp_stack_off;
+	
+	options->gen.handle_cycle_limit_int = code->cur;
+	neg_r(code, options->gen.cycles, SZ_D);
+	add_rdispr(code, options->gen.context_reg, offsetof(z80_context, target_cycle), options->gen.cycles, SZ_D);
+	cmp_rdispr(code, options->gen.context_reg, offsetof(z80_context, int_cycle), options->gen.cycles, SZ_D);
+	jcc(code, CC_B, skip_int);
+	//check that we are not past the end of interrupt pulse
+	cmp_rrdisp(code, options->gen.cycles, options->gen.context_reg, offsetof(z80_context, int_pulse_end), SZ_D);
+	jcc(code, CC_B, skip_int);
+	//set limit to the cycle limit
+	mov_rdispr(code, options->gen.context_reg, offsetof(z80_context, sync_cycle), options->gen.scratch2, SZ_D);
+	mov_rrdisp(code, options->gen.scratch2, options->gen.context_reg, offsetof(z80_context, target_cycle), SZ_D);
+	neg_r(code, options->gen.cycles, SZ_D);
+	add_rr(code, options->gen.scratch2, options->gen.cycles, SZ_D);
+	//disable interrupts
+	cmp_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, int_is_nmi), SZ_B);
+	code_ptr is_nmi = code->cur + 1;
+	jcc(code, CC_NZ, is_nmi);
+	mov_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, iff1), SZ_B);
+	mov_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, iff2), SZ_B);
+	cycles(&options->gen, 6); //interupt ack cycle
+	code_ptr after_int_disable = code->cur + 1;
+	jmp(code, after_int_disable);
+	*is_nmi = code->cur - (is_nmi + 1);
+	mov_rdispr(code, options->gen.context_reg, offsetof(z80_context, iff1), options->gen.scratch2, SZ_B);
+	mov_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, iff1), SZ_B);
+	mov_rrdisp(code, options->gen.scratch2, options->gen.context_reg, offsetof(z80_context, iff2), SZ_B);
+	cycles(&options->gen, 5); //NMI processing cycles
+	*after_int_disable = code->cur - (after_int_disable + 1);
+	//save return address (in scratch1) to Z80 stack
+	sub_ir(code, 2, options->regs[Z80_SP], SZ_W);
+	mov_rr(code, options->regs[Z80_SP], options->gen.scratch2, SZ_W);
+	//we need to do check_cycles and cycles outside of the write_8 call
+	//so that the stack has the correct depth if we need to return to C
+	//for a synchronization
+	check_cycles(&options->gen);
+	cycles(&options->gen, 3);
+	//save word to write before call to write_8_noinc
+	push_r(code, options->gen.scratch1);
+	call(code, options->write_8_noinc);
+	//restore word to write
+	pop_r(code, options->gen.scratch1);
+	//write high byte to SP+1
+	mov_rr(code, options->regs[Z80_SP], options->gen.scratch2, SZ_W);
+	add_ir(code, 1, options->gen.scratch2, SZ_W);
+	shr_ir(code, 8, options->gen.scratch1, SZ_W);
+	check_cycles(&options->gen);
+	cycles(&options->gen, 3);
+	call(code, options->write_8_noinc);
+	//dispose of return address as we'll be jumping somewhere else
+	add_ir(code, 16, RSP, SZ_PTR);
+	cmp_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, int_is_nmi), SZ_B);
+	is_nmi = code->cur + 1;
+	jcc(code, CC_NZ, is_nmi);
+	//TODO: Support interrupt mode 0, not needed for Genesis sit it seems to read $FF during intack
+	//which is conveniently rst $38, i.e. the same thing that im 1 does
+	//check interrupt mode
+	cmp_irdisp(code, 2, options->gen.context_reg, offsetof(z80_context, im), SZ_B);
+	code_ptr im2 = code->cur + 1;
+	jcc(code, CC_Z, im2);
+	mov_ir(code, 0x38, options->gen.scratch1, SZ_W);
+	cycles(&options->gen, 1); //total time for mode 0/1 is 13 t-states
+	code_ptr after_int_dest = code->cur + 1;
+	jmp(code, after_int_dest);
+	*im2 = code->cur - (im2 + 1);
+	//read vector address from I << 8 | vector
+	mov_rdispr(code, options->gen.context_reg, offsetof(z80_context, regs) + Z80_I, options->gen.scratch1, SZ_B);
+	shl_ir(code, 8, options->gen.scratch1, SZ_W);
+	movzx_rdispr(code, options->gen.context_reg, offsetof(z80_context, im2_vector), options->gen.scratch2, SZ_B, SZ_W);
+	or_rr(code, options->gen.scratch2, options->gen.scratch1, SZ_W);
+	push_r(code, options->gen.scratch1);
+	cycles(&options->gen, 3);
+	call(code, options->read_8_noinc);
+	pop_r(code, options->gen.scratch2);
+	push_r(code, options->gen.scratch1);
+	mov_rr(code, options->gen.scratch2, options->gen.scratch1, SZ_W);
+	add_ir(code, 1, options->gen.scratch1, SZ_W);
+	cycles(&options->gen, 3);
+	call(code, options->read_8_noinc);
+	pop_r(code, options->gen.scratch2);
+	shl_ir(code, 8, options->gen.scratch1, SZ_W);
+	movzx_rr(code, options->gen.scratch2, options->gen.scratch2, SZ_B, SZ_W);
+	or_rr(code, options->gen.scratch2, options->gen.scratch1, SZ_W);
+	code_ptr after_int_dest2 = code->cur + 1;
+	jmp(code, after_int_dest2);
+	*is_nmi = code->cur - (is_nmi + 1);
+	mov_irdisp(code, 0, options->gen.context_reg, offsetof(z80_context, int_is_nmi), SZ_B);
+	mov_irdisp(code, CYCLE_NEVER, options->gen.context_reg, offsetof(z80_context, nmi_start), SZ_D);
+	mov_ir(code, 0x66, options->gen.scratch1, SZ_W);
+	*after_int_dest = code->cur - (after_int_dest + 1);
+	*after_int_dest2 = code->cur - (after_int_dest2 + 1);
+	call(code, options->native_addr);
+	mov_rrind(code, options->gen.scratch1, options->gen.context_reg, SZ_PTR);
+	tmp_stack_off = code->stack_off;
+	restore_callee_save_regs(code);
+	//return to caller of z80_run to sync
+	retn(code);
+	code->stack_off = tmp_stack_off;
+	
+	//HACK
+	options->gen.address_size = SZ_D;
+	options->gen.address_mask = options->io_address_mask;
+	options->gen.bus_cycles = 4;
+	options->read_io = gen_mem_fun(&options->gen, options->io_memmap, options->io_memmap_chunks, READ_8, NULL);
+	options->write_io = gen_mem_fun(&options->gen, options->io_memmap, options->io_memmap_chunks, WRITE_8, NULL);
+	options->gen.address_size = SZ_W;
+	options->gen.address_mask = 0xFFFF;
+	options->gen.bus_cycles = 3;
+	
+	options->read_16 = code->cur;
+	cycles(&options->gen, 3);
+	check_cycles(&options->gen);
+	//TODO: figure out how to handle the extra wait state for word reads to bank area
+	//may also need special handling to avoid too much stack depth when access is blocked
+	push_r(code, options->gen.scratch1);
+	call(code, options->read_8_noinc);
+	mov_rr(code, options->gen.scratch1, options->gen.scratch2, SZ_B);
+#ifndef X86_64
+	//scratch 2 is a caller save register in 32-bit builds and may be clobbered by something called from the read8 fun
+	mov_rrdisp(code, options->gen.scratch1, options->gen.context_reg, offsetof(z80_context, scratch2), SZ_B);
+#endif
+	pop_r(code, options->gen.scratch1);
+	add_ir(code, 1, options->gen.scratch1, SZ_W);
+	cycles(&options->gen, 3);
+	check_cycles(&options->gen);
+	call(code, options->read_8_noinc);
+	shl_ir(code, 8, options->gen.scratch1, SZ_W);
+#ifdef X86_64
+	mov_rr(code, options->gen.scratch2, options->gen.scratch1, SZ_B);
+#else
+	mov_rdispr(code, options->gen.context_reg, offsetof(z80_context, scratch2), options->gen.scratch1, SZ_B);
+#endif
+	retn(code);
+
+	options->write_16_highfirst = code->cur;
+	cycles(&options->gen, 3);
+	check_cycles(&options->gen);
+	push_r(code, options->gen.scratch2);
+	push_r(code, options->gen.scratch1);
+	add_ir(code, 1, options->gen.scratch2, SZ_W);
+	shr_ir(code, 8, options->gen.scratch1, SZ_W);
+	call(code, options->write_8_noinc);
+	pop_r(code, options->gen.scratch1);
+	pop_r(code, options->gen.scratch2);
+	cycles(&options->gen, 3);
+	check_cycles(&options->gen);
+	//TODO: Check if we can get away with TCO here
+	call(code, options->write_8_noinc);
+	retn(code);
+
+	options->write_16_lowfirst = code->cur;
+	cycles(&options->gen, 3);
+	check_cycles(&options->gen);
+	push_r(code, options->gen.scratch2);
+	push_r(code, options->gen.scratch1);
+	call(code, options->write_8_noinc);
+	pop_r(code, options->gen.scratch1);
+	pop_r(code, options->gen.scratch2);
+	add_ir(code, 1, options->gen.scratch2, SZ_W);
+	shr_ir(code, 8, options->gen.scratch1, SZ_W);
+	cycles(&options->gen, 3);
+	check_cycles(&options->gen);
+	//TODO: Check if we can get away with TCO here
+	call(code, options->write_8_noinc);
+	retn(code);
 }
 
 void zinsert_breakpoint(z80_context * context, uint16_t address, uint8_t * bp_handler)

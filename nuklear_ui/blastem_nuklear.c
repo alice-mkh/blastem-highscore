@@ -329,6 +329,7 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 				browser_cur_path = full_path;
 				free_dir_list(entries, num_entries);
 				entries = NULL;
+				context->input.selected_widget = 0;
 			} else {
 				handle_chooser_result(normal_open, full_path);
 			}

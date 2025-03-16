@@ -727,8 +727,8 @@ void vdp_print_reg_explain(vdp_context * context)
 		   (context->flags & FLAG_PENDING) ? "word" : (context->flags2 & FLAG2_BYTE_PENDING) ? "byte" : "none",
 		   context->vcounter, context->hslot*2, (context->flags2 & FLAG2_VINT_PENDING) ? "true" : "false",
 		   (context->flags2 & FLAG2_HINT_PENDING) ? "true" : "false", vdp_status(context));
-	printf("\nDebug Register: %X | Output disabled: %s, Force Layer: %d\n", context->test_port,
-		(context->test_port & TEST_BIT_DISABLE)  ? "true" : "false", context->test_port >> 7 & 3
+	printf("\nDebug Register: %X | Output disabled: %s, Force Layer: %d\n", context->test_regs[0],
+		(context->test_regs[0] & TEST_BIT_DISABLE)  ? "true" : "false", context->test_regs[0] >> 7 & 3
 	);
 }
 
@@ -1812,8 +1812,8 @@ static void render_map_output(uint32_t line, int32_t col, vdp_context * context)
 {
 	uint8_t *dst;
 	uint8_t *debug_dst;
-	uint8_t output_disabled = (context->test_port & TEST_BIT_DISABLE) != 0;
-	uint8_t test_layer = context->test_port >> 7 & 3;
+	uint8_t output_disabled = (context->test_regs[0] & TEST_BIT_DISABLE) != 0;
+	uint8_t test_layer = context->test_regs[0] >> 7 & 3;
 	if (context->state == PREPARING && !test_layer) {
 		if (col) {
 			col -= 2;
@@ -2915,10 +2915,10 @@ static void draw_right_border(vdp_context *context)
 {
 	uint8_t *dst = context->compositebuf + BORDER_LEFT + ((context->regs[REG_MODE_4] & BIT_H40) ? 320 : 256);
 	uint8_t pixel = context->regs[REG_BG_COLOR] & 0x3F;
-	if ((context->test_port & TEST_BIT_DISABLE) != 0) {
+	if ((context->test_regs[0] & TEST_BIT_DISABLE) != 0) {
 		pixel = 0x3F;
 	}
-	uint8_t test_layer = context->test_port >> 7 & 3;
+	uint8_t test_layer = context->test_regs[0] >> 7 & 3;
 	if (test_layer) {
 		switch(test_layer)
 			{
@@ -3276,7 +3276,7 @@ static void vdp_h40_line(vdp_context * context)
 	uint32_t mask;
 	uint32_t const slot_cycles = MCLKS_SLOT_H40;
 	uint8_t bgindex = context->regs[REG_BG_COLOR] & 0x3F;
-	uint8_t test_layer = context->test_port >> 7 & 3;
+	uint8_t test_layer = context->test_regs[0] >> 7 & 3;
 
 	//165
 	if (!(context->regs[REG_MODE_3] & BIT_VSCROLL)) {
@@ -3482,7 +3482,7 @@ static void vdp_h40(vdp_context * context, uint32_t target_cycles)
 	uint32_t mask;
 	uint32_t const slot_cycles = MCLKS_SLOT_H40;
 	uint8_t bgindex = context->regs[REG_BG_COLOR] & 0x3F;
-	uint8_t test_layer = context->test_port >> 7 & 3;
+	uint8_t test_layer = context->test_regs[0] >> 7 & 3;
 	if (!context->output) {
 		//This shouldn't happen normally, but it can theoretically
 		//happen when doing border busting
@@ -3712,7 +3712,7 @@ static void vdp_h32(vdp_context * context, uint32_t target_cycles)
 	uint32_t mask;
 	uint32_t const slot_cycles = MCLKS_SLOT_H32;
 	uint8_t bgindex = context->regs[REG_BG_COLOR] & 0x3F;
-	uint8_t test_layer = context->test_port >> 7 & 3;
+	uint8_t test_layer = context->test_regs[0] >> 7 & 3;
 	if (!context->output) {
 		//This shouldn't happen normally, but it can theoretically
 		//happen when doing border busting
@@ -3930,7 +3930,7 @@ static void vdp_h32_mode4(vdp_context * context, uint32_t target_cycles)
 	uint32_t mask;
 	uint32_t const slot_cycles = MCLKS_SLOT_H32;
 	uint8_t bgindex = 0x10 | (context->regs[REG_BG_COLOR] & 0xF) + MODE4_OFFSET;
-	uint8_t test_layer = context->test_port >> 7 & 3;
+	uint8_t test_layer = context->test_regs[0] >> 7 & 3;
 	if (!context->output) {
 		//This shouldn't happen normally, but it can theoretically
 		//happen when doing border busting
@@ -4810,7 +4810,7 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 		dst = NULL;
 	}
 
-	uint8_t test_layer = context->test_port >> 7 & 3;
+	uint8_t test_layer = context->test_regs[0] >> 7 & 3;
 
 	while(context->cycles < target_cycles)
 	{
@@ -5301,9 +5301,16 @@ void vdp_data_port_write_pbc(vdp_context * context, uint8_t value)
 	increment_address(context);
 }
 
+void vdp_test_port_select(vdp_context * context, uint16_t value)
+{
+	context->selected_test_reg = value >> 8 & 0xF;
+}
+
 void vdp_test_port_write(vdp_context * context, uint16_t value)
 {
-	context->test_port = value;
+	if (context->selected_test_reg < 8) {
+		context->test_regs[context->selected_test_reg] = value;
+	}
 }
 
 uint16_t vdp_status(vdp_context *context)
@@ -5714,7 +5721,7 @@ void vdp_int_ack(vdp_context * context)
 	}
 }
 
-#define VDP_STATE_VERSION 4
+#define VDP_STATE_VERSION 5
 void vdp_serialize(vdp_context *context, serialize_buffer *buf)
 {
 	save_int8(buf, VDP_STATE_VERSION);
@@ -5762,7 +5769,7 @@ void vdp_serialize(vdp_context *context, serialize_buffer *buf)
 	save_int16(buf, context->vscroll_latch[1]);
 	save_int16(buf, context->col_1);
 	save_int16(buf, context->col_2);
-	save_int16(buf, context->test_port);
+	save_int16(buf, context->test_regs[0]);
 	save_buffer8(buf, context->tmp_buf_a, SCROLL_BUFFER_SIZE);
 	save_buffer8(buf, context->tmp_buf_b, SCROLL_BUFFER_SIZE);
 	save_int8(buf, context->buf_a_off);
@@ -5799,6 +5806,8 @@ void vdp_serialize(vdp_context *context, serialize_buffer *buf)
 	save_int8(buf, context->cd);
 	save_int8(buf, context->window_h_latch);
 	save_int8(buf, context->window_v_latch);
+	save_buffer16(buf, context->test_regs + 1, 7);
+	save_int8(buf, context->selected_test_reg);
 }
 
 void vdp_deserialize(deserialize_buffer *buf, void *vcontext)
@@ -5867,7 +5876,7 @@ void vdp_deserialize(deserialize_buffer *buf, void *vcontext)
 	context->vscroll_latch[1] = load_int16(buf);
 	context->col_1 = load_int16(buf);
 	context->col_2 = load_int16(buf);
-	context->test_port = load_int16(buf);
+	context->test_regs[0] = load_int16(buf);
 	load_buffer8(buf, context->tmp_buf_a, SCROLL_BUFFER_SIZE);
 	load_buffer8(buf, context->tmp_buf_b, SCROLL_BUFFER_SIZE);
 	context->buf_a_off = load_int8(buf) & SCROLL_BUFFER_MASK;
@@ -5945,6 +5954,13 @@ void vdp_deserialize(deserialize_buffer *buf, void *vcontext)
 		}
 	} else {
 		context->address_latch = context->address;
+	}
+	if (version > 4) {
+		load_buffer16(buf, context->test_regs + 1, 7);
+		context->selected_test_reg = load_int8(buf);
+	} else {
+		memset(context->test_regs + 1, 0, 7 * sizeof(uint16_t));
+		context->selected_test_reg = 0;
 	}
 	update_video_params(context);
 }

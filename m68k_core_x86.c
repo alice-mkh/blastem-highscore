@@ -2563,7 +2563,7 @@ void m68k_invalidate_code_range(m68k_context *context, uint32_t start, uint32_t 
 	}
 }
 
-void m68k_breakpoint_patch(m68k_context *context, uint32_t address, m68k_debug_handler bp_handler, code_ptr native_addr)
+void m68k_breakpoint_patch(m68k_context *context, uint32_t address, debug_handler bp_handler, code_ptr native_addr)
 {
 	m68k_options * opts = context->opts;
 	code_info native;

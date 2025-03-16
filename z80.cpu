@@ -26,6 +26,7 @@ declare
 	void zremove_breakpoint(z80_context * context, uint16_t address);
 	void z80_options_free(z80_options *opts);
 	void z80_sync_cycle(z80_context *context, uint32_t target_cycle);
+	void z80_clock_divider_updated(z80_options *options);
 
 regs
 	main 8 b c d e h l f a
