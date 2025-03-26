@@ -946,24 +946,29 @@ static int32_t handle_event(SDL_Event *event)
 	case SDL_JOYAXISMOTION:
 		handle_joy_axis(lock_joystick_index(render_find_joystick_index(event->jaxis.which), -1), event->jaxis.axis, event->jaxis.value);
 		break;
-	case SDL_JOYDEVICEADDED:
-		if (event->jdevice.which < MAX_JOYSTICKS) {
-			int index = lowest_unused_joystick_index();
-			if (index >= 0) {
-				SDL_Joystick * joy = joysticks[index] = SDL_JoystickOpen(event->jdevice.which);
-				joystick_sdl_index[index] = event->jdevice.which;
-				joystick_index_locked[index] = 0;
-				if (gc_events_enabled) {
-					controllers[index] = SDL_GameControllerOpen(event->jdevice.which);
-				}
-				if (joy) {
-					debug_message("Joystick %d added: %s\n", index, SDL_JoystickName(joy));
-					debug_message("\tNum Axes: %d\n\tNum Buttons: %d\n\tNum Hats: %d\n", SDL_JoystickNumAxes(joy), SDL_JoystickNumButtons(joy), SDL_JoystickNumHats(joy));
-					handle_joy_added(index);
-				}
+	case SDL_JOYDEVICEADDED: {
+		int index = lowest_unused_joystick_index();
+		if (index >= 0) {
+			SDL_Joystick * joy = SDL_JoystickOpen(event->jdevice.which);
+			if (SDL_JoystickNumAxes(joy) == 3 && SDL_JoystickNumButtons(joy) == 0) {
+				//probably just an acclerometer or gyro
+				SDL_JoystickClose(joy);
+				break;
+			}
+			joysticks[index] = joy;
+			joystick_sdl_index[index] = event->jdevice.which;
+			joystick_index_locked[index] = 0;
+			if (gc_events_enabled) {
+				controllers[index] = SDL_GameControllerOpen(event->jdevice.which);
+			}
+			if (joy) {
+				debug_message("Joystick %d added: %s\n", index, SDL_JoystickName(joy));
+				debug_message("\tNum Axes: %d\n\tNum Buttons: %d\n\tNum Hats: %d\n", SDL_JoystickNumAxes(joy), SDL_JoystickNumButtons(joy), SDL_JoystickNumHats(joy));
+				handle_joy_added(index);
 			}
 		}
 		break;
+	}
 	case SDL_JOYDEVICEREMOVED: {
 		int index = render_find_joystick_index(event->jdevice.which);
 		if (index >= 0) {
