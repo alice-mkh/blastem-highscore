@@ -257,7 +257,9 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 	static size_t num_entries;
 	static int32_t selected_entry = -1;
 	if (!browser_cur_path) {
-		get_initial_browse_path(&browser_cur_path);
+		if (!get_initial_browse_path(&browser_cur_path)) {
+			return;
+		}
 	}
 	if (use_native_filechooser && native_filechooser_available()) {
 		char *path = native_filechooser_pick(browser_label, browser_cur_path);

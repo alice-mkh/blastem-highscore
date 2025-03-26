@@ -21,7 +21,11 @@ enum {
 
 zip_file *zip_open(const char *filename)
 {
+#ifdef __ANDROID__
+	FILE *f = fopen_wrapper(filename, "rb");
+#else
 	FILE *f = fopen(filename, "rb");
+#endif
 	if (!f) {
 		return NULL;
 	}

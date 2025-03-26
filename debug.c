@@ -29,7 +29,7 @@
 static debug_func *funcs;
 static uint32_t num_funcs, func_storage;
 
-static debug_func* alloc_func(void)
+static debug_func* alloc_dfunc(void)
 {
 	if (num_funcs == func_storage) {
 		func_storage = func_storage ? func_storage * 2 : 4;
@@ -40,7 +40,7 @@ static debug_func* alloc_func(void)
 
 static debug_val new_native_func(debug_native_func impl, int max_args, int min_args)
 {
-	debug_func *f = alloc_func();
+	debug_func *f = alloc_dfunc();
 	f->impl.native = impl;
 	f->max_args = max_args;
 	f->min_args = min_args;
@@ -55,7 +55,7 @@ static debug_val new_native_func(debug_native_func impl, int max_args, int min_a
 
 static debug_val new_user_func(command_block *block, char **args, int num_args)
 {
-	debug_func *f = alloc_func();
+	debug_func *f = alloc_dfunc();
 	f->impl.block = *block;
 	f->arg_names = args;
 	f->max_args = f->min_args = num_args;

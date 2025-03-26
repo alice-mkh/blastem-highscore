@@ -26,7 +26,7 @@ void force_no_terminal()
 
 void init_terminal()
 {
-#ifndef IS_LIB
+#if !defined(IS_LIB) && !defined(__ANDROID__)
 	if (!init_done) {
 		if (!(isatty(STDIN_FILENO) && isatty(STDOUT_FILENO))) {
 #ifndef __APPLE__
@@ -40,7 +40,7 @@ void init_terminal()
 			mkfifo(INPUT_PATH, 0666);
 			mkfifo(OUTPUT_PATH, 0666);
 
-			//close existing file descriptors
+			//close existing file descriptorsbundled_file_path
 			close(STDIN_FILENO);
 			close(STDOUT_FILENO);
 			close(STDERR_FILENO);
