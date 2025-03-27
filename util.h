@@ -106,5 +106,12 @@ void socket_close(int sock);
 int socket_last_error(void);
 //Returns if the last socket error was EAGAIN/EWOULDBLOCK
 int socket_error_is_wouldblock(void);
+#if defined(__ANDROID__) && !defined(IS_LIB)
+FILE* fopen_wrapper(const char *path, const char *mode);
+#ifndef DISABLE_ZLIB
+#include "zlib/zlib.h"
+gzFile gzopen_wrapper(const char *path, const char *mode);
+#endif
+#endif
 
 #endif //UTIL_H_

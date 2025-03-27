@@ -2271,9 +2271,9 @@ class Program:
 			pieces.append('\nunimplemented:')
 			if len(self.mainDispatch) == 1:
 				dispatch = list(self.mainDispatch)[0]
-				body.append(f'\n\tfatal_error("Unimplemented instruction: %X\\n", {dispatch});')
+				pieces.append(f'\n\tfatal_error("Unimplemented instruction: %X\\n", {dispatch});')
 			else:
-				body.append('\n\tfatal_error("Unimplemented instruction\\n");')
+				pieces.append('\n\tfatal_error("Unimplemented instruction\\n");')
 			pieces.append('\n}')
 		return ''.join(body) +  ''.join(pieces)
 		

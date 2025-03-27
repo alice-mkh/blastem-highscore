@@ -10,6 +10,10 @@
 #include <unistd.h>
 #include <errno.h>
 #endif
+#ifdef __ANDROID__
+#include <SDL_system.h>
+#include <jni.h>
+#endif
 
 static char **current_path;
 
@@ -39,8 +43,6 @@ static void persist_path(void)
 }
 
 #ifdef __ANDROID__
-#include <SDL.h>
-#include <jni.h>
 static char *get_external_storage_path()
 {
 	static char *ret;
@@ -74,9 +76,41 @@ cleanup:
 }
 #endif
 
-void get_initial_browse_path(char **dst)
+uint8_t get_initial_browse_path(char **dst)
 {
 	char *base = NULL;
+#ifdef __ANDROID__
+	static const char activity_class_name[] = "com/retrodev/blastem/BlastEmActivity";
+	static const char get_rom_path_name[] = "getRomPath";
+	JNIEnv *env = SDL_AndroidGetJNIEnv();
+	jclass act_class = (*env)->FindClass(env, activity_class_name);
+	if (!act_class) {
+		fatal_error("Failed to find activity class %s\n", activity_class_name);
+	}
+	jmethodID meth = (*env)->GetMethodID(env, act_class, get_rom_path_name, "()Ljava/lang/String;");
+	if (!meth) {
+		fatal_error("Failed to find method %s\n", get_rom_path_name);
+	}
+	jobject activity = SDL_AndroidGetActivity();
+	jobject ret = (*env)->CallObjectMethod(env, activity, meth);
+	char *res = NULL;
+	if (ret) {
+		const char*utf = (*env)->GetStringUTFChars(env, (jstring)ret, NULL);
+		jsize len = (*env)->GetStringUTFLength(env, (jstring)ret);
+		res = calloc(len + 1, 1);
+		memcpy(res, utf, len);
+		debug_message("Got initial browse path: %s\n", res);
+		(*env)->ReleaseStringUTFChars(env, (jstring)ret, utf);
+		(*env)->DeleteLocalRef(env, ret);
+	}
+	
+	(*env)->DeleteLocalRef(env, activity);
+	if (res) {
+		*dst = res;
+		return 1;
+	}
+	return 0;
+#else
 	char *remember_path = tern_find_path(config, "ui\0remember_path\0", TVAL_PTR).ptrval;
 	if (!remember_path || !strcmp("on", remember_path)) {
 		char *pathfname = sticky_path_path();
@@ -104,8 +138,10 @@ void get_initial_browse_path(char **dst)
 	if (!base) {
 		base = tern_find_path(config, "ui\0initial_path\0", TVAL_PTR).ptrval;
 	}
+#endif
 	if (!base){
 #ifdef __ANDROID__
+		
 		base = get_external_storage_path();
 #else
 		base = "$HOME";
@@ -116,6 +152,7 @@ void get_initial_browse_path(char **dst)
 	*dst = replace_vars(base, vars, 1);
 	free(base);
 	tern_free(vars);
+	return 1;
 }
 
 char *path_append(const char *base, const char *suffix)

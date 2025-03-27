@@ -257,7 +257,9 @@ void view_file_browser(struct nk_context *context, uint8_t normal_open)
 	static size_t num_entries;
 	static int32_t selected_entry = -1;
 	if (!browser_cur_path) {
-		get_initial_browse_path(&browser_cur_path);
+		if (!get_initial_browse_path(&browser_cur_path)) {
+			return;
+		}
 	}
 	if (use_native_filechooser && native_filechooser_available()) {
 		char *path = native_filechooser_pick(browser_label, browser_cur_path);
@@ -1417,7 +1419,8 @@ static uint8_t initial_controller_config;
 static void view_controller_mappings(struct nk_context *context)
 {
 	char buffer[512];
-	static int quiet, button_a = -1, button_a_axis = -1;
+	static int button_a = -1, button_a_axis = -1;
+	static uint32_t quiet_start;
 	uint8_t added_mapping = 0;
 	if (nk_begin(context, "Controllers", nk_rect(0, 0, render_width(), render_height()), NK_WINDOW_NO_SCROLLBAR)) {
 
@@ -1445,8 +1448,10 @@ static void view_controller_mappings(struct nk_context *context)
 		}
 
 		nk_layout_space_end(context);
-		if (quiet) {
-			--quiet;
+		if (quiet_start) {
+			if (render_elapsed_ms() - quiet_start > 1000 * QUIET_FRAMES / 60) {
+				quiet_start = 0;
+			}
 		} else {
 			if (button_pressed >= 0 && button_pressed != last_button) {
 				if (current_button <= SDL_CONTROLLER_BUTTON_B || button_pressed != button_a) {
@@ -1495,7 +1500,7 @@ static void view_controller_mappings(struct nk_context *context)
 		}
 
 		while (added_mapping) {
-			quiet = QUIET_FRAMES;
+			quiet_start = render_elapsed_ms();
 			if (current_button < SDL_CONTROLLER_BUTTON_MAX) {
 				current_button++;
 				if (current_button == SDL_CONTROLLER_BUTTON_MAX) {
@@ -2671,25 +2676,27 @@ void ui_idle_loop(void)
 }
 static void handle_event(SDL_Event *event)
 {
+	SDL_Joystick *joy = render_get_joystick(selected_controller);
 	if (event->type == SDL_KEYDOWN) {
 		keycode = event->key.keysym.sym;
-	}
-	else if (event->type == SDL_JOYBUTTONDOWN) {
-		button_pressed = event->jbutton.button;
-	}
-	else if (event->type == SDL_JOYHATMOTION) {
-		hat_moved = event->jhat.hat;
-		hat_value = event->jhat.value;
-	}
-	else if (event->type == SDL_JOYAXISMOTION) {
-		if (event->jaxis.axis == axis_moved || abs(event->jaxis.value) > abs(axis_value) || abs(event->jaxis.value) > 4000) {
-			axis_moved = event->jaxis.axis;
-			axis_value = event->jaxis.value;
-		}
 	} else if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == 0) {
 		click = 1;
 	} else if (event->type == SDL_MOUSEBUTTONUP && event->button.button == 0) {
 		click = 0;
+	} else if (joy) {
+		if (event->type == SDL_JOYBUTTONDOWN && event->jbutton.which == SDL_JoystickInstanceID(joy)) {
+			button_pressed = event->jbutton.button;
+		}
+		else if (event->type == SDL_JOYHATMOTION && event->jhat.which == SDL_JoystickInstanceID(joy)) {
+			hat_moved = event->jhat.hat;
+			hat_value = event->jhat.value;
+		}
+		else if (event->type == SDL_JOYAXISMOTION && event->jaxis.which == SDL_JoystickInstanceID(joy)) {
+			if (event->jaxis.axis == axis_moved || abs(event->jaxis.value) > abs(axis_value) || abs(event->jaxis.value) > 4000) {
+				axis_moved = event->jaxis.axis;
+				axis_value = event->jaxis.value;
+			}
+		}
 	}
 	if (stick_nav_disabled && event->type == SDL_CONTROLLERAXISMOTION) {
 		return;

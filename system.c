@@ -18,7 +18,11 @@
 
 #ifdef DISABLE_ZLIB
 #define ROMFILE FILE*
+#ifdef __ANDROID__
+#define romopen fopen_wrapper
+#else
 #define romopen fopen
+#endif
 #define romread fread
 #define romseek fseek
 #define romgetc fgetc
@@ -26,7 +30,11 @@
 #else
 #include "zlib/zlib.h"
 #define ROMFILE gzFile
+#ifdef __ANDROID__
+#define romopen gzopen_wrapper
+#else
 #define romopen gzopen
+#endif
 #define romread gzfread
 #define romseek gzseek
 #define romgetc gzgetc

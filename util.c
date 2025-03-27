@@ -11,6 +11,8 @@
 
 #ifdef __ANDROID__
 #include <android/log.h>
+#include <SDL_system.h>
+#include <jni.h>
 #define info_puts(msg) __android_log_write(ANDROID_LOG_INFO, "BlastEm", msg)
 #define warning_puts(msg) __android_log_write(ANDROID_LOG_WARN, "BlastEm", msg)
 #define fatal_puts(msg) __android_log_write(ANDROID_LOG_FATAL, "BlastEm", msg)
@@ -866,6 +868,54 @@ fallback:
 
 dir_entry *get_dir_list(char *path, size_t *numret)
 {
+#ifdef __ANDROID__
+	debug_message("get_dir_list(%s)\n", path);
+	if (startswith(path, "content://")) {
+		static const char activity_class_name[] = "com/retrodev/blastem/BlastEmActivity";
+		static const char read_uri_dir_name[] = "readUriDir";
+		JNIEnv *env = SDL_AndroidGetJNIEnv();
+		jclass act_class = (*env)->FindClass(env, activity_class_name);
+		if (!act_class) {
+			fatal_error("Failed to find activity class %s\n", activity_class_name);
+		}
+		jmethodID meth = (*env)->GetMethodID(env, act_class, read_uri_dir_name, "(Ljava/lang/String;)[Ljava/lang/String;");
+		if (!meth) {
+			fatal_error("Failed to find method %s\n", read_uri_dir_name);
+		}
+		debug_message("get_dir_list(%s) using Storage Access Framework\n", path);
+		jstring jpath = (*env)->NewStringUTF(env, path);
+		jobject activity = SDL_AndroidGetActivity();
+		jobject ret = (*env)->CallObjectMethod(env, activity, meth, jpath);
+		dir_entry *res = NULL;
+		if (ret) {
+			jsize num = (*env)->GetArrayLength(env, ret);
+			if (numret) {
+				*numret = num;
+			}
+			res = calloc(num, sizeof(dir_entry));
+			for (jsize i = 0; i < num; i++)
+			{
+				jstring entry = (*env)->GetObjectArrayElement(env, ret, i);
+				char const *tmp = (*env)->GetStringUTFChars(env, entry, NULL);
+				jsize len = (*env)->GetStringUTFLength(env, entry);
+				res[i].name = calloc(len + 1, 1);
+				res[i].is_dir = tmp[len-1] == '/';
+				memcpy(res[i].name, tmp, res[i].is_dir ? len -1 : len);
+				(*env)->ReleaseStringUTFChars(env, entry, tmp);
+			}
+			(*env)->DeleteLocalRef(env, ret);
+		}
+		
+		(*env)->DeleteLocalRef(env, activity);
+		if (!res) {
+			if (numret) {
+				*numret = 0;
+			}
+			return NULL;
+		}
+		return res;
+	}
+#endif
 	DIR *d = opendir(path);
 	if (!d) {
 		if (numret) {
@@ -1004,7 +1054,60 @@ char *read_bundled_file(char *name, uint32_t *sizeret)
 	SDL_RWclose(rw);
 	return ret;
 }
+
+static int open_uri(const char *path, const char *mode)
+{
+	static const char activity_class_name[] = "com/retrodev/blastem/BlastEmActivity";
+	static const char open_uri_as_fd_name[] = "openUriAsFd";
+	JNIEnv *env = SDL_AndroidGetJNIEnv();
+	jclass act_class = (*env)->FindClass(env, activity_class_name);
+	if (!act_class) {
+		fatal_error("Failed to find activity class %s\n", activity_class_name);
+	}
+	jmethodID meth = (*env)->GetMethodID(env, act_class, open_uri_as_fd_name, "(Ljava/lang/String;Ljava/lang/String;)I");
+	if (!meth) {
+		fatal_error("Failed to find method %s\n", open_uri_as_fd_name);
+	}
+	jobject activity = SDL_AndroidGetActivity();
+	jstring jpath = (*env)->NewStringUTF(env, path);
+	jstring jmode = (*env)->NewStringUTF(env, mode);
+	int fd = (*env)->CallIntMethod(env, activity, meth, jpath, jmode);
+	(*env)->DeleteLocalRef(env, activity);
+	return fd;
+}
+
+FILE* fopen_wrapper(const char *path, const char *mode)
+{
+	if (startswith(path, "content://")) {
+		debug_message("fopen_wrapper(%s, %s) - Using Storage Access Framework\n", path, mode);
+		int fd = open_uri(path, mode);
+		if (!fd) {
+			return NULL;
+		}
+		return fdopen(fd, mode);
+	} else {
+		debug_message("fopen_wrapper(%s, %s) - Norma fopen\n", path, mode);
+		return fopen(path, mode);
+	}
+}
+
+#ifndef DISABLE_ZLIB
+gzFile gzopen_wrapper(const char *path, const char *mode)
+{
+	if (startswith(path, "content://")) {
+		debug_message("gzopen_wrapper(%s, %s) - Using Storage Access Framework\n", path, mode);
+		int fd = open_uri(path, mode);
+		if (!fd) {
+			return NULL;
+		}
+		return gzdopen(fd, mode);
+	} else {
+		debug_message("fopen_wrapper(%s, %s) - Norma gzopen\n", path, mode);
+		return gzopen(path, mode);
+	}
+}
 #endif
+#endif // IS_LIB
 
 char const *get_config_dir()
 {
