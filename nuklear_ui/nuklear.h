@@ -5560,7 +5560,6 @@ nk_murmur_hash(const void * key, int len, nk_hash seed)
 {
     /* 32-Bit MurmurHash3: https://code.google.com/p/smhasher/wiki/MurmurHash3*/
     #define NK_ROTL(x,r) ((x) << (r) | ((x) >> (32 - r)))
-    union {const nk_uint *i; const nk_byte *b;} conv = {0};
     const nk_byte *data = (const nk_byte*)key;
     const int nblocks = len/4;
     nk_uint h1 = seed;
@@ -5573,10 +5572,8 @@ nk_murmur_hash(const void * key, int len, nk_hash seed)
 
     /* body */
     if (!key) return 0;
-    conv.b = (data + nblocks*4);
-    blocks = (const nk_uint*)conv.i;
-    for (i = -nblocks; i; ++i) {
-        k1 = blocks[i];
+    for (i = 0; i < nblocks*4; i+=4) {
+        k1 = data[i] | data[i+1] << 8u | data[i+2] << 16u | data[i+3] << 24u;
         k1 *= c1;
         k1 = NK_ROTL(k1,15);
         k1 *= c2;
