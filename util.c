@@ -866,6 +866,43 @@ fallback:
 }
 #include <dirent.h>
 
+#ifdef __ANDROID__
+static dir_entry *jdir_list_helper(JNIEnv *env, jmethodID meth, char *path, size_t *numret)
+{
+	jstring jpath = (*env)->NewStringUTF(env, path);
+	jobject activity = SDL_AndroidGetActivity();
+	jobject ret = (*env)->CallObjectMethod(env, activity, meth, jpath);
+	dir_entry *res = NULL;
+	if (ret) {
+		jsize num = (*env)->GetArrayLength(env, ret);
+		if (numret) {
+			*numret = num;
+		}
+		res = calloc(num, sizeof(dir_entry));
+		for (jsize i = 0; i < num; i++)
+		{
+			jstring entry = (*env)->GetObjectArrayElement(env, ret, i);
+			char const *tmp = (*env)->GetStringUTFChars(env, entry, NULL);
+			jsize len = (*env)->GetStringUTFLength(env, entry);
+			res[i].name = calloc(len + 1, 1);
+			res[i].is_dir = tmp[len-1] == '/';
+			memcpy(res[i].name, tmp, res[i].is_dir ? len -1 : len);
+			(*env)->ReleaseStringUTFChars(env, entry, tmp);
+		}
+		(*env)->DeleteLocalRef(env, ret);
+	}
+	
+	(*env)->DeleteLocalRef(env, activity);
+	if (!res) {
+		if (numret) {
+			*numret = 0;
+		}
+		return NULL;
+	}
+	return res;
+}
+#endif
+
 dir_entry *get_dir_list(char *path, size_t *numret)
 {
 #ifdef __ANDROID__
@@ -883,37 +920,7 @@ dir_entry *get_dir_list(char *path, size_t *numret)
 			fatal_error("Failed to find method %s\n", read_uri_dir_name);
 		}
 		debug_message("get_dir_list(%s) using Storage Access Framework\n", path);
-		jstring jpath = (*env)->NewStringUTF(env, path);
-		jobject activity = SDL_AndroidGetActivity();
-		jobject ret = (*env)->CallObjectMethod(env, activity, meth, jpath);
-		dir_entry *res = NULL;
-		if (ret) {
-			jsize num = (*env)->GetArrayLength(env, ret);
-			if (numret) {
-				*numret = num;
-			}
-			res = calloc(num, sizeof(dir_entry));
-			for (jsize i = 0; i < num; i++)
-			{
-				jstring entry = (*env)->GetObjectArrayElement(env, ret, i);
-				char const *tmp = (*env)->GetStringUTFChars(env, entry, NULL);
-				jsize len = (*env)->GetStringUTFLength(env, entry);
-				res[i].name = calloc(len + 1, 1);
-				res[i].is_dir = tmp[len-1] == '/';
-				memcpy(res[i].name, tmp, res[i].is_dir ? len -1 : len);
-				(*env)->ReleaseStringUTFChars(env, entry, tmp);
-			}
-			(*env)->DeleteLocalRef(env, ret);
-		}
-		
-		(*env)->DeleteLocalRef(env, activity);
-		if (!res) {
-			if (numret) {
-				*numret = 0;
-			}
-			return NULL;
-		}
-		return res;
+		return jdir_list_helper(env, meth, path, numret);
 	}
 #endif
 	DIR *d = opendir(path);
@@ -1055,6 +1062,22 @@ char *read_bundled_file(char *name, uint32_t *sizeret)
 	return ret;
 }
 
+dir_entry *get_bundled_dir_list(char *name, size_t *num_out)
+{
+	static const char activity_class_name[] = "com/retrodev/blastem/BlastEmActivity";
+	static const char get_assets_list_name[] = "getAssetsList";
+	JNIEnv *env = SDL_AndroidGetJNIEnv();
+	jclass act_class = (*env)->FindClass(env, activity_class_name);
+	if (!act_class) {
+		fatal_error("Failed to find activity class %s\n", activity_class_name);
+	}
+	jmethodID meth = (*env)->GetMethodID(env, act_class, get_assets_list_name, "(Ljava/lang/String;)[Ljava/lang/String;");
+	if (!meth) {
+		fatal_error("Failed to find method %s\n", get_assets_list_name);
+	}
+	return jdir_list_helper(env, meth, name, num_out);
+}
+
 static int open_uri(const char *path, const char *mode)
 {
 	static const char activity_class_name[] = "com/retrodev/blastem/BlastEmActivity";
@@ -1171,6 +1194,14 @@ char *read_bundled_file(char *name, uint32_t *sizeret)
 		ret = NULL;
 	}
 	fclose(f);
+	return ret;
+}
+
+dir_entry *get_bundled_dir_list(char *name, size_t *num_out)
+{
+	char *path = bundled_file_path(name);
+	dir_entry *ret = get_dir_list(path, num_out);
+	free(path);
 	return ret;
 }
 #endif //ISLIB

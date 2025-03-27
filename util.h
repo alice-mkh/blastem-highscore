@@ -70,8 +70,10 @@ char const *get_userdata_dir();
 char *bundled_file_path(char *name);
 //Reads a file bundled with the executable
 char *read_bundled_file(char *name, uint32_t *sizeret);
-//Retunrs an array of normal files and directories residing in a directory
+//Returns an array of normal files and directories residing in a directory
 dir_entry *get_dir_list(char *path, size_t *numret);
+//Returns an array of normal files and directories residing in a bundled directory
+dir_entry *get_bundled_dir_list(char *name, size_t *num_out);
 //Frees a dir list returned by get_dir_list
 void free_dir_list(dir_entry *list, size_t numentries);
 //Performs a case-insensitive sort by file name on a dir list

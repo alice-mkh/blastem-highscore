@@ -13,6 +13,7 @@ import android.util.Log;
 import android.view.View;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
@@ -126,6 +127,15 @@ public class BlastEmActivity extends SDLActivity
 			Log.w("BlastEm", "Failed to open URI: " + e);
 		}
 		return 0;
+	}
+	
+	public String[] getAssetsList(String path) {
+		try {
+			return getAssets().list(path);
+		} catch (IOException e) {
+			Log.w("BlastEm", "Failed to get assets at '" + path + "': " + e);
+		}
+		return new String[0];
 	}
 	
 	@Override
