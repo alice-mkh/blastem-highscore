@@ -155,7 +155,6 @@ static uint8_t *try_load_font(char *path, uint32_t *size_out)
 {
 	debug_message("Trying to load font %s\n", path);
 	FILE *f = fopen(path, "rb");
-	free(path);
 	if (!f) {
 		return NULL;
 	}
@@ -163,6 +162,7 @@ static uint8_t *try_load_font(char *path, uint32_t *size_out)
 	uint8_t *buffer = malloc(size);
 	if (size != fread(buffer, 1, size, f)) {
 		fclose(f);
+		free(buffer);
 		return NULL;
 	}
 	fclose(f);
@@ -181,6 +181,7 @@ uint8_t *default_font(uint32_t *size_out)
 		goto error;
 	}
 	uint8_t *ret = try_load_font(path, size_out);
+	free(path);
 	if (ret) {
 		return ret;
 	}
