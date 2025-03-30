@@ -263,7 +263,7 @@ void scd_toggle_graphics_debug(segacd_context *cd)
 static void render_graphics_debug(segacd_context *cd)
 {
 	int pitch;
-	uint32_t *fb = render_get_framebuffer(cd->graphics_debug_window, &pitch);
+	pixel_t *fb = render_get_framebuffer(cd->graphics_debug_window, &pitch);
 	uint32_t pixels = (cd->gate_array[GA_STAMP_SIZE] & BIT_SMS) ? 4096 : 256;
 	uint32_t stamp_size = (cd->gate_array[GA_STAMP_SIZE] & BIT_STS) ? 32 : 16;
 	uint32_t num_stamps = pixels / stamp_size;
@@ -284,7 +284,7 @@ static void render_graphics_debug(segacd_context *cd)
 				{
 					for (uint32_t y = start_y; y < start_y + stamp_size; y++)
 					{
-						uint32_t *line = fb + y * pitch / sizeof(uint32_t);
+						pixel_t *line = fb + y * pitch / sizeof(uint32_t);
 						for (uint32_t x = tile_x; x < tile_x + 8; x += 4)
 						{
 						

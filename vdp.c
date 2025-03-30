@@ -160,8 +160,8 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t
 {
 	vdp_context *context = calloc(1, sizeof(vdp_context) + VRAM_SIZE);
 	if (headless) {
-		context->fb = malloc(512 * LINEBUF_SIZE * sizeof(uint32_t));
-		context->output_pitch = LINEBUF_SIZE * sizeof(uint32_t);
+		context->fb = malloc(512 * LINEBUF_SIZE * sizeof(pixel_t));
+		context->output_pitch = LINEBUF_SIZE * sizeof(pixel_t);
 	} else {
 		context->cur_buffer = FRAMEBUFFER_ODD;
 		context->fb = render_get_framebuffer(FRAMEBUFFER_ODD, &context->output_pitch);
@@ -339,7 +339,7 @@ vdp_context *init_vdp_context(uint8_t region_pal, uint8_t has_max_vsram, uint8_t
 		context->flags2 |= FLAG2_REGION_PAL;
 	}
 	update_video_params(context);
-	context->output = (uint32_t *)(((char *)context->fb) + context->output_pitch * context->border_top);
+	context->output = (pixel_t *)(((char *)context->fb) + context->output_pitch * context->border_top);
 	return context;
 }
 
@@ -999,7 +999,7 @@ static void write_cram(vdp_context * context, uint16_t address, uint16_t value)
 	)) {
 		uint8_t bg_end_slot = BG_START_SLOT + (context->regs[REG_MODE_4] & BIT_H40) ? LINEBUF_SIZE/2 : (256+HORIZ_BORDER)/2;
 		if (context->hslot < bg_end_slot) {
-			uint32_t color = (context->regs[REG_MODE_2] & BIT_MODE_5) ? context->colors[addr] : context->colors[addr + MODE4_OFFSET];
+			pixel_t color = (context->regs[REG_MODE_2] & BIT_MODE_5) ? context->colors[addr] : context->colors[addr + MODE4_OFFSET];
 			context->output[(context->hslot - BG_START_SLOT)*2 + 1] = color;
 		}
 	}
@@ -1820,7 +1820,7 @@ static void render_map_output(uint32_t line, int32_t col, vdp_context * context)
 			dst = context->compositebuf + BORDER_LEFT + col * 8;
 		} else {
 			dst = context->compositebuf;
-			uint32_t bg_color = context->colors[context->regs[REG_BG_COLOR] & 0x3F];
+			pixel_t bg_color = context->colors[context->regs[REG_BG_COLOR] & 0x3F];
 			memset(dst, 0, BORDER_LEFT);
 			context->done_composite = dst + BORDER_LEFT;
 			return;
@@ -2059,7 +2059,7 @@ static void vdp_advance_line(vdp_context *context)
 			line += context->border_top;
 		}
 		if (context->enabled_debuggers & (1 << DEBUG_CRAM)) {
-			uint32_t *fb = context->debug_fbs[DEBUG_CRAM] + context->debug_fb_pitch[DEBUG_CRAM] * line / sizeof(uint32_t);
+			pixel_t *fb = context->debug_fbs[DEBUG_CRAM] + context->debug_fb_pitch[DEBUG_CRAM] * line / sizeof(pixel_t);
 			if (context->regs[REG_MODE_2] & BIT_MODE_5) {
 				for (int i = 0; i < 64; i++)
 				{
@@ -2082,7 +2082,7 @@ static void vdp_advance_line(vdp_context *context)
 				{
 					uint8_t entry = context->vdpmem[mode4_address_map[address] ^ 1];
 					uint8_t fg = entry >> 4, bg = entry & 0xF;
-					uint32_t fg_full, bg_full;
+					pixel_t fg_full, bg_full;
 					if (context->type == VDP_GAMEGEAR) {
 						//Game Gear uses CRAM entries 16-31 for TMS9918A modes
 						fg_full = context->colors[fg + 16 + MODE4_OFFSET];
@@ -2110,7 +2110,7 @@ static void vdp_advance_line(vdp_context *context)
 			context->enabled_debuggers & (1 << DEBUG_COMPOSITE)
 			&& line < (context->inactive_start + context->border_bot + context->border_top)
 		) {
-			uint32_t *fb = context->debug_fbs[DEBUG_COMPOSITE] + context->debug_fb_pitch[DEBUG_COMPOSITE] * line / sizeof(uint32_t);
+			pixel_t *fb = context->debug_fbs[DEBUG_COMPOSITE] + context->debug_fb_pitch[DEBUG_COMPOSITE] * line / sizeof(pixel_t);
 			if (is_mode_5) {
 				uint32_t left, right;
 				uint16_t top_line, bottom_line;
@@ -2175,7 +2175,7 @@ static void vdp_advance_line(vdp_context *context)
 	}
 }
 
-static void vram_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context)
+static void vram_debug_mode5(pixel_t *fb, uint32_t pitch, vdp_context *context)
 {
 	uint8_t pal = (context->debug_modes[DEBUG_VRAM] % 4) << 4;
 	int yshift, ymask, tilesize;
@@ -2190,7 +2190,7 @@ static void vram_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context)
 	}
 	for (int y = 0; y < 512; y++)
 	{
-		uint32_t *line = fb + y * pitch / sizeof(uint32_t);
+		pixel_t *line = fb + y * pitch / sizeof(pixel_t);
 		int row = y >> yshift;
 		int yoff = y >> 1 & ymask;
 		for (int col = 0; col < 64; col++)
@@ -2210,11 +2210,11 @@ static void vram_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context)
 	}
 }
 
-static void vram_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *context)
+static void vram_debug_mode4(pixel_t *fb, uint32_t pitch, vdp_context *context)
 {
 	for (int y = 0; y < 256; y++)
 	{
-		uint32_t *line = fb + y * pitch / sizeof(uint32_t);
+		pixel_t *line = fb + y * pitch / sizeof(pixel_t);
 		int row = y >> 4;
 		int yoff = y >> 1 & 7;
 		for (int col = 0; col < 64; col++)
@@ -2237,13 +2237,13 @@ static void vram_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *context)
 	}
 }
 
-static void vram_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
+static void vram_debug_tms(pixel_t *fb, uint32_t pitch, vdp_context *context)
 {
 	uint8_t pal = ((context->debug_modes[DEBUG_VRAM] % 14) + 2) << 1;
 	pal = (pal & 0xE) | (pal << 1 & 0x20);
 	for (int y = 0; y < 512; y++)
 	{
-		uint32_t *line = fb + y * pitch / sizeof(uint32_t);
+		pixel_t *line = fb + y * pitch / sizeof(pixel_t);
 		int row = y >> 4;
 		int yoff = y >> 1 & 7;
 		for (int col = 0; col < 64; col++)
@@ -2261,7 +2261,7 @@ static void vram_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
 	}
 }
 
-static void plane_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context)
+static void plane_debug_mode5(pixel_t *fb, uint32_t pitch, vdp_context *context)
 {
 	uint16_t hscroll_mask;
 	uint16_t v_mul;
@@ -2309,7 +2309,7 @@ static void plane_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context
 		vscroll_mask = 0x1F;
 		break;
 	}
-	uint32_t bg_color = context->colors[context->regs[REG_BG_COLOR] & 0x3F];
+	pixel_t bg_color = context->colors[context->regs[REG_BG_COLOR] & 0x3F];
 	uint16_t num_rows;
 	int num_lines;
 	if (context->double_res) {
@@ -2330,7 +2330,7 @@ static void plane_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context
 			uint16_t entry = context->vdpmem[address] << 8 | context->vdpmem[address + 1];
 			uint8_t pal = entry >> 9 & 0x30;
 
-			uint32_t *dst = fb + (row * pitch * num_lines / sizeof(uint32_t)) + col * 8;
+			pixel_t *dst = fb + (row * pitch * num_lines / sizeof(pixel_t)) + col * 8;
 			if (context->double_res) {
 				address = (entry & 0x3FF) * 64;
 			} else {
@@ -2349,7 +2349,7 @@ static void plane_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context
 			for (int y = 0; y < num_lines; y++)
 			{
 				uint16_t trow_address = address;
-				uint32_t *row_dst = dst;
+				pixel_t *row_dst = dst;
 				for (int x = 0; x < 4; x++)
 				{
 					uint8_t byte = context->vdpmem[trow_address];
@@ -2366,25 +2366,25 @@ static void plane_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context
 					*(row_dst++) = right ? context->colors[right|pal] : bg_color;
 				}
 				address += y_diff;
-				dst += pitch / sizeof(uint32_t);
+				dst += pitch / sizeof(pixel_t);
 			}
 		}
 	}
 }
 
-static void sprite_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *context)
+static void sprite_debug_mode5(pixel_t *fb, uint32_t pitch, vdp_context *context)
 {
-	uint32_t bg_color = context->colors[context->regs[REG_BG_COLOR] & 0x3F];
+	pixel_t bg_color = context->colors[context->regs[REG_BG_COLOR] & 0x3F];
 	//clear a single alpha channel bit so we can distinguish between actual bg color and sprite
 	//pixels that just happen to be the same color
 	bg_color &= 0xFEFFFFFF;
-	uint32_t *line = fb;
-	uint32_t border_line = render_map_color(0, 0, 255);
-	uint32_t sprite_outline = render_map_color(255, 0, 255);
+	pixel_t *line = fb;
+	pixel_t border_line = render_map_color(0, 0, 255);
+	pixel_t sprite_outline = render_map_color(255, 0, 255);
 	int right_border = 256 + ((context->h40_lines > context->output_lines / 2) ? 640 : 512);
 	for (int y = 0; y < 1024; y++)
 	{
-		uint32_t *cur = line;
+		pixel_t *cur = line;
 		if (y != 256 && y != 256+context->inactive_start*2) {
 			for (int x = 0; x < 255; x++)
 			{
@@ -2406,7 +2406,7 @@ static void sprite_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *contex
 				*(cur++) = border_line;
 			}
 		}
-		line += pitch / sizeof(uint32_t);
+		line += pitch / sizeof(pixel_t);
 	}
 	for (int i = 0, index = 0; i < context->max_sprites_frame; i++)
 	{
@@ -2431,8 +2431,8 @@ static void sprite_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *contex
 		uint16_t hflip = tileinfo & MAP_BIT_H_FLIP;
 		uint16_t vflip = tileinfo & MAP_BIT_V_FLIP;
 		uint32_t x = (((context->vdpmem[att_addr+ 2] & 0x3) << 8 | context->vdpmem[att_addr + 3]) & 0x1FF) * 2;
-		uint32_t *line = fb + y * pitch / sizeof(uint32_t) + x;
-		uint32_t *cur = line;
+		pixel_t *line = fb + y * pitch / sizeof(pixel_t) + x;
+		pixel_t *cur = line;
 		for (uint32_t cx = x, x2 = x + pixel_width; cx < x2; cx++)
 		{
 			*(cur++) = sprite_outline;
@@ -2453,7 +2453,7 @@ static void sprite_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *contex
 		}
 		for (; y < y2; y++)
 		{
-			line += pitch / sizeof(uint32_t);
+			line += pitch / sizeof(pixel_t);
 			cur = line;
 			*(cur++) = sprite_outline;
 			uint16_t line_addr = tile_addr;
@@ -2463,7 +2463,7 @@ static void sprite_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *contex
 				for (uint8_t cx = 0; cx < 4; cx++)
 				{
 					uint8_t pair = context->vdpmem[cur_addr];
-					uint32_t left, right;
+					pixel_t left, right;
 					if (hflip) {
 						right = pair >> 4;
 						left = pair & 0xF;
@@ -2506,7 +2506,7 @@ static void sprite_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *contex
 			advance_source = !advance_source;
 		}
 		if (y2 != 1024) {
-			line += pitch / sizeof(uint32_t);
+			line += pitch / sizeof(pixel_t);
 			cur = line;
 			for (uint32_t cx = x, x2 = x + pixel_width; cx < x2; cx++)
 			{
@@ -2520,13 +2520,13 @@ static void sprite_debug_mode5(uint32_t *fb, uint32_t pitch, vdp_context *contex
 	}
 }
 
-static void plane_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *context)
+static void plane_debug_mode4(pixel_t *fb, uint32_t pitch, vdp_context *context)
 {
-	uint32_t bg_color = context->colors[(context->regs[REG_BG_COLOR] & 0xF) + MODE4_OFFSET];
+	pixel_t bg_color = context->colors[(context->regs[REG_BG_COLOR] & 0xF) + MODE4_OFFSET];
 	uint32_t address = (context->regs[REG_SCROLL_A] & 0xE) << 10;
 	for (uint32_t row_address = address, end = address + 32*32*2; row_address < end; row_address += 2 * 32)
 	{
-		uint32_t *col = fb;
+		pixel_t *col = fb;
 		for(uint32_t cur = row_address, row_end = row_address + 2 * 32; cur < row_end; cur += 2)
 		{
 			uint32_t mapped = mode4_address_map[cur];
@@ -2551,7 +2551,7 @@ static void plane_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *context
 			} else {
 				tile_inc = 4;
 			}
-			uint32_t *line = col;
+			pixel_t *line = col;
 			for (int y = 0; y < 16; y++)
 			{
 				uint32_t first = mode4_address_map[tile_address];
@@ -2560,10 +2560,10 @@ static void plane_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *context
 				pixels |= planar_to_chunky[context->vdpmem[first+1]];
 				pixels |= planar_to_chunky[context->vdpmem[last]] << 3;
 				pixels |= planar_to_chunky[context->vdpmem[last+1]] << 2;
-				uint32_t *out = line;
+				pixel_t *out = line;
 				for (uint32_t i = i_init; i != i_limit; i += i_inc)
 				{
-					uint32_t pixel = context->colors[((pixels >> i & 0xF) | pal) + MODE4_OFFSET];
+					pixel_t pixel = context->colors[((pixels >> i & 0xF) | pal) + MODE4_OFFSET];
 					*(out++) = pixel;
 					*(out++) = pixel;
 				}
@@ -2572,22 +2572,22 @@ static void plane_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *context
 				if (y & 1) {
 					tile_address += tile_inc;
 				}
-				line += pitch / sizeof(uint32_t);
+				line += pitch / sizeof(pixel_t);
 			}
 			
 			
 			
 			col += 16;
 		}
-		fb += 16 * pitch / sizeof(uint32_t);
+		fb += 16 * pitch / sizeof(pixel_t);
 	}
 }
 
-static void sprite_debug_mode4(uint32_t *fb, uint32_t pitch, vdp_context *context)
+static void sprite_debug_mode4(pixel_t *fb, uint32_t pitch, vdp_context *context)
 {
 }
 
-uint32_t tms_map_color(vdp_context *context, uint8_t color)
+pixel_t tms_map_color(vdp_context *context, uint8_t color)
 {
 	if (context->type == VDP_GAMEGEAR) {
 		//Game Gear uses CRAM entries 16-31 for TMS9918A modes
@@ -2599,7 +2599,7 @@ uint32_t tms_map_color(vdp_context *context, uint8_t color)
 	}
 }
 
-static void plane_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
+static void plane_debug_tms(pixel_t *fb, uint32_t pitch, vdp_context *context)
 {
 	uint16_t table_address = context->regs[REG_SCROLL_A] << 10 & 0x3C00;
 	uint16_t color_address = context->regs[REG_COLOR_TABLE] << 6;
@@ -2636,10 +2636,10 @@ static void plane_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
 	}
 	for (uint32_t row = 0; row < 24; row++)
 	{
-		uint32_t *colfb = fb;
+		pixel_t *colfb = fb;
 		for (uint32_t col = 0; col < cols; col++)
 		{
-			uint32_t *linefb = colfb;
+			pixel_t *linefb = colfb;
 			uint8_t pattern = context->vdpmem[mode4_address_map[table_address] ^ 1];
 			uint16_t caddress = color_address;
 			uint16_t paddress = pattern_address;
@@ -2665,7 +2665,7 @@ static void plane_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
 						bg = tms_map_color(context, colors & 0xF);
 					}
 					
-					uint32_t *curfb = linefb;
+					pixel_t *curfb = linefb;
 					for (uint32_t x = 0; x < pixels; x++)
 					{
 						*(curfb++) = (bits & 0x80) ? fg : bg;
@@ -2673,7 +2673,7 @@ static void plane_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
 							bits <<= 1;
 						}
 					}
-					linefb += pitch / sizeof(uint32_t);
+					linefb += pitch / sizeof(pixel_t);
 					if (y & 1) {
 						if (context->regs[REG_MODE_1] & BIT_M3) {
 							caddress++;
@@ -2685,11 +2685,11 @@ static void plane_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
 			table_address++;
 			colfb += pixels;
 		}
-		fb += 16 * pitch / sizeof(uint32_t);
+		fb += 16 * pitch / sizeof(pixel_t);
 	}
 }
 
-static void sprite_debug_tms(uint32_t *fb, uint32_t pitch, vdp_context *context)
+static void sprite_debug_tms(pixel_t *fb, uint32_t pitch, vdp_context *context)
 {
 }
 
@@ -2698,7 +2698,7 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 	if (context->enabled_debuggers & (1 << DEBUG_PLANE)) {
 		
 		uint32_t pitch;
-		uint32_t *fb = render_get_framebuffer(context->debug_fb_indices[DEBUG_PLANE], &pitch);
+		pixel_t *fb = render_get_framebuffer(context->debug_fb_indices[DEBUG_PLANE], &pitch);
 		if (context->type == VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_MODE_5)) {
 			if ((context->debug_modes[DEBUG_PLANE] & 3) == 3) {
 				sprite_debug_mode5(fb, pitch, context);
@@ -2723,7 +2723,7 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 
 	if (context->enabled_debuggers & (1 << DEBUG_VRAM)) {
 		uint32_t pitch;
-		uint32_t *fb = render_get_framebuffer(context->debug_fb_indices[DEBUG_VRAM], &pitch);
+		pixel_t *fb = render_get_framebuffer(context->debug_fb_indices[DEBUG_VRAM], &pitch);
 		if (context->type == VDP_GENESIS && (context->regs[REG_MODE_2] & BIT_MODE_5)) {
 			vram_debug_mode5(fb, pitch, context);
 		} else if (context->type != VDP_TMS9918A && (context->regs[REG_MODE_1] & BIT_MODE_4)) {
@@ -2736,12 +2736,13 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 
 	if (context->enabled_debuggers & (1 << DEBUG_CRAM)) {
 		uint32_t starting_line = 512 - 32*4;
-		uint32_t *line = context->debug_fbs[DEBUG_CRAM]
-			+ context->debug_fb_pitch[DEBUG_CRAM]  * starting_line / sizeof(uint32_t);
+		pixel_t *line = context->debug_fbs[DEBUG_CRAM]
+			+ context->debug_fb_pitch[DEBUG_CRAM]  * starting_line / sizeof(pixel_t);
+		pixel_t black = render_map_color(0, 0, 0);
 		if (context->regs[REG_MODE_2] & BIT_MODE_5) {
 			for (int pal = 0; pal < 4; pal ++)
 			{
-				uint32_t *cur;
+				pixel_t *cur;
 				for (int y = 0; y < 31; y++)
 				{
 					cur = line;
@@ -2751,21 +2752,21 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 						{
 							*(cur++) = context->colors[pal * 16 + offset];
 						}
-						*(cur++) = 0xFF000000;
+						*(cur++) = black;
 					}
-					line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(uint32_t);
+					line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(pixel_t);
 				}
 				cur = line;
 				for (int x = 0; x < 512; x++)
 				{
-					*(cur++) = 0xFF000000;
+					*(cur++) = black;
 				}
-				line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(uint32_t);
+				line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(pixel_t);
 			}
 		} else {
 			for (int pal = 0; pal < 2; pal ++)
 			{
-				uint32_t *cur;
+				pixel_t *cur;
 				for (int y = 0; y < 31; y++)
 				{
 					cur = line;
@@ -2775,16 +2776,16 @@ static void vdp_update_per_frame_debug(vdp_context *context)
 						{
 							*(cur++) = context->colors[pal * 16 + offset];
 						}
-						*(cur++) = 0xFF000000;
+						*(cur++) = black;
 					}
-					line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(uint32_t);
+					line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(pixel_t);
 				}
 				cur = line;
 				for (int x = 0; x < 512; x++)
 				{
-					*(cur++) = 0xFF000000;
+					*(cur++) = black;
 				}
-				line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(uint32_t);
+				line += context->debug_fb_pitch[DEBUG_CRAM] / sizeof(pixel_t);
 			}
 		}
 		render_framebuffer_updated(context->debug_fb_indices[DEBUG_CRAM], 512);
@@ -2869,7 +2870,7 @@ static void advance_output_line(vdp_context *context)
 		context->fb = render_get_framebuffer(context->cur_buffer, &context->output_pitch);
 	}
 	output_line += context->top_offset;
-	context->output = (uint32_t *)(((char *)context->fb) + context->output_pitch * output_line);
+	context->output = (pixel_t *)(((char *)context->fb) + context->output_pitch * output_line);
 #ifdef DEBUG_FB_FILL
 	for (int i = 0; i < LINEBUF_SIZE; i++)
 	{
@@ -2894,7 +2895,7 @@ void vdp_reacquire_framebuffer(vdp_context *context)
 	uint16_t lines_max = context->inactive_start + context->border_bot + context->border_top;
 	if (context->output_lines <= lines_max && context->output_lines > 0) {
 		context->fb = render_get_framebuffer(context->cur_buffer, &context->output_pitch);
-		context->output = (uint32_t *)(((char *)context->fb) + context->output_pitch * (context->output_lines - 1 + context->top_offset));
+		context->output = (pixel_t *)(((char *)context->fb) + context->output_pitch * (context->output_lines - 1 + context->top_offset));
 	} else {
 		context->output = NULL;
 	}
@@ -2965,7 +2966,7 @@ static void draw_right_border(vdp_context *context)
 #define CHECK_LIMIT if (context->flags & FLAG_DMA_RUN) { run_dma_src(context, -1); } context->hslot++; context->cycles += slot_cycles; CHECK_ONLY
 #define OUTPUT_PIXEL(slot) if ((slot) >= BG_START_SLOT) {\
 		uint8_t *src = context->compositebuf + ((slot) - BG_START_SLOT) *2;\
-		uint32_t *dst = context->output + ((slot) - BG_START_SLOT) *2;\
+		pixel_t *dst = context->output + ((slot) - BG_START_SLOT) *2;\
 		if ((*src & 0x3F) | test_layer) {\
 			*(dst++) = context->colors[*(src++)];\
 		} else {\
@@ -2980,7 +2981,7 @@ static void draw_right_border(vdp_context *context)
 
 #define OUTPUT_PIXEL_H40(slot) if (slot <= (BG_START_SLOT + LINEBUF_SIZE/2)) {\
 		uint8_t *src = context->compositebuf + (slot - BG_START_SLOT) *2;\
-		uint32_t *dst = context->output + (slot - BG_START_SLOT) *2;\
+		pixel_t *dst = context->output + (slot - BG_START_SLOT) *2;\
 		if ((*src & 0x3F) | test_layer) {\
 			*(dst++) = context->colors[*(src++)];\
 		} else {\
@@ -2999,7 +3000,7 @@ static void draw_right_border(vdp_context *context)
 
 #define OUTPUT_PIXEL_H32(slot) if (slot <= (BG_START_SLOT + (256+HORIZ_BORDER)/2)) {\
 		uint8_t *src = context->compositebuf + (slot - BG_START_SLOT) *2;\
-		uint32_t *dst = context->output + (slot - BG_START_SLOT) *2;\
+		pixel_t *dst = context->output + (slot - BG_START_SLOT) *2;\
 		if ((*src & 0x3F) | test_layer) {\
 			*(dst++) = context->colors[*(src++)];\
 		} else {\
@@ -3020,7 +3021,7 @@ static void draw_right_border(vdp_context *context)
 //BG_START_SLOT + 13/2=6, dst = 6, src = border + comp + 13
 #define OUTPUT_PIXEL_MODE4(slot) if ((slot) >= BG_START_SLOT) {\
 		uint8_t *src = context->compositebuf + ((slot) - BG_START_SLOT) *2;\
-		uint32_t *dst = context->output + ((slot) - BG_START_SLOT) *2;\
+		pixel_t *dst = context->output + ((slot) - BG_START_SLOT) *2;\
 		if ((slot) - BG_START_SLOT < BORDER_LEFT/2) {\
 			*(dst++) = context->colors[bgindex];\
 			*(dst++) = context->colors[bgindex];\
@@ -3269,7 +3270,7 @@ static void draw_right_border(vdp_context *context)
 		render_sprite_cells_mode4(context);\
 		MODE4_CHECK_SLOT_LINE(CALC_SLOT(slot, 5))
 
-static uint32_t dummy_buffer[LINEBUF_SIZE];
+static pixel_t dummy_buffer[LINEBUF_SIZE];
 static void vdp_h40_line(vdp_context * context)
 {
 	uint16_t address;
@@ -3314,7 +3315,7 @@ static void vdp_h40_line(vdp_context * context)
 
 	//Do palette lookup for end of previous line
 	uint8_t *src = context->compositebuf + (LINE_CHANGE_H40 - BG_START_SLOT) *2;
-	uint32_t *dst = context->output + (LINE_CHANGE_H40 - BG_START_SLOT) *2;
+	pixel_t *dst = context->output + (LINE_CHANGE_H40 - BG_START_SLOT) *2;
 	if (context->output) {
 		if (test_layer) {
 			for (int i = 0; i < LINEBUF_SIZE - (LINE_CHANGE_H40 - BG_START_SLOT) * 2; i++)
@@ -4292,7 +4293,7 @@ static void tms_border(vdp_context *context)
 			return;
 		}
 	}
-	uint32_t color;
+	pixel_t color;
 	if (context->type == VDP_GAMEGEAR) {
 		//Game Gear uses CRAM entries 16-31 for TMS9918A modes
 		color = context->colors[(context->regs[REG_BG_COLOR] & 0xF) + 16 + MODE4_OFFSET];
@@ -4801,7 +4802,7 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 			active_line = 0x200;
 		}
 	}
-	uint32_t *dst;
+	pixel_t *dst;
 	uint8_t *debug_dst;
 	if (context->output && context->hslot >= BG_START_SLOT && context->hslot <= bg_end_slot) {
 		dst = context->output + 2 * (context->hslot - BG_START_SLOT);
@@ -4873,7 +4874,7 @@ static void vdp_inactive(vdp_context *context, uint32_t target_cycles, uint8_t i
 
 		if (dst) {
 			uint8_t bg_index;
-			uint32_t bg_color;
+			pixel_t bg_color;
 			if (mode_5) {
 				bg_index = context->regs[REG_BG_COLOR] & 0x3F;
 				bg_color = context->colors[bg_index];

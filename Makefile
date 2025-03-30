@@ -67,6 +67,10 @@ ifeq ($(CPU),wasm)
 USE_GLES:=1
 endif
 
+ifdef USE_RGB565
+CFLAGS+= -DUSE_RGB565
+endif
+
 ifdef USE_FBDEV
 LIBS=alsa
 ifndef NOGL

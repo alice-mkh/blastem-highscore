@@ -44,7 +44,7 @@ typedef struct {
 	uint8_t              num_static;
 #ifndef DISABLE_OPENGL
 	SDL_GLContext        *gl_context;
-	uint32_t             *texture_buf;
+	pixel_t              *texture_buf;
 	uint32_t             tex_width;
 	uint32_t             tex_height;
 	GLuint               gl_texture[2];
@@ -94,7 +94,7 @@ enum {
 static uint8_t sync_src;
 static uint32_t min_buffered;
 
-uint32_t **frame_buffers;
+pixel_t **frame_buffers;
 uint32_t num_buffers;
 uint32_t buffer_storage;
 
@@ -339,12 +339,16 @@ uint8_t render_fullscreen(void)
 	return is_fullscreen;
 }
 
-uint32_t render_map_color(uint8_t r, uint8_t g, uint8_t b)
+pixel_t render_map_color(uint8_t r, uint8_t g, uint8_t b)
 {
+#ifdef USE_RGB565
+	return r << 8 & 0xF800 | g << 3 & 0x07E0 | b >> 3;
+#else
 #ifdef USE_GLES
 	return 255UL << 24 | b << 16 | g << 8 | r;
 #else
 	return 255UL << 24 | r << 16 | g << 8 | b;
+#endif
 #endif
 }
 
@@ -457,19 +461,38 @@ static GLuint load_shader(char * fname, GLenum shader_type)
 }
 #endif
 
-static uint32_t texture_buf[512 * 513];
+static pixel_t texture_buf[512 * 513];
 #ifdef DISABLE_OPENGL
-#define RENDER_FORMAT SDL_PIXELFORMAT_ARGB8888
+#ifdef USE_RGB565
+#define RENDER_FORMAT SDL_PIXELFORMAT_RGB565
 #else
+#define RENDER_FORMAT SDL_PIXELFORMAT_ARGB8888
+#endif
+#else //DISABLE_OPENGL
+#ifdef USE_RGB565
+#define INTERNAL_FORMAT GL_RGB
+#define SRC_FORMAT GL_RGB
+#define SRC_TYPE GL_UNSIGNED_SHORT_5_6_5
+#define RENDER_FORMAT SDL_PIXELFORMAT_RGB565
+#else //USE_RGB565
+#define SRC_TYPE GL_UNSIGNED_BYTE
 #ifdef USE_GLES
 #define INTERNAL_FORMAT GL_RGBA
 #define SRC_FORMAT GL_RGBA
 #define RENDER_FORMAT SDL_PIXELFORMAT_ABGR8888
-#else
+#else //USE_GLES
 #define INTERNAL_FORMAT GL_RGBA8
 #define SRC_FORMAT GL_BGRA
 #define RENDER_FORMAT SDL_PIXELFORMAT_ARGB8888
+#endif //USE_GLES
+#endif //USE_RGB565
+
+#ifdef USE_GLES
+#define SRC_FORMAT32 GL_RGBA
+#else
+#define SRC_FORMAT32 GL_BGRA
 #endif
+
 static void gl_setup()
 {
 	tern_val def = {.ptrval = "linear"};
@@ -494,10 +517,10 @@ static void gl_setup()
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		if (i < 2) {
 			//TODO: Fixme for PAL + invalid display mode
-			glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, tex_width, tex_height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, texture_buf);
+			glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, tex_width, tex_height, 0, SRC_FORMAT, SRC_TYPE, texture_buf);
 		} else {
-			uint32_t blank = 255UL << 24;
-			glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, 1, 1, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, &blank);
+			pixel_t blank = render_map_color(0, 0, 0);
+			glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, 1, 1, 0, SRC_FORMAT, SRC_TYPE, &blank);
 		}
 	}
 	glGenBuffers(2, buffers);
@@ -538,7 +561,7 @@ static void gl_teardown()
 	glDeleteBuffers(2, buffers);
 	glDeleteTextures(3, textures);
 }
-#endif
+#endif //DISABLE_OPENGL
 
 static uint8_t texture_init;
 static void render_alloc_surfaces()
@@ -1190,7 +1213,7 @@ static void window_setup(void)
 		free_buffer_mutex = SDL_CreateMutex();
 		frame_ready = SDL_CreateCond();
 		buffer_storage = 4;
-		frame_buffers = calloc(buffer_storage, sizeof(uint32_t*));
+		frame_buffers = calloc(buffer_storage, sizeof(pixel_t*));
 		frame_buffers[0] = texture_buf;
 		num_buffers = 1;
 	}
@@ -1688,7 +1711,7 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 			glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 			if (i) {
-				glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, 1, 1, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, extras[win_idx].color);
+				glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, 1, 1, 0, SRC_FORMAT, SRC_TYPE, extras[win_idx].color);
 			} else {
 				extras[win_idx].tex_width = width;
 				extras[win_idx].tex_height = height;
@@ -1697,8 +1720,8 @@ uint8_t render_create_window(char *caption, uint32_t width, uint32_t height, win
 					extras[win_idx].tex_width = nearest_pow2(width);
 					extras[win_idx].tex_height = nearest_pow2(height);
 				}
-				extras[win_idx].texture_buf = calloc(extras[win_idx].tex_width * extras[win_idx].tex_height, sizeof(uint32_t));
-				glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, extras[win_idx].tex_width, extras[win_idx].tex_height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, extras[win_idx].texture_buf);
+				extras[win_idx].texture_buf = calloc(PITCH_PIXEL_T(extras[win_idx].tex_width) * extras[win_idx].tex_height, sizeof(pixel_t));
+				glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, extras[win_idx].tex_width, extras[win_idx].tex_height, 0, SRC_FORMAT, SRC_TYPE, extras[win_idx].texture_buf);
 			}
 		}
 		glGenBuffers(3, extras[win_idx].gl_buffers);
@@ -1876,12 +1899,12 @@ uint8_t render_static_image(uint8_t window, uint8_t *buffer, uint32_t size)
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		//TODO: maybe make this respect the npot texture setting?
-		glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, width, height, 0, SRC_FORMAT, GL_UNSIGNED_BYTE, pixels);
+		glTexImage2D(GL_TEXTURE_2D, 0, INTERNAL_FORMAT, width, height, 0, SRC_FORMAT32, GL_UNSIGNED_BYTE, pixels);
 	} else
 #endif
 	{
 		extra->static_images[img_index] = SDL_CreateTexture(extra->renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STATIC, width, height);
-		SDL_UpdateTexture(extra->static_images[img_index], NULL, pixels, sizeof(uint32_t) * width);
+		SDL_UpdateTexture(extra->static_images[img_index], NULL, pixels, sizeof(pixel_t) * width);
 	}
 	free(pixels);
 	return img_index;
@@ -1963,7 +1986,7 @@ void render_fill_rect(uint8_t window, uint8_t r, uint8_t g, uint8_t b, int x, in
 		extra->color[1] = g;
 		extra->color[2] = r;
 		glBindTexture(GL_TEXTURE_2D, extra->gl_texture[1]);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, SRC_FORMAT, GL_UNSIGNED_BYTE, extra->color);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, SRC_FORMAT, SRC_TYPE, extra->color);
 		extra_draw_quad(extra, extra->gl_texture[1], 1.0f, 1.0f);
 	}
 #endif
@@ -1982,18 +2005,18 @@ void render_window_refresh(uint8_t window)
 #endif
 }
 
-uint32_t *locked_pixels;
+pixel_t *locked_pixels;
 uint32_t locked_pitch;
-uint32_t *render_get_framebuffer(uint8_t which, int *pitch)
+pixel_t *render_get_framebuffer(uint8_t which, int *pitch)
 {
 	if (sync_src == SYNC_AUDIO_THREAD || sync_src == SYNC_EXTERNAL) {
-		*pitch = LINEBUF_SIZE * sizeof(uint32_t);
-		uint32_t *buffer;
+		*pitch = PITCH_BYTES(LINEBUF_SIZE);
+		pixel_t *buffer;
 		SDL_LockMutex(free_buffer_mutex);
 			if (num_buffers) {
 				buffer = frame_buffers[--num_buffers];
 			} else {
-				buffer = calloc(tex_width*(tex_height + 1), sizeof(uint32_t));
+				buffer = calloc(tex_width*(tex_height + 1), sizeof(pixel_t));
 			}
 		SDL_UnlockMutex(free_buffer_mutex);
 		locked_pixels = buffer;
@@ -2001,11 +2024,11 @@ uint32_t *render_get_framebuffer(uint8_t which, int *pitch)
 	}
 #ifndef DISABLE_OPENGL
 	if (render_gl && which <= FRAMEBUFFER_EVEN) {
-		*pitch = LINEBUF_SIZE * sizeof(uint32_t);
+		*pitch = PITCH_BYTES(LINEBUF_SIZE);
 		return texture_buf;
 	} else if (render_gl && which >= FRAMEBUFFER_USER_START) {
 		uint8_t win_idx = which - FRAMEBUFFER_USER_START;
-		*pitch = extras[win_idx].width * sizeof(uint32_t);
+		*pitch = PITCH_BYTES(extras[win_idx].width);
 		return extras[win_idx].texture_buf;
 	} else {
 #endif
@@ -2030,7 +2053,7 @@ uint32_t *render_get_framebuffer(uint8_t which, int *pitch)
 		}
 		static uint8_t last;
 		if (which <= FRAMEBUFFER_EVEN) {
-			locked_pixels = (uint32_t *)pixels;
+			locked_pixels = (pixel_t *)pixels;
 			if (which == FRAMEBUFFER_EVEN) {
 				pixels += *pitch;
 			}
@@ -2040,18 +2063,18 @@ uint32_t *render_get_framebuffer(uint8_t which, int *pitch)
 			}
 			last = which;
 		}
-		return (uint32_t *)pixels;
+		return (pixel_t *)pixels;
 #ifndef DISABLE_OPENGL
 	}
 #endif
 }
 
-static void release_buffer(uint32_t *buffer)
+static void release_buffer(pixel_t *buffer)
 {
 	SDL_LockMutex(free_buffer_mutex);
 		if (num_buffers == buffer_storage) {
 			buffer_storage *= 2;
-			frame_buffers = realloc(frame_buffers, sizeof(uint32_t*)*buffer_storage);
+			frame_buffers = realloc(frame_buffers, sizeof(pixel_t*)*buffer_storage);
 		}
 		frame_buffers[num_buffers++] = buffer;
 	SDL_UnlockMutex(free_buffer_mutex);
@@ -2066,7 +2089,7 @@ uint8_t events_processed;
 
 static uint32_t last_width, last_height;
 static uint8_t interlaced, last_field;
-static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
+static void process_framebuffer(pixel_t *buffer, uint8_t which, int width)
 {
 	if (sync_src == SYNC_VIDEO && which <= FRAMEBUFFER_EVEN && source_frame_count < 0) {
 		source_frame++;
@@ -2100,24 +2123,24 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 			screenshot_path = NULL;
 		}
 		interlaced = last_field != which;
-		buffer += overscan_left[video_standard] + LINEBUF_SIZE * overscan_top[video_standard];
+		buffer += overscan_left[video_standard] + PITCH_PIXEL_T(LINEBUF_SIZE) * overscan_top[video_standard];
 	}
 #ifndef DISABLE_OPENGL
 	if (render_gl && which <= FRAMEBUFFER_EVEN) {
 		SDL_GL_MakeCurrent(main_window, main_context);
 		glBindTexture(GL_TEXTURE_2D, textures[which]);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LINEBUF_SIZE, height, SRC_FORMAT, GL_UNSIGNED_BYTE, buffer);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, LINEBUF_SIZE, height, SRC_FORMAT, SRC_TYPE, buffer);
 
 		if (screenshot_file) {
 			//properly supporting interlaced modes here is non-trivial, so only save the odd field for now
 #ifndef DISABLE_ZLIB
 			if (!strcasecmp(ext, "png")) {
 				free(ext);
-				save_png(screenshot_file, buffer, width, height, LINEBUF_SIZE*sizeof(uint32_t));
+				save_png(screenshot_file, buffer, width, height, PITCH_BYTES(LINEBUF_SIZE));
 			} else {
 				free(ext);
 #endif
-				save_ppm(screenshot_file, buffer, width, height, LINEBUF_SIZE*sizeof(uint32_t));
+				save_ppm(screenshot_file, buffer, width, height, PITCH_BYTES(LINEBUF_SIZE));
 #ifndef DISABLE_ZLIB
 			}
 #endif
@@ -2128,14 +2151,14 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 				//TODO: more precise frame rate
 				apng = start_apng(apng_file, width, height, video_standard == VID_PAL ? 50.0 : 60.0);
 			}
-			save_png24_frame(apng_file, buffer, apng, width, height, LINEBUF_SIZE*sizeof(uint32_t));
+			save_png24_frame(apng_file, buffer, apng, width, height, PITCH_BYTES(LINEBUF_SIZE));
 		}
 #endif
 	} else if (render_gl && which >= FRAMEBUFFER_USER_START) {
 		uint8_t win_idx = which - FRAMEBUFFER_USER_START;
 		SDL_GL_MakeCurrent(extras[win_idx].win, extras[win_idx].gl_context);
 		glBindTexture(GL_TEXTURE_2D, extras[win_idx].gl_texture[0]);
-		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, extras[win_idx].width, extras[win_idx].height, SRC_FORMAT, GL_UNSIGNED_BYTE, buffer);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, extras[win_idx].width, extras[win_idx].height, SRC_FORMAT, SRC_TYPE, buffer);
 	} else {
 #endif
 		uint32_t shot_height = height;
@@ -2298,7 +2321,7 @@ static void process_framebuffer(uint32_t *buffer, uint8_t which, int width)
 }
 
 typedef struct {
-	uint32_t *buffer;
+	pixel_t *buffer;
 	int      width;
 	uint8_t  which;
 } frame;
@@ -2337,6 +2360,20 @@ void render_framebuffer_updated(uint8_t which, int width)
 			frame_queue_len++;
 			SDL_CondSignal(frame_ready);
 		SDL_UnlockMutex(frame_mutex);
+#ifdef __ANDROID__
+		if (which <= FRAMEBUFFER_EVEN) {
+			static uint32_t frame_counter, start;
+			frame_counter++;
+			uint32_t last_frame= SDL_GetTicks();
+			if ((last_frame - start) > FPS_INTERVAL) {
+				if (start && (last_frame-start)) {
+					debug_message("%s - %.1f fps (emulated)", caption, ((float)frame_counter) / (((float)(last_frame-start)) / 1000.0));
+				}
+				start = last_frame;
+				frame_counter = 0;
+			}
+		}
+#endif
 		return;
 	}
 	//TODO: Maybe fixme for render API

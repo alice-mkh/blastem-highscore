@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include "system.h"
 #include "serialize.h"
+#include "pixel.h"
 
 #define VDP_REGS 24
 #define CRAM_SIZE 64
@@ -183,11 +184,11 @@ typedef void (*vdp_data_hook)(vdp_context *, uint16_t value);
 struct vdp_context {
 	system_header  *system;
 	//pointer to current line in framebuffer
-	uint32_t       *output;
+	pixel_t        *output;
 	//pointer to current framebuffer
-	uint32_t       *fb;
+	pixel_t       *fb;
 	uint8_t        *done_composite;
-	uint32_t       *debug_fbs[NUM_DEBUG_TYPES];
+	pixel_t        *debug_fbs[NUM_DEBUG_TYPES];
 	char           *kmod_msg_buffer;
 	vdp_hook       dma_hook;
 	vdp_reg_hook   reg_hook;
@@ -203,8 +204,8 @@ struct vdp_context {
 	uint32_t       address;
 	uint32_t       address_latch;
 	uint32_t       serial_address;
-	uint32_t       colors[CRAM_SIZE*4];
-	uint32_t       debugcolors[1 << (3 + 1 + 1 + 1)];//3 bits for source, 1 bit for priority, 1 bit for shadow, 1 bit for hilight
+	pixel_t        colors[CRAM_SIZE*4];
+	pixel_t        debugcolors[1 << (3 + 1 + 1 + 1)];//3 bits for source, 1 bit for priority, 1 bit for shadow, 1 bit for hilight
 	uint16_t       cram[CRAM_SIZE];
 	uint32_t       frame;
 	uint32_t       vsram_size;
