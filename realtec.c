@@ -82,7 +82,7 @@ void realtec_deserialize(deserialize_buffer *buf, genesis_context *gen)
 
 rom_info realtec_configure_rom(uint8_t *rom, uint32_t rom_size, memmap_chunk const *base_map, uint32_t base_chunks)
 {
-	rom_info info;
+	rom_info info = {0};
 	realtec *r = calloc(sizeof(realtec), 1);
 	for (uint32_t i = 0; i < 512*1024; i += 8*1024)
 	{
