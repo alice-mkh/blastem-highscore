@@ -1,5 +1,6 @@
 #disable built-in rules
 .SUFFIXES :
+.PHONY: all clean
 
 ifndef OS
 OS:=$(shell uname -s)
@@ -328,14 +329,25 @@ CPMOBJS:=blastcpm.o util.o serialize.o $(Z80OBJS) $(TRANSOBJS)
 
 LIBCFLAGS=$(CFLAGS) -fpic -DIS_LIB -DDISABLE_ZLIB
 
+all : $(ALL)
+
+ORDERONLY:=$(OBJDIR)
+LIBORDERONLY:=$(LIBOBJDIR)
+ifdef NEW_CORE
+ifeq ($(wildcard $(OBJDIR)/*.d),)
+ORDERONLY+= m68k.c z80.c
+endif
+ifeq ($(wildcard $(LIBOBJDIR)/*.d),)
+LIBORDERONLY+= m68k.c z80.c
+endif
+endif
+
 -include $(MAINOBJS:%.o=$(OBJDIR)/%.d)
 -include $(LIBOBJS:%.o=$(LIBOBJDIR)/%.d)
 -include $(DISOBJS:.o=$(OBJDIR)/%.d)
 -include $(OBJDIR)/trans.d
 -include $(OBJDIR)/ztestrun.d
 -include $(OBJDIR)/blastcpm.d
-
-all : $(ALL)
 
 $(OBJDIR) :
 	mkdir -p $(OBJDIR)/nuklear_ui
@@ -385,22 +397,22 @@ vos_prog_info : $(OBJDIR)/vos_prog_info.o $(OBJDIR)/vos_program_module.o
 %.db.c : %.db
 	sed $< -e 's/"/\\"/g' -e 's/^\(.*\)$$/"\1\\n"/' -e'1s/^\(.*\)$$/const char $(shell echo $< | tr '.' '_')_data[] = \1/' -e '$$s/^\(.*\)$$/\1;/' > $@
 
-$(OBJDIR)/%.o : %.S | $(OBJDIR)
+$(OBJDIR)/%.o : %.S | $(ORDERONLY)
 	$(CC) -c -MMD -o $@ $<
 
-$(OBJDIR)/%.o : %.c | $(OBJDIR)
+$(OBJDIR)/%.o : %.c | $(ORDERONLY)
 	$(CC) $(CFLAGS) -c -MMD -o $@ $<
 
-$(OBJDIR)/%.o : %.m | $(OBJDIR)
+$(OBJDIR)/%.o : %.m | $(ORDERONLY)
 	$(CC) $(CFLAGS) -c -MMD -o $@ $<
 
-$(LIBOBJDIR)/%.o : %.S | $(LIBOBJDIR)
+$(LIBOBJDIR)/%.o : %.S | $(LIBORDERONLY)
 	$(CC) -c -MMD -o $@ $<
 
-$(LIBOBJDIR)/%.o : %.c | $(LIBOBJDIR)
+$(LIBOBJDIR)/%.o : %.c | $(LIBORDERONLY)
 	$(CC) $(LIBCFLAGS) -c -MMD -o $@ $<
 
-$(LIBOBJDIR)/%.o : %.m | $(LIBOBJDIR)
+$(LIBOBJDIR)/%.o : %.m | $(LIBORDERONLY)
 	$(CC) $(LIBCFLAGS) -c -MMD -o $@ $<
 
 %.png : %.xcf
