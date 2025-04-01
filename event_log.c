@@ -9,6 +9,7 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <pthread.h>
 #endif
 
 #include <stdlib.h>
@@ -127,11 +128,29 @@ cleanup_address:
 	freeaddrinfo(result);
 }
 
+static event_reader *mem_reader;
+static uint8_t mem_reader_quit = 1;
+#ifndef _WIN32
+void event_log_mem(void)
+{
+	event_log_common_init();
+	free(buffer.data);
+	buffer.storage = 1024 * 1024;
+	buffer.data = malloc(buffer.storage);
+	mem_reader = calloc(1, sizeof(event_reader));
+	mem_reader->last_cycle = 0;
+	mem_reader->repeat_event = 0xFF;
+	mem_reader->storage = buffer.storage;
+	init_deserialize(&mem_reader->buffer, buffer.data, 0);
+	mem_reader_quit = 0;
+}
+#endif
+
 static uint8_t *system_start;
 static size_t system_start_size;
 void event_system_start(system_type stype, vid_std video_std, char *name)
 {
-	if (!active) {
+	if (!active || mem_reader) {
 		return;
 	}
 	save_int8(&buffer, stype);
@@ -202,7 +221,7 @@ static void event_header(uint8_t type, uint32_t cycle)
 
 void event_cycle_adjust(uint32_t cycle, uint32_t deduction)
 {
-	if (!fully_active) {
+	if (!fully_active && !mem_reader) {
 		return;
 	}
 	event_header(EVENT_ADJUST, cycle);
@@ -322,38 +341,69 @@ static void flush_socket(void)
 	}
 }
 
+#ifndef _WIN32
+static pthread_mutex_t event_log_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t event_cond = PTHREAD_COND_INITIALIZER;
+#endif
+static event_reader *mem_reader;
 uint8_t wrote_since_last_flush;
 void event_log(uint8_t type, uint32_t cycle, uint8_t size, uint8_t *payload)
 {
-	if (!fully_active) {
+	if (!fully_active && (!mem_reader || type == EVENT_PSG_REG || type == EVENT_YM_REG)) {
 		return;
 	}
+	
 	event_header(type, cycle);
 	last = cycle;
 	save_buffer8(&buffer, payload, size);
 	if (!multi_count) {
 		last_event_type = 0xFF;
-		output_stream.avail_in = buffer.size - (output_stream.next_in - buffer.data);
-		int result = deflate(&output_stream, Z_NO_FLUSH);
-		if (result != Z_OK) {
-			fatal_error("deflate returned %d\n", result);
-		}
-		if (listen_sock) {
-			if ((output_stream.next_out - compressed) > 1280 || !output_stream.avail_out) {
-				flush_socket();
-				wrote_since_last_flush = 1;
+#ifndef _WIN32
+		if (mem_reader) {
+			pthread_mutex_lock(&event_log_lock);
+				if (mem_reader->buffer.cur_pos) {
+					memmove(buffer.data, buffer.data + mem_reader->buffer.cur_pos, buffer.size - mem_reader->buffer.cur_pos);
+					buffer.size -= mem_reader->buffer.cur_pos;
+					mem_reader->buffer.cur_pos = 0;
+				}
+				mem_reader->buffer.size = buffer.size;
+				pthread_cond_signal(&event_cond);
+			pthread_mutex_unlock(&event_log_lock);
+		} else 
+#endif
+		{
+			output_stream.avail_in = buffer.size - (output_stream.next_in - buffer.data);
+			int result = deflate(&output_stream, Z_NO_FLUSH);
+			if (result != Z_OK) {
+				fatal_error("deflate returned %d\n", result);
 			}
-		} else if (!output_stream.avail_out) {
-			fwrite(compressed, 1, compressed_storage, event_file);
-			output_stream.next_out = compressed;
-			output_stream.avail_out = compressed_storage;
-		}
-		if (!output_stream.avail_in) {
-			buffer.size = 0;
-			output_stream.next_in = buffer.data;
+			if (listen_sock) {
+				if ((output_stream.next_out - compressed) > 1280 || !output_stream.avail_out) {
+					flush_socket();
+					wrote_since_last_flush = 1;
+				}
+			} else if (!output_stream.avail_out) {
+				fwrite(compressed, 1, compressed_storage, event_file);
+				output_stream.next_out = compressed;
+				output_stream.avail_out = compressed_storage;
+			}
+			if (!output_stream.avail_in) {
+				buffer.size = 0;
+				output_stream.next_in = buffer.data;
+			}
 		}
 	}
 }
+
+#ifndef _WIN32
+void event_log_mem_stop(void)
+{
+	pthread_mutex_lock(&event_log_lock);
+		mem_reader_quit = 1;
+		pthread_cond_signal(&event_cond);
+	pthread_mutex_unlock(&event_log_lock);
+}
+#endif
 
 static uint32_t last_word_address;
 void event_vram_word(uint32_t cycle, uint32_t address, uint16_t value)
@@ -499,11 +549,26 @@ void event_flush(uint32_t cycle)
 	if (!active) {
 		return;
 	}
-	if (fully_active) {
+	if (fully_active || mem_reader) {
 		event_header(EVENT_FLUSH, cycle);
 		last = cycle;
 		
-		deflate_flush(0);
+#ifndef _WIN32
+		if (mem_reader) {
+			pthread_mutex_lock(&event_log_lock);
+				if (mem_reader->buffer.cur_pos) {
+					memmove(buffer.data, buffer.data + mem_reader->buffer.cur_pos, buffer.size - mem_reader->buffer.cur_pos);
+					buffer.size -= mem_reader->buffer.cur_pos;
+					mem_reader->buffer.cur_pos = 0;
+				}
+				mem_reader->buffer.size = buffer.size;
+				pthread_cond_signal(&event_cond);
+			pthread_mutex_unlock(&event_log_lock);
+		} else
+#endif
+		{
+			deflate_flush(0);
+		}
 	}
 	if (event_file) {
 		fwrite(compressed, 1, output_stream.next_out - compressed, event_file);
@@ -518,14 +583,29 @@ void event_flush(uint32_t cycle)
 
 void event_soft_flush(uint32_t cycle)
 {
-	if (!fully_active || wrote_since_last_flush || event_file) {
+	if ((!fully_active && !mem_reader) || wrote_since_last_flush || event_file) {
 		return;
 	}
 	event_header(EVENT_FLUSH, cycle);
 	last = cycle;
 	
-	deflate_flush(0);
-	flush_socket();
+#ifndef _WIN32
+	if (mem_reader) {
+		pthread_mutex_lock(&event_log_lock);
+			if (mem_reader->buffer.cur_pos) {
+				memmove(buffer.data, buffer.data + mem_reader->buffer.cur_pos, buffer.size - mem_reader->buffer.cur_pos);
+				buffer.size -= mem_reader->buffer.cur_pos;
+				mem_reader->buffer.cur_pos = 0;
+			}
+			mem_reader->buffer.size = buffer.size;
+			pthread_cond_signal(&event_cond);
+		pthread_mutex_unlock(&event_log_lock);
+	} else
+#endif
+	{
+		deflate_flush(0);
+		flush_socket();
+	}
 }
 
 static void init_event_reader_common(event_reader *reader)
@@ -664,14 +744,23 @@ static void inflate_flush(event_reader *reader)
 
 void reader_ensure_data(event_reader *reader, size_t bytes)
 {
-	if (reader->buffer.size - reader->buffer.cur_pos < bytes) {
-		if (reader->input_stream.avail_in) {
-			inflate_flush(reader);
+#ifndef _WIN32
+	if (reader == mem_reader) {
+		while (!mem_reader_quit && reader->buffer.size - reader->buffer.cur_pos < bytes) {
+			pthread_cond_wait(&event_cond, &event_log_lock);
 		}
-		if (reader->socket) {
-			while (reader->buffer.size - reader->buffer.cur_pos < bytes) {
-				read_from_socket(reader);
+	} else
+#endif
+	{
+		if (reader->buffer.size - reader->buffer.cur_pos < bytes) {
+			if (reader->input_stream.avail_in) {
 				inflate_flush(reader);
+			}
+			if (reader->socket) {
+				while (reader->buffer.size - reader->buffer.cur_pos < bytes) {
+					read_from_socket(reader);
+					inflate_flush(reader);
+				}
 			}
 		}
 	}
@@ -686,6 +775,9 @@ uint8_t reader_next_event(event_reader *reader, uint32_t *cycle_out)
 		return reader->repeat_event;
 	}
 	reader_ensure_data(reader, 1);
+	if (reader == mem_reader && mem_reader_quit) {
+		return EVENT_EOF;
+	}
 	uint8_t header = load_int8(&reader->buffer);
 	uint8_t ret;
 	uint32_t delta;
@@ -734,6 +826,78 @@ uint8_t reader_next_event(event_reader *reader, uint32_t *cycle_out)
 	}
 	return ret;
 }
+
+#ifndef _WIN32
+uint8_t mem_reader_next_event(event_out *out)
+{
+	uint8_t ret = EVENT_EOF;
+	if (mem_reader->repeat_remaining) {
+		mem_reader->repeat_remaining--;
+		mem_reader->last_cycle += mem_reader->repeat_delta;
+		out->cycle = mem_reader->last_cycle;
+		ret = mem_reader->repeat_event;
+	}
+	if (ret < EVENT_PSG_REG) {
+		return ret;
+	}
+	pthread_mutex_lock(&event_log_lock);
+		if (ret == EVENT_EOF) {
+			ret = reader_next_event(mem_reader, &out->cycle);
+		}
+		switch (ret)
+		{
+		case EVENT_ADJUST:
+			out->address = load_int32(&mem_reader->buffer);
+			break;
+		case EVENT_VRAM_BYTE:
+			out->address = load_int16(&mem_reader->buffer);
+			break;
+		case EVENT_VRAM_BYTE_DELTA:
+			out->address = mem_reader->last_byte_address + load_int8(&mem_reader->buffer);
+			break;
+		case EVENT_VRAM_BYTE_ONE:
+			out->address = mem_reader->last_byte_address + 1;
+			break;
+		case EVENT_VRAM_BYTE_AUTO:
+			out->address = mem_reader->last_byte_address + out->autoinc;
+			break;
+		case EVENT_VRAM_WORD:
+			out->address = load_int8(&mem_reader->buffer) << 16;
+			out->address |= load_int16(&mem_reader->buffer);
+			break;
+		case EVENT_VRAM_WORD_DELTA:
+			out->address = mem_reader->last_word_address + load_int8(&mem_reader->buffer);
+			break;
+		case EVENT_VDP_REG:
+		case EVENT_VDP_INTRAM:
+			out->address = load_int8(&mem_reader->buffer);
+			break;
+		}
+		switch (ret)
+		{
+		case EVENT_VRAM_BYTE:
+		case EVENT_VRAM_BYTE_DELTA:
+		case EVENT_VRAM_BYTE_ONE:
+		case EVENT_VRAM_BYTE_AUTO:
+			mem_reader->last_byte_address = out->address;
+		case EVENT_VDP_REG:
+			out->value = load_int8(&mem_reader->buffer);
+			break;
+		case EVENT_VRAM_WORD:
+		case EVENT_VRAM_WORD_DELTA:
+			mem_reader->last_word_address = out->address;
+		case EVENT_VDP_INTRAM:
+			out->value = load_int16(&mem_reader->buffer);
+			break;
+		case EVENT_EOF:
+			free(mem_reader);
+			mem_reader = NULL;
+			break;
+		}
+	pthread_mutex_unlock(&event_log_lock);
+	return ret;
+}
+#endif
 
 uint8_t reader_system_type(event_reader *reader)
 {

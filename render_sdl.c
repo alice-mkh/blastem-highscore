@@ -108,6 +108,11 @@ uint8_t render_is_audio_sync(void)
 	return sync_src < SYNC_VIDEO;
 }
 
+uint8_t render_is_threaded_video(void)
+{
+	return sync_src == SYNC_AUDIO_THREAD || sync_src == SYNC_EXTERNAL;
+}
+
 uint8_t render_should_release_on_exit(void)
 {
 #ifdef __EMSCRIPTEN__

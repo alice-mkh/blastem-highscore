@@ -183,6 +183,7 @@ typedef void (*vdp_data_hook)(vdp_context *, uint16_t value);
 
 struct vdp_context {
 	system_header  *system;
+	struct vdp_context *renderer;
 	//pointer to current line in framebuffer
 	pixel_t        *output;
 	//pointer to current framebuffer

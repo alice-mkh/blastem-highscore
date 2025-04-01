@@ -15,8 +15,9 @@ enum {
 	EVENT_VRAM_WORD_DELTA = 10,
 	EVENT_VDP_INTRAM = 11,
 	EVENT_STATE = 12,
-	EVENT_MULTI = 13
+	EVENT_MULTI = 13,
 	//14 and 15 are reserved for header types
+	EVENT_EOF = 16
 };
 
 #include "serialize.h"
@@ -36,11 +37,20 @@ typedef struct event_reader {
 	uint8_t repeat_remaining;
 } event_reader;
 
+typedef struct {
+	uint32_t cycle;
+	uint32_t autoinc;
+	uint32_t address;
+	uint16_t value;
+} event_out;
+
 #include "system.h"
 #include "render.h"
 
 void event_log_file(char *fname);
 void event_log_tcp(char *address, char *port);
+void event_log_mem(void);
+void event_log_mem_stop(void);
 void event_system_start(system_type stype, vid_std video_std, char *name);
 void event_cycle_adjust(uint32_t cycle, uint32_t deduction);
 void event_log(uint8_t type, uint32_t cycle, uint8_t size, uint8_t *payload);
@@ -56,5 +66,6 @@ uint8_t reader_next_event(event_reader *reader, uint32_t *cycle_out);
 void reader_ensure_data(event_reader *reader, size_t bytes);
 uint8_t reader_system_type(event_reader *reader);
 void reader_send_gamepad_event(event_reader *reader, uint8_t pad, uint8_t button, uint8_t down);
+uint8_t mem_reader_next_event(event_out *out);
 
 #endif //EVENT_LOG_H_
